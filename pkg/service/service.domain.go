@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"io"
+	"mime/multipart"
+	"time"
 
 	"github.com/meilisearch/meilisearch-go"
 	"gorm.io/gorm"
@@ -49,23 +52,42 @@ type SecurityService interface {
 	Shutdown(ctx context.Context) error
 }
 
-type StorageService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
-}
 type StreamService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+}
+
+type StorageService interface {
+	Init(ctx context.Context) error
+	Shutdown(ctx context.Context) error
+
+	Ping(ctx context.Context) error
+	Upload(ctx context.Context, file any, cb ProgressCallback) (*Storage, error)
+	UploadFromPath(ctx context.Context, path string, cb ProgressCallback) (*Storage, error)
+	UploadFromURL(ctx context.Context, url string, cb ProgressCallback) (*Storage, error)
+	UploadFromBinary(ctx context.Context, data []byte, cb ProgressCallback) (*Storage, error)
+	UploadFromHeader(ctx context.Context, header *multipart.FileHeader, cb ProgressCallback) (*Storage, error)
+	ReUpload(ctx context.Context, storage *Storage, cb ProgressCallback) (*Storage, error)
+
+	DeleteFile(ctx context.Context, storage *Storage) error
+	GeneratePresignedURL(ctx context.Context, storage *Storage, expiry time.Duration) (string, error)
+	GenerateUniqueName(original string, contentType string) (string, error)
+	RemoveAllFiles(ctx context.Context) error
+	UploadFromStream(ctx context.Context, r io.Reader, size int64, fileName string, contentType string, cb ProgressCallback) (*Storage, error)
 }
 
 // SMSService represents the interface for the SMS service.
 type SMSService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+	Format(ctx context.Context, req SMSRequest) (*SMSRequest, error)
+	Send(ctx context.Context, req SMSRequest) error
 }
 type SMTPService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+	Format(ctx context.Context, req SMTPRequest) (*SMTPRequest, error)
+	Send(ctx context.Context, req SMTPRequest) error
 }
 
 // SQL and NoSQL services for database interactions.
