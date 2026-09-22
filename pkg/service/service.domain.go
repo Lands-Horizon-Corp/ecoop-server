@@ -76,6 +76,17 @@ type SQLService interface {
 	Client() *gorm.DB
 	StartTransaction(ctx context.Context) (*gorm.DB, func(error) error)
 	Ping() error
+
+	Migrate(ctx context.Context) error
+	Rollback(ctx context.Context) error
+	RollbackTo(ctx context.Context, version string) error
+	Redo(ctx context.Context) error
+	Status(ctx context.Context) (string, error)
+	Version(ctx context.Context) (string, error)
+	Fresh(ctx context.Context) error
+	Create(ctx context.Context) error
+	RollbackSteps(ctx context.Context, steps int) error
+	UpSteps(ctx context.Context, steps int) error
 }
 
 type NOSQLService interface {
@@ -85,6 +96,17 @@ type NOSQLService interface {
 	Client() meilisearch.ServiceManager
 	SwapIndexes(ctx context.Context, indexA, indexB string) (*meilisearch.TaskInfo, error)
 	Ping() error
+
+	Migrate(ctx context.Context) error
+	Rollback(ctx context.Context) error
+	RollbackTo(ctx context.Context, version string) error
+	Redo(ctx context.Context) error
+	Status(ctx context.Context) (string, error)
+	Version(ctx context.Context) (string, error)
+	Fresh(ctx context.Context) error
+	Create(ctx context.Context) error
+	RollbackSteps(ctx context.Context, steps int) error
+	UpSteps(ctx context.Context, steps int) error
 }
 
 type CQRSService interface {
@@ -93,16 +115,22 @@ type CQRSService interface {
 	Run(ctx context.Context) error
 	Client() (*gorm.DB, meilisearch.ServiceManager)
 	StartTransaction(ctx context.Context) (*gorm.DB, func(error) error)
-	Ping() error
+	Ping() (error, error)
+
+	Migrate(ctx context.Context) error
+	Rollback(ctx context.Context) error
+	RollbackTo(ctx context.Context, version string) error
+	Redo(ctx context.Context) error
+	Status(ctx context.Context) (string, error)
+	Version(ctx context.Context) (string, error)
+	Fresh(ctx context.Context) error
+	Create(ctx context.Context) error
+	RollbackSteps(ctx context.Context, steps int) error
+	UpSteps(ctx context.Context, steps int) error
 }
 
 // APIService represents the interface for the API service, which includes security, caching, CQRS, storage, and logging capabilities.
 type APIService interface {
-	SecurityService
-	CacheService
-	CQRSService
-	StorageService
-	LoggingService
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
 }
