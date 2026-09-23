@@ -51,3 +51,30 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
+
+type ClaimWithID interface {
+	GetID() string
+}
+
+type AuthImpl[T ClaimWithID] struct {
+	name       string
+	csrfHeader string
+	ssl        bool
+}
+
+type QRResult struct {
+	Data string `json:"data"`
+	Type string `json:"type"`
+}
+
+type RenderOptions struct {
+	Template    string `json:"template"`
+	Data        any    `json:"data"`
+	Filename    string `json:"filename,omitempty"`
+	Width       string `json:"width,omitempty"`
+	Height      string `json:"height,omitempty"`
+	Password    string `json:"password,omitempty"`
+	BaseURL     string `json:"base_url,omitempty"`
+	Media       string `json:"media,omitempty"`
+	Orientation string `json:"orientation,omitempty"`
+}

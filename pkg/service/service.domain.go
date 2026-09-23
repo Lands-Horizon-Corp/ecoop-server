@@ -6,55 +6,116 @@ import (
 	"mime/multipart"
 	"time"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/meilisearch/meilisearch-go"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-type AuthService interface {
+type AuthService[T ClaimWithID] interface {
 	SecurityService
-	Init(ctx context.Context) error
+	Initialize(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+
+	CurrentUser(ctx context.Context, c *app.RequestContext) (T, error)
+	UserDevices(ctx context.Context, c *app.RequestContext) ([]T, error)
+	Login(ctx context.Context, c *app.RequestContext, claim T, expiry time.Duration) error
+	Logout(ctx context.Context, c *app.RequestContext) error
+	LogoutOtherDevices(ctx context.Context, c *app.RequestContext) error
+
+	LoggedInUsers(ctx context.Context, c *app.RequestContext) ([]T, error)
+	LogoutAllUsers(ctx context.Context, c *app.RequestContext) error
 }
+
 type BroadcastService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+
+	Publish(ctx context.Context, channel, event string, payload any) error
+	Dispatch(ctx context.Context, channels []string, event string, payload any) error
+	Broadcast(ctx context.Context, channel string, events []string, payload any) error
+	Runner(ctx context.Context)
 }
+
 type CacheService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+	Ping(ctx context.Context) error
+
+	Flush(ctx context.Context) error
+	Get(ctx context.Context, key string) ([]byte, error)
+	Set(ctx context.Context, key string, value any, ttl time.Duration) error
+	Exists(ctx context.Context, key string) (bool, error)
+	Delete(ctx context.Context, key string) error
+	Keys(ctx context.Context, pattern string) ([]string, error)
+	ZAdd(ctx context.Context, key string, score float64, member any) error
+	ZRange(ctx context.Context, key string, start, stop int64) ([]string, error)
+	ZRangeWithScores(ctx context.Context, key string, start, stop int64) ([]redis.Z, error)
+	ZCard(ctx context.Context, key string) (int64, error)
+	ZRem(ctx context.Context, key string, members ...any) (int64, error)
+	ZRemRangeByScore(ctx context.Context, key string, min, max string) (int64, error)
+	SetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error)
+	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
+	Expire(ctx context.Context, key string, ttl time.Duration) (bool, error)
 }
-type ConfigService interface {
+type ConfigService[T any] interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+	LoadConfig(ctx context.Context) error
+	Config() *T
 }
+
 type LoggingService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+
+	Debug(ctx context.Context, msg string, keysAndValues ...any)
+	Info(ctx context.Context, msg string, keysAndValues ...any)
+	Warn(ctx context.Context, msg string, keysAndValues ...any)
+	Error(ctx context.Context, msg string, err error, keysAndValues ...any)
 }
+
 type OTPService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+
+	Generate(ctx context.Context, key string) (string, error)
+	Verify(ctx context.Context, key, code string) (bool, error)
+	Revoke(ctx context.Context, key string) error
 }
 type QRService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+
+	DecodeQR(ctx context.Context, data *QRResult) (*any, error)
+	EncodeQR(ctx context.Context, data any, qrType string) (*QRResult, error)
 }
 type ReportService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+	Generate(ctx context.Context, render RenderOptions) (io.ReadCloser, error)
 }
 type CronService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+
+	Generate(ctx context.Context, render RenderOptions) (io.ReadCloser, error)
+	CreateJob(jobID string, schedule string, taskName string, payload []byte, loc *time.Location) error
+	ExecuteJob(taskName string, payload []byte) error
+	RemoveJob(jobID string) error
 }
 type SecurityService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
-}
 
-type StreamService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Hash(password string) (string, error)
+	VerifyHash(hash string, password string) (bool, error)
+
+	Encrypt(ctx context.Context, data string, ttl time.Duration) (string, error)
+	Decrypt(ctx context.Context, token string) (string, error)
+
+	GenerateUUIDv5(name string) (string, error)
+	Firewall(ctx context.Context, callback func(ip, host string)) error
 }
 
 type StorageService interface {
@@ -135,6 +196,7 @@ type CQRSService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
 	Run(ctx context.Context) error
+
 	Client() (*gorm.DB, meilisearch.ServiceManager)
 	StartTransaction(ctx context.Context) (*gorm.DB, func(error) error)
 	Ping() (error, error)
@@ -150,9 +212,19 @@ type CQRSService interface {
 	RollbackSteps(ctx context.Context, steps int) error
 	UpSteps(ctx context.Context, steps int) error
 }
+type StreamService interface {
+	Init(ctx context.Context) error
+	Shutdown(ctx context.Context) error
+	Run(ctx context.Context) error
+
+	// Registration & Production
+	RegisterHandler(topic string, handler func(ctx context.Context, topic string, key []byte, payload []byte) error) error
+	Publish(ctx context.Context, topic string, key []byte, payload any) error
+}
 
 // APIService represents the interface for the API service, which includes security, caching, CQRS, storage, and logging capabilities.
 type APIService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+	Run(ctx context.Context) error
 }
