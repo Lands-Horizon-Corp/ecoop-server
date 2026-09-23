@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/meilisearch/meilisearch-go"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
+	"github.com/uptrace/bun"
 )
 
 type AuthService[T ClaimWithID] interface {
@@ -156,8 +156,8 @@ type SQLService interface {
 	Init(ctx context.Context) error
 	Shutdown(ctx context.Context) error
 	Run(ctx context.Context) error
-	Client() *gorm.DB
-	StartTransaction(ctx context.Context) (*gorm.DB, func(error) error)
+	Client() *bun.DB
+	StartTransaction(ctx context.Context) (*bun.DB, func(error) error)
 	Ping() error
 
 	Migrate(ctx context.Context) error
@@ -197,8 +197,8 @@ type CQRSService interface {
 	Shutdown(ctx context.Context) error
 	Run(ctx context.Context) error
 
-	Client() (*gorm.DB, meilisearch.ServiceManager)
-	StartTransaction(ctx context.Context) (*gorm.DB, func(error) error)
+	Client() (*bun.DB, meilisearch.ServiceManager)
+	StartTransaction(ctx context.Context) (*bun.DB, func(error) error)
 	Ping() (error, error)
 
 	Migrate(ctx context.Context) error
