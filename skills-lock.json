@@ -55,6 +55,12 @@
       "skillPath": "skills/golang-testing/SKILL.md",
       "computedHash": "31b691f568f4c00d8d7bedc65a38d9966d9f3d353712929a1a8805eaa3f88b00"
     },
+    "multi-stage-dockerfile": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/multi-stage-dockerfile/SKILL.md",
+      "computedHash": "698bf93a84dae18fd7bd0b1d35c21427307fde78fbdf4624be9726f5f98189ca"
+    },
     "performance-optimization": {
       "source": "addyosmani/agent-skills",
       "sourceType": "github",
