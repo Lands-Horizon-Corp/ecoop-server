@@ -12,90 +12,11 @@ import (
 	"github.com/uptrace/bun"
 )
 
-type SMTPRequest struct {
-	Name     string
-	To       string
-	Subject  string
-	Body     string
-	Vars     map[string]string
-	FromName string
-}
-
-type SMSRequest struct {
-	To   string
-	Body string
-	Vars map[string]string
-}
-
-type Storage struct {
-	FileName   string
-	FileSize   int64
-	FileType   string
-	StorageKey string
-	URL        string
-	BucketName string
-	Status     string
-	Progress   int64
-}
-
-type ProgressCallback func(progress int64, total int64, storage *Storage)
-
-type progressReader struct {
-	reader    io.Reader
-	callback  ProgressCallback
-	total     int64
-	readSoFar int64
-	storage   *Storage
-}
-
-func (pr *progressReader) Read(p []byte) (int, error) {
-	n, err := pr.reader.Read(p)
-	if n > 0 {
-		pr.readSoFar += int64(n)
-		percent := pr.readSoFar * 100 / pr.total
-		percent = min(percent, 100)
-		pr.storage.Progress = percent
-		if pr.callback != nil {
-			pr.callback(percent, 100, pr.storage)
-		}
-	}
-	return n, err
-}
-
-type ClaimWithID interface {
-	GetID() string
-}
-
-type AuthImpl[T ClaimWithID] struct {
-	name       string
-	csrfHeader string
-	ssl        bool
-}
-
-type QRResult struct {
-	Data string `json:"data"`
-	Type string `json:"type"`
-}
-
-type RenderOptions struct {
-	Template    string `json:"template"`
-	Data        any    `json:"data"`
-	Filename    string `json:"filename,omitempty"`
-	Width       string `json:"width,omitempty"`
-	Height      string `json:"height,omitempty"`
-	Password    string `json:"password,omitempty"`
-	BaseURL     string `json:"base_url,omitempty"`
-	Media       string `json:"media,omitempty"`
-	Orientation string `json:"orientation,omitempty"`
-}
-
 type AuthService[T ClaimWithID] interface {
 	SecurityService
-	Initialize(ctx context.Context) error
-	Shutdown(ctx context.Context) error
 
 	CurrentUser(ctx context.Context, c *app.RequestContext) (T, error)
-	UserDevices(ctx context.Context, c *app.RequestContext) ([]T, error)
+	CurrentUserDevices(ctx context.Context, c *app.RequestContext) ([]T, error)
 	Login(ctx context.Context, c *app.RequestContext, claim T, expiry time.Duration) error
 	Logout(ctx context.Context, c *app.RequestContext) error
 	LogoutOtherDevices(ctx context.Context, c *app.RequestContext) error
@@ -105,8 +26,7 @@ type AuthService[T ClaimWithID] interface {
 }
 
 type BroadcastService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 
 	Publish(ctx context.Context, channel, event string, payload any) error
 	Dispatch(ctx context.Context, channels []string, event string, payload any) error
@@ -115,8 +35,7 @@ type BroadcastService interface {
 }
 
 type CacheService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	Ping(ctx context.Context) error
 
 	Flush(ctx context.Context) error
@@ -136,15 +55,13 @@ type CacheService interface {
 	Expire(ctx context.Context, key string, ttl time.Duration) (bool, error)
 }
 type ConfigService[T any] interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	LoadConfig(ctx context.Context) error
 	Config() *T
 }
 
 type LoggingService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 
 	Debug(ctx context.Context, msg string, keysAndValues ...any)
 	Info(ctx context.Context, msg string, keysAndValues ...any)
@@ -153,28 +70,24 @@ type LoggingService interface {
 }
 
 type OTPService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 
 	Generate(ctx context.Context, key string) (string, error)
 	Verify(ctx context.Context, key, code string) (bool, error)
 	Revoke(ctx context.Context, key string) error
 }
 type QRService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 
-	DecodeQR(ctx context.Context, data *QRResult) (*any, error)
+	DecodeQR(ctx context.Context, data *QRResult) (any, error)
 	EncodeQR(ctx context.Context, data any, qrType string) (*QRResult, error)
 }
 type ReportService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	Generate(ctx context.Context, render RenderOptions) (io.ReadCloser, error)
 }
 type CronService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 
 	Generate(ctx context.Context, render RenderOptions) (io.ReadCloser, error)
 	CreateJob(jobID string, schedule string, taskName string, payload []byte, loc *time.Location) error
@@ -182,8 +95,7 @@ type CronService interface {
 	RemoveJob(jobID string) error
 }
 type SecurityService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 
 	Hash(password string) (string, error)
 	VerifyHash(hash string, password string) (bool, error)
@@ -196,8 +108,7 @@ type SecurityService interface {
 }
 
 type StorageService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 
 	Ping(ctx context.Context) error
 	Upload(ctx context.Context, file any, cb ProgressCallback) (*Storage, error)
@@ -216,26 +127,23 @@ type StorageService interface {
 
 // SMSService represents the interface for the SMS service.
 type SMSService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	Format(ctx context.Context, req SMSRequest) (*SMSRequest, error)
 	Send(ctx context.Context, req SMSRequest) error
 }
 type SMTPService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	Format(ctx context.Context, req SMTPRequest) (*SMTPRequest, error)
 	Send(ctx context.Context, req SMTPRequest) error
 }
 
 // SQL and NoSQL services for database interactions.
 type SQLService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	Run(ctx context.Context) error
 	Client() *bun.DB
 	StartTransaction(ctx context.Context) (*bun.DB, func(error) error)
-	Ping() error
+	Ping(ctx context.Context) error
 
 	Migrate(ctx context.Context) error
 	Rollback(ctx context.Context) error
@@ -250,12 +158,11 @@ type SQLService interface {
 }
 
 type NOSQLService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	Run(ctx context.Context) error
 	Client() meilisearch.ServiceManager
 	SwapIndexes(ctx context.Context, indexA, indexB string) (*meilisearch.TaskInfo, error)
-	Ping() error
+	Ping(ctx context.Context) error
 
 	Migrate(ctx context.Context) error
 	Rollback(ctx context.Context) error
@@ -270,13 +177,13 @@ type NOSQLService interface {
 }
 
 type CQRSService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	Run(ctx context.Context) error
 
 	Client() (*bun.DB, meilisearch.ServiceManager)
 	StartTransaction(ctx context.Context) (*bun.DB, func(error) error)
-	Ping() (error, error)
+	Ping(ctx context.Context) error
+	Sync(ctx context.Context) error
 
 	Migrate(ctx context.Context) error
 	Rollback(ctx context.Context) error
@@ -290,8 +197,7 @@ type CQRSService interface {
 	UpSteps(ctx context.Context, steps int) error
 }
 type StreamService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	Run(ctx context.Context) error
 
 	// Registration & Production
@@ -301,7 +207,6 @@ type StreamService interface {
 
 // APIService represents the interface for the API service, which includes security, caching, CQRS, storage, and logging capabilities.
 type APIService interface {
-	Init(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+	Lifecycle
 	Run(ctx context.Context) error
 }
