@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/contrib/bridges/otelzap"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/log/global"
@@ -48,8 +49,7 @@ func NewLogContextService(name string, logFormat string, logLevel string) LogCon
 	return &LogContextService{name: name, logFormat: logFormat, logLevel: logLevel}
 }
 
-func (l *LogContextService) Start(
-	ctx context.Context, otelServiceName string, otelOtlpEndpoint string) error {
+func (l *LogContextService) Start(ctx context.Context) error {
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(attribute.String("service.name", l.name)),
@@ -137,27 +137,30 @@ func (l *LogContextService) Stop(ctx context.Context) error {
 }
 
 func (l *LogContextService) Trace(
-	name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
-	return l.tracer.Start(l.Context, name, trace.WithAttributes(attrs...))
-}
-func (l *LogContextService) Debug(ctx context.Context, msg string, kv ...any) {
-	l.log(ctx, zapcore.DebugLevel, msg, kv)
-}
-
-func (l *LogContextService) Error(ctx context.Context, err error, msg string, kv ...any) {
-	l.log(ctx, zapcore.ErrorLevel, msg, kv)
-}
-
-func (l *LogContextService) Fatal(ctx context.Context, err error, msg string, kv ...any) {
-	l.log(ctx, zapcore.FatalLevel, msg, kv)
-}
-
-func (l *LogContextService) Info(ctx context.Context, msg string, kv ...any) {
-	l.log(ctx, zapcore.InfoLevel, msg, kv)
-}
-
-func (l *LogContextService) Warn(ctx context.Context, msg string, kv ...any) {
-	l.log(ctx, zapcore.WarnLevel, msg, kv)
+	name string, attrs ...attribute.KeyValue) (context.Context, LoggerLevel, trace.Span) {
+	ctx, span := l.tracer.Start(l.Context, name, trace.WithAttributes(attrs...))
+	return ctx, LoggerLevel{
+		Debug: func(ctx context.Context, msg string, kv ...any) {
+			l.log(ctx, zapcore.DebugLevel, msg, kv)
+		},
+		Info: func(ctx context.Context, msg string, kv ...any) {
+			span.SetStatus(codes.Ok, msg)
+			l.log(ctx, zapcore.InfoLevel, msg, kv)
+		},
+		Warn: func(ctx context.Context, msg string, kv ...any) {
+			l.log(ctx, zapcore.WarnLevel, msg, kv)
+		},
+		Error: func(ctx context.Context, err error, msg string, kv ...any) {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			l.log(ctx, zapcore.ErrorLevel, msg, kv)
+		},
+		Fatal: func(ctx context.Context, err error, msg string, kv ...any) {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			l.log(ctx, zapcore.FatalLevel, msg, kv)
+		},
+	}, span
 }
 
 func (l *LogContextService) log(ctx context.Context, lvl zapcore.Level, msg string, kv []any) {

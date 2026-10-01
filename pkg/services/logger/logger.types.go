@@ -7,23 +7,16 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+type LoggerLevel struct {
+	Debug func(ctx context.Context, msg string, kv ...any)
+	Info  func(ctx context.Context, msg string, kv ...any)
+	Warn  func(ctx context.Context, msg string, kv ...any)
+	Error func(ctx context.Context, err error, msg string, kv ...any)
+	Fatal func(ctx context.Context, err error, msg string, kv ...any)
+}
 type LogContextServices interface {
 	context.Context
-
-	Start(ctx context.Context, otelServiceName string, otelOtlpEndpoint string) error
+	Trace(name string, attrs ...attribute.KeyValue) (context.Context, LoggerLevel, trace.Span)
+	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
-
-	Trace(name string, attrs ...attribute.KeyValue) (context.Context, trace.Span)
-	Debug(ctx context.Context, msg string, kv ...any)
-	Info(ctx context.Context, msg string, kv ...any)
-	Warn(ctx context.Context, msg string, kv ...any)
-	Error(ctx context.Context, msg string, kv ...any)
-	Fatal(ctx context.Context, msg string, kv ...any)
 }
-
-/*
-
-func Encode(ctx LogContext) {
-	ctx, span := ctx.Trace("sample.log")
-}
-*/

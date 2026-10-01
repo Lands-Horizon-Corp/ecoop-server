@@ -10,9 +10,13 @@ import (
 
 // stderrCore wraps the console/JSON core: it must not print the raw ctx object,
 // so it swaps it for trace_id / span_id (greppable in the terminal).
-type StderrCore struct{ zapcore.Core }
+type StderrCore struct {
+	zapcore.Core
+}
 
-func (c StderrCore) With(f []zapcore.Field) zapcore.Core { return StderrCore{c.Core.With(cleanCtx(f))} }
+func (c StderrCore) With(f []zapcore.Field) zapcore.Core {
+	return StderrCore{c.Core.With(cleanCtx(f))}
+}
 
 func (c StderrCore) Check(e zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
 	if c.Enabled(e.Level) {
