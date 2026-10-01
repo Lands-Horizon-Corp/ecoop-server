@@ -10,6 +10,9 @@ import (
 type LogContextServices interface {
 	context.Context
 
+	Start(ctx context.Context, otelServiceName string, otelOtlpEndpoint string) error
+	Stop(ctx context.Context) error
+
 	Trace(name string, attrs ...attribute.KeyValue) (context.Context, trace.Span)
 	Debug(ctx context.Context, msg string, kv ...any)
 	Info(ctx context.Context, msg string, kv ...any)
