@@ -12,7 +12,7 @@ type LogContextService struct {
 }
 
 func NewLogContextService() LogContextServices {
-	return &LogContextService{Context: context.Background()}
+	return &LogContextService{}
 }
 
 // Debug implements [LogContextServices].
