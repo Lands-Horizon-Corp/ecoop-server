@@ -54,6 +54,7 @@ func (q *QRService) Close() {
 }
 
 func (q *QRService) Encode(ctx context.Context, data *QRData) (string, error) {
+
 	marshalled, err := sonic.Marshal(data)
 	if err != nil {
 		return "", err

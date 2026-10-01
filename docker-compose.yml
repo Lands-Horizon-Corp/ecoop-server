@@ -6,7 +6,7 @@ services:
         command: -config.file=/etc/loki/loki-config.yaml
         ports: ['3100:3100']
         volumes:
-            - ./observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+            - ./.docker/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
             - loki-data:/loki
         networks: [obs]
 
@@ -15,7 +15,7 @@ services:
         command: -config.file=/etc/tempo/tempo.yaml
         ports: ['3200:3200'] # Tempo HTTP API (Grafana queries here)
         volumes:
-            - ./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+            - ./.docker/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
             - tempo-data:/var/tempo
         networks: [obs]
 
@@ -27,7 +27,7 @@ services:
             - '4318:4318' # OTLP HTTP
             - '12345:12345' # Alloy UI / metrics
         volumes:
-            - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+            - ./.docker/alloy/config.alloy:/etc/alloy/config.alloy:ro
         depends_on: [loki, tempo]
         networks: [obs]
 
@@ -36,7 +36,7 @@ services:
         ports: ['3000:3000']
         env_file: .env
         volumes:
-            - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+            - ./.docker/grafana/provisioning:/etc/grafana/provisioning:ro
             - grafana-data:/var/lib/grafana
         depends_on: [loki, tempo]
         networks: [obs]
