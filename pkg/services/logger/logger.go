@@ -2,35 +2,21 @@ package logger
 
 import (
 	"context"
-	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
-type LogContextService struct{}
-
-func NewLogContextService() LogContextServices {
-	return &LogContextService{}
+type LogContextService struct {
+	context.Context
 }
 
-// Deadline implements [LogContextServices].
-func (l *LogContextService) Deadline() (deadline time.Time, ok bool) {
-	panic("unimplemented")
+func NewLogContextService() LogContextServices {
+	return &LogContextService{Context: context.Background()}
 }
 
 // Debug implements [LogContextServices].
 func (l *LogContextService) Debug(ctx context.Context, msg string, kv ...any) {
-	panic("unimplemented")
-}
-
-// Done implements [LogContextServices].
-func (l *LogContextService) Done() <-chan struct{} {
-	panic("unimplemented")
-}
-
-// Err implements [LogContextServices].
-func (l *LogContextService) Err() error {
 	panic("unimplemented")
 }
 
@@ -51,11 +37,6 @@ func (l *LogContextService) Info(ctx context.Context, msg string, kv ...any) {
 
 // Trace implements [LogContextServices].
 func (l *LogContextService) Trace(name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
-	panic("unimplemented")
-}
-
-// Value implements [LogContextServices].
-func (l *LogContextService) Value(key any) any {
 	panic("unimplemented")
 }
 
