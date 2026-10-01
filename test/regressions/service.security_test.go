@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"e-coop-server/pkg/services/security"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/security"
 )
 
 func newTestSecurityService() security.SecurityServices {

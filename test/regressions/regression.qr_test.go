@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"e-coop-server/pkg/services/qr"
-	qrService "e-coop-server/pkg/services/qr"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/qr"
+	qrService "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/qr"
 )
 
 // Regression guards for qr.QRService.

@@ -2,13 +2,14 @@ package regressions
 
 import (
 	"context"
-	"e-coop-server/pkg/services/qr"
-	qrService "e-coop-server/pkg/services/qr"
 	"fmt"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/qr"
+	qrService "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/qr"
 )
 
 const qrIterations = 1_000_000

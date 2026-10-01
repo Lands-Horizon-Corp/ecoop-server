@@ -8,8 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"e-coop-server/pkg/services"
-
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
