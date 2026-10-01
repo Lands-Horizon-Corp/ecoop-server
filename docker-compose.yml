@@ -1,0 +1,50 @@
+name: e-coop-server
+
+services:
+    loki:
+        image: grafana/loki:latest
+        command: -config.file=/etc/loki/loki-config.yaml
+        ports: ['3100:3100']
+        volumes:
+            - ./observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+            - loki-data:/loki
+        networks: [obs]
+
+    tempo:
+        image: grafana/tempo:latest
+        command: -config.file=/etc/tempo/tempo.yaml
+        ports: ['3200:3200'] # Tempo HTTP API (Grafana queries here)
+        volumes:
+            - ./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+            - tempo-data:/var/tempo
+        networks: [obs]
+
+    alloy:
+        image: grafana/alloy:latest
+        command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+        ports:
+            - '4317:4317' # OTLP gRPC  (app -> alloy)
+            - '4318:4318' # OTLP HTTP
+            - '12345:12345' # Alloy UI / metrics
+        volumes:
+            - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+        depends_on: [loki, tempo]
+        networks: [obs]
+
+    grafana:
+        image: grafana/grafana:latest
+        ports: ['3000:3000']
+        env_file: .env
+        volumes:
+            - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+            - grafana-data:/var/lib/grafana
+        depends_on: [loki, tempo]
+        networks: [obs]
+
+volumes:
+    loki-data:
+    tempo-data:
+    grafana-data:
+
+networks:
+    obs:
