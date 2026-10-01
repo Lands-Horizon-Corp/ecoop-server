@@ -1,4 +1,4 @@
-name: e-coop-server
+name: ecoop-server
 
 services:
     loki:

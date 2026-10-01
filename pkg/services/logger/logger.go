@@ -116,6 +116,7 @@ func (l *LogContextService) Start(ctx context.Context) error {
 	}
 	l.z = zap.New(zapcore.NewTee(cores...), zap.AddCaller(), zap.AddCallerSkip(2))
 	l.buffered = buffered
+	l.Context = ctx
 	return nil
 }
 
@@ -138,13 +139,20 @@ func (l *LogContextService) Stop(ctx context.Context) error {
 
 func (l *LogContextService) Trace(
 	name string, attrs ...attribute.KeyValue) (context.Context, LoggerLevel, trace.Span) {
-	ctx, span := l.tracer.Start(l.Context, name, trace.WithAttributes(attrs...))
+	return l.trace(l.Context, name, attrs...)
+}
+
+func (l *LogContextService) trace(
+	parent context.Context,
+	name string,
+	attrs ...attribute.KeyValue,
+) (context.Context, LoggerLevel, trace.Span) {
+	ctx, span := l.tracer.Start(parent, name, trace.WithAttributes(attrs...))
 	return ctx, LoggerLevel{
 		Debug: func(ctx context.Context, msg string, kv ...any) {
 			l.log(ctx, zapcore.DebugLevel, msg, kv)
 		},
 		Info: func(ctx context.Context, msg string, kv ...any) {
-			span.SetStatus(codes.Ok, msg)
 			l.log(ctx, zapcore.InfoLevel, msg, kv)
 		},
 		Warn: func(ctx context.Context, msg string, kv ...any) {

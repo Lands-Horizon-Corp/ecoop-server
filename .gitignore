@@ -26,7 +26,7 @@ go.work.sum
 .env.prod
 
 ./main
-e-coop-server
+ecoop-server
 
 main
 
@@ -92,10 +92,10 @@ terraform.rc
 # Uncomment the line below if you want to ignore planout files.
 # planout*.DBF
 *.dbf
-e-coop-server
+ecoop-server
 *.tar.gz
 *.gz
-e-coop-server
+ecoop-server
 *.tar.gz
 
 # Railway IaC local tooling (only needed for editor type-checking / CLI)
