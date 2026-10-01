@@ -47,7 +47,6 @@ func NewQRService(secret string) QRServices {
 	}
 }
 
-// Close releases the zstd encoder/decoder. Call it on shutdown.
 func (q *QRService) Close() {
 	q.encoder.Close()
 	q.decoder.Close()
