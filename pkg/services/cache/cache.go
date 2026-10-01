@@ -2,103 +2,396 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"time"
 
-	redis "github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9"
+	"github.com/rotisserie/eris"
 )
 
-type CacheService struct{}
+type CacheService struct {
+	url                string
+	sentinelAddress    []string
+	sentinelMasterName string
+	sentinelPassword   string
+	client             redis.UniversalClient
+	prefix             string
+}
 
-func NewCacheService() CacheServices {
-	return &CacheService{}
+func newCacheImpl(url string) *CacheService {
+	return &CacheService{
+		url:    url,
+		client: nil,
+		prefix: "",
+	}
+}
+
+func NewSentinelCasheImpl(sentinelAddress []string, masterName, password string) *CacheService {
+	return &CacheService{
+		sentinelAddress:    sentinelAddress,
+		sentinelMasterName: masterName,
+		sentinelPassword:   password,
+		client:             nil,
+		prefix:             "",
+	}
+}
+
+func (c *CacheService) applyPrefix(key string) string {
+	return c.prefix + key
 }
 
 // Delete implements [CacheServices].
 func (c *CacheService) Delete(ctx context.Context, key string) error {
-	panic("unimplemented")
+	if c.client == nil {
+		return eris.New("redis client not initialized")
+	}
+	prefixedKey := c.applyPrefix(key)
+	return c.client.Del(ctx, prefixedKey).Err()
 }
 
 // Exists implements [CacheServices].
 func (c *CacheService) Exists(ctx context.Context, key string) (bool, error) {
-	panic("unimplemented")
+	if c.client == nil {
+		return false, eris.New("redis client not initialized")
+	}
+	prefixedKey := c.applyPrefix(key)
+	val, err := c.client.Exists(ctx, prefixedKey).Result()
+	if err != nil {
+		return false, err
+	}
+	return val > 0, nil
+
 }
 
-// Expire implements [CacheServices].
-func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-	panic("unimplemented")
-}
+// Expire implements [CacheServices]. dependent to telescope
+// func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+// 	var success bool
+// 	err := c.telescope.Trace(ctx, "Cache.Expire", func(tCtx context.Context) error {
+// 		if c.client == nil {
+// 			return eris.New("redis client is not initialized")
+// 		}
+// 		var err error
+// 		success, err = h.client.Expire(tCtx, h.applyPrefix(key), ttl).Result()
+// 		return err
+// 	})
+// 	return success, err
+//I
 
 // Flush implements [CacheServices].
 func (c *CacheService) Flush(ctx context.Context) error {
-	panic("unimplemented")
+	if c.client == nil {
+		return eris.New("redis client is not initialized")
+	}
+	return eris.Wrap(c.client.FlushAll(ctx).Err(), "failed to flush Redis")
 }
 
-// Get implements [CacheServices].
+// Get implements [CacheServices]. dependent to telescope
 func (c *CacheService) Get(ctx context.Context, key string) ([]byte, error) {
-	panic("unimplemented")
+	var val []byte
+	if c.client == nil {
+		return val, eris.New("redis client is not initialized")
+	}
+	prefixedKey := c.applyPrefix(key)
+	var redisErr error
+	val, redisErr = c.client.Get(ctx, prefixedKey).Bytes()
+
+	if redisErr != nil {
+		return val, eris.Wrap(redisErr, "failed to get key")
+	}
+	return val, nil
 }
 
 // Incr implements [CacheServices].
 func (c *CacheService) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
-	panic("unimplemented")
+	var val int64
+	const luaScript = `
+        local current = redis.call('INCR', KEYS[1])
+        if current == 1 then
+            redis.call('EXPIRE', KEYS[1], ARGV[1])
+        end
+        return current
+    `
+	if c.client == nil {
+		return val, eris.New("redis client is not initialized")
+	}
+	res, err := c.client.Eval(ctx, luaScript, []string{c.applyPrefix(key)}, int(ttl.Seconds())).Result()
+	if v, ok := res.(int64); ok {
+		val = v
+	} else {
+		return val, eris.New("unexpected return type from redis script")
+	}
+	return val, err
 }
 
 // Keys implements [CacheServices].
 func (c *CacheService) Keys(ctx context.Context, pattern string) ([]string, error) {
-	panic("unimplemented")
+	if c.client == nil {
+		return nil, eris.New("redis client is not initialized")
+	}
+	prefixedPattern := c.applyPrefix(pattern)
+	var cursor uint64
+	var keys []string
+	for {
+		var scanKeys []string
+		var err error
+		scanKeys, cursor, err = c.client.Scan(ctx, cursor, prefixedPattern, 100).Result()
+		if err != nil {
+			return nil, eris.Wrap(err, "failed to scan keys")
+		}
+		keys = append(keys, scanKeys...)
+		if cursor == 0 {
+			break
+		}
+	}
+	return keys, nil
 }
 
 // Ping implements [CacheServices].
 func (c *CacheService) Ping(ctx context.Context) error {
-	panic("unimplemented")
+	if c.client == nil {
+		return eris.New("redis client is not initialized")
+	}
+	if err := c.client.Ping(ctx).Err(); err != nil {
+		return eris.Wrap(err, "redis ping failed")
+	}
+	return nil
 }
 
 // Run implements [CacheServices].
 func (c *CacheService) Run(ctx context.Context) error {
-	panic("unimplemented")
+	// return c.telescope.Trace(ctx, "Cache.Run", func(ctx context.Context) error {
+	// 	return nil
+	// })
+
+	if len(c.sentinelAddress) > 0 {
+		c.client = redis.NewFailoverClusterClient(&redis.FailoverOptions{
+			MasterName:    c.sentinelMasterName,
+			SentinelAddrs: c.sentinelAddress,
+			Password:      c.sentinelPassword,
+			// Same password as Password above -- this topology's
+			// Sentinel processes require REDIS_SENTINEL_PASSWORD to
+			// even start (see the comment on REDIS_SENTINEL_PASSWORD
+			// in .railway/modules/cache.ts), so the client has to
+			// authenticate to the Sentinel connection itself too, not
+			// just the master/replica data connections.
+			SentinelPassword: c.sentinelPassword,
+			// Read-only commands (Get, Exists, ZRange, ...) get sent to
+			// a random replica instead of always the master -- this is
+			// what actually turns the replicas into read capacity
+			// rather than idle failover standbys. Writes still always
+			// go to whichever node is currently master.
+			RouteRandomly: true,
+			DialTimeout:   20 * time.Second,
+			ReadTimeout:   20 * time.Second,
+			WriteTimeout:  20 * time.Second,
+			PoolSize:      20,
+		})
+	} else {
+		opt, err := redis.ParseURL(c.url)
+		if err != nil {
+			return eris.Wrap(err, "failed to parse redis url")
+		}
+		opt.DialTimeout = 20 * time.Second
+		opt.ReadTimeout = 20 * time.Second
+		opt.WriteTimeout = 20 * time.Second
+		opt.PoolSize = 20
+		c.client = redis.NewClient(opt)
+	}
+	//no current logger
+	// if err := redisotel.InstrumentTracing(h.client); err != nil {
+	// 	c.logger.Error(ctx, "failed to instrument redis tracing", err)
+	// }
+	//no current logger
+	// if err := redisotel.InstrumentMetrics(h.client); err != nil {
+	// 	c.logger.Error(ctx, "failed to instrument redis metrics", err)
+	// }
+	if err := c.client.Ping(ctx).Err(); err != nil {
+		return eris.Wrap(err, "failed to ping Redis server")
+	}
+	return nil
 }
 
 // Set implements [CacheServices].
 func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
-	panic("unimplemented")
+
+	if c.client == nil {
+		return eris.New("redis client is not initialized")
+	}
+
+	prefixedKey := c.applyPrefix(key)
+
+	var data []byte
+	switch v := value.(type) {
+	case []byte:
+		data = v
+	case string:
+		data = []byte(v)
+	case int:
+		data = []byte(strconv.Itoa(v))
+	case int8:
+		data = []byte(strconv.FormatInt(int64(v), 10))
+	case int16:
+		data = []byte(strconv.FormatInt(int64(v), 10))
+	case int32:
+		data = []byte(strconv.FormatInt(int64(v), 10))
+	case int64:
+		data = []byte(strconv.FormatInt(v, 10))
+	case uint:
+		data = []byte(strconv.FormatUint(uint64(v), 10))
+	case uint8:
+		data = []byte(strconv.FormatUint(uint64(v), 10))
+	case uint16:
+		data = []byte(strconv.FormatUint(uint64(v), 10))
+	case uint32:
+		data = []byte(strconv.FormatUint(uint64(v), 10))
+	case uint64:
+		data = []byte(strconv.FormatUint(v, 10))
+	case float32:
+		data = []byte(strconv.FormatFloat(float64(v), 'f', -1, 32))
+	case float64:
+		data = []byte(strconv.FormatFloat(v, 'f', -1, 64))
+	case bool:
+		data = []byte(strconv.FormatBool(v))
+	default:
+		var err error
+		data, err = json.Marshal(value)
+		if err != nil {
+			return eris.Wrap(err, "failed to marshal value")
+		}
+	}
+
+	return eris.Wrap(
+		c.client.Set(ctx, prefixedKey, data, ttl).Err(),
+		"failed to set key",
+	)
+
 }
 
 // SetNX implements [CacheServices].
 func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error) {
-	panic("unimplemented")
+	var acquired bool
+	// err := c.telescope.Trace(ctx, "Cache.SetNX", func(tCtx context.Context) error {
+	// 	return nil
+	// })
+	if c.client == nil {
+		return acquired, eris.New("redis client is not initialized")
+	}
+	var innerErr error
+	acquired, innerErr = c.client.SetNX(ctx, c.applyPrefix(key), value, ttl).Result() //nolint:staticcheck
+	if innerErr != nil {
+		return acquired, eris.Wrap(innerErr, "failed to execute SetNX")
+	}
+	return acquired, innerErr
 }
 
 // Stop implements [CacheServices].
 func (c *CacheService) Stop(ctx context.Context) error {
-	panic("unimplemented")
+
+	if c.client == nil {
+		return eris.New("redis client is not initialized")
+	}
+	pattern := c.prefix + "*"
+	keys, err := c.Keys(ctx, pattern)
+	if err != nil {
+		return eris.Wrap(err, "failed to fetch keys for cleanup")
+	}
+	const batchSize = 500
+	for i := 0; i < len(keys); i += batchSize {
+		end := min(i+batchSize, len(keys))
+		if err := c.client.Del(ctx, keys[i:end]...).Err(); err != nil {
+			return eris.Wrapf(err, "failed to delete keys %d-%d during cleanup", i, end)
+		}
+	}
+	return c.client.Close()
 }
 
 // ZAdd implements [CacheServices].
 func (c *CacheService) ZAdd(ctx context.Context, key string, score float64, member any) error {
-	panic("unimplemented")
+	if c.client == nil {
+		return eris.New("redis client is not initialized")
+	}
+	prefixedKey := c.applyPrefix(key)
+	z := redis.Z{
+		Score:  score,
+		Member: member,
+	}
+	return eris.Wrap(
+		c.client.ZAdd(ctx, prefixedKey, z).Err(),
+		"failed to add member to sorted set",
+	)
 }
 
 // ZCard implements [CacheServices].
 func (c *CacheService) ZCard(ctx context.Context, key string) (int64, error) {
-	panic("unimplemented")
+
+	if c.client == nil {
+		return 0, eris.New("redis client is not initialized")
+	}
+	prefixedKey := c.applyPrefix(key)
+	result, err := c.client.ZCard(ctx, prefixedKey).Result()
+	if err != nil {
+		return 0, eris.Wrap(err, "failed to get sorted set cardinality")
+	}
+	return result, nil
 }
 
 // ZRange implements [CacheServices].
 func (c *CacheService) ZRange(ctx context.Context, key string, start int64, stop int64) ([]string, error) {
-	panic("unimplemented")
+	if c.client == nil {
+		return nil, eris.New("redis client is not initialized")
+	}
+	prefixedKey := c.applyPrefix(key)
+	result, err := c.client.ZRange(ctx, prefixedKey, start, stop).Result()
+	if err != nil {
+		return nil, eris.Wrap(err, "failed to get range from sorted set")
+	}
+	return result, nil
 }
 
 // ZRangeWithScores implements [CacheServices].
 func (c *CacheService) ZRangeWithScores(ctx context.Context, key string, start int64, stop int64) ([]redis.Z, error) {
-	panic("unimplemented")
+
+	if c.client == nil {
+		return nil, eris.New("redis client is not initialized")
+	}
+	prefixedKey := c.applyPrefix(key)
+	result, err := c.client.ZRangeWithScores(ctx, prefixedKey, start, stop).Result()
+	if err != nil {
+		return nil, eris.Wrap(err, "failed to get range with scores from sorted set")
+	}
+
+	return result, nil
 }
 
 // ZRem implements [CacheServices].
 func (c *CacheService) ZRem(ctx context.Context, key string, members ...any) (int64, error) {
-	panic("unimplemented")
+	if c.client == nil {
+		return 0, eris.New("redis client is not initialized")
+	}
+
+	prefixedKey := c.applyPrefix(key)
+
+	result, err := c.client.ZRem(ctx, prefixedKey, members...).Result()
+	if err != nil {
+		return 0, eris.Wrap(err, "failed to remove members from sorted set")
+	}
+
+	return result, nil
 }
 
 // ZRemRangeByScore implements [CacheServices].
 func (c *CacheService) ZRemRangeByScore(ctx context.Context, key string, min string, max string) (int64, error) {
-	panic("unimplemented")
+	if c.client == nil {
+		return 0, eris.New("redis client is not initialized")
+	}
+
+	prefixedKey := c.applyPrefix(key)
+
+	result, err := c.client.ZRemRangeByScore(ctx, prefixedKey, min, max).Result()
+	if err != nil {
+		return 0, eris.Wrap(err, "failed to remove members by score from sorted set")
+	}
+
+	return result, nil
 }
