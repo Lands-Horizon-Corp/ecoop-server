@@ -13,54 +13,74 @@ func main() {
 	_ = godotenv.Load()
 
 	l := logger.NewLogContextService("sample", "", "")
+	if err := l.Start(context.Background()); err != nil {
+		panic(err)
+	}
 
-	l.Start(context.Background())
-
-	ctx, lvl, span := l.Trace("demo.checkout")
-	lvl.Info(ctx, "checkout started")
-
-	// dbExec already logged the error once at the source; nothing here
-	// re-logs it, so the span's error status set there isn't overwritten.
-	_ = apiHandler(ctx, lvl)
+	c, log, span := l.Trace("demo.checkout")
+	defer span.End()
+	log.Info("checkout started")
+	_ = apiHandler(c)
 
 	span.End()
-
 	l.Stop(context.Background())
 }
 
-func apiHandler(ctx context.Context, lvl logger.LoggerLevel) error {
-	return authCheck(ctx, lvl)
+func apiHandler(ctx logger.LogContextService) error {
+	c, log, span := ctx.Trace("demo.apiHandler")
+	defer span.End()
+
+	log.Info("apiHandler called")
+	return authCheck(c)
 }
 
-func authCheck(ctx context.Context, lvl logger.LoggerLevel) error {
-	return orderValidate(ctx, lvl)
+func authCheck(ctx logger.LogContextService) error {
+	c, log, span := ctx.Trace("demo.authCheck")
+	defer span.End()
+
+	log.Info("authCheck called")
+	return orderValidate(c)
 }
 
-func orderValidate(ctx context.Context, lvl logger.LoggerLevel) error {
-	return inventoryReserve(ctx, lvl)
+func orderValidate(ctx logger.LogContextService) error {
+	c, log, span := ctx.Trace("demo.orderValidate")
+	defer span.End()
+
+	log.Info("orderValidate called")
+	return inventoryReserve(c)
 }
 
-func inventoryReserve(ctx context.Context, lvl logger.LoggerLevel) error {
-	return paymentCharge(ctx, lvl)
+func inventoryReserve(ctx logger.LogContextService) error {
+	c, _, span := ctx.Trace("demo.inventoryReserve")
+	defer span.End()
+	return paymentCharge(c)
 }
 
-func paymentCharge(ctx context.Context, lvl logger.LoggerLevel) error {
-	return gatewayCall(ctx, lvl)
+func paymentCharge(ctx logger.LogContextService) error {
+	c, _, span := ctx.Trace("demo.paymentCharge")
+	defer span.End()
+	return gatewayCall(c)
 }
 
-func gatewayCall(ctx context.Context, lvl logger.LoggerLevel) error {
-	return ledgerWrite(ctx, lvl)
+func gatewayCall(ctx logger.LogContextService) error {
+	c, _, span := ctx.Trace("demo.gatewayCall")
+	defer span.End()
+	return ledgerWrite(c)
 }
 
-func ledgerWrite(ctx context.Context, lvl logger.LoggerLevel) error {
-	return dbExec(ctx, lvl)
+func ledgerWrite(ctx logger.LogContextService) error {
+	c, _, span := ctx.Trace("demo.ledgerWrite")
+	defer span.End()
+	return dbExec(c)
 }
 
-// dbExec is where the failure actually happens, so it's the only place
-// that logs the error (and records the exception event on the span).
-// Everything above just wraps and propagates it up.
-func dbExec(ctx context.Context, lvl logger.LoggerLevel) error {
+func dbExec(ctx logger.LogContextService) error {
+	_, log, span := ctx.Trace("demo.dbExec")
+	defer span.End()
+
 	err := errors.New("duplicate key value violates unique constraint")
-	lvl.Error(ctx, err, "db exec failed")
-	return fmt.Errorf("db exec: %w", err)
+	err = fmt.Errorf("db exec: %w", err)
+
+	log.Error(err, "database transaction failed")
+	return err
 }

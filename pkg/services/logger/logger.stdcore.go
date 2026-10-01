@@ -8,8 +8,6 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// stderrCore wraps the console/JSON core: it must not print the raw ctx object,
-// so it swaps it for trace_id / span_id (greppable in the terminal).
 type StderrCore struct {
 	zapcore.Core
 }

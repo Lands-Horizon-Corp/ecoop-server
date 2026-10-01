@@ -1,38 +1,23 @@
 package logger
 
 import (
-	"context"
-	"strings"
+	"fmt"
 
 	"go.uber.org/zap"
 )
 
-var sensitiveKeys = map[string]struct{}{
-	"password": {}, "token": {}, "authorization": {}, "secret": {},
-	"email": {}, "phone": {}, "otp": {}, "pin": {},
-}
-
-func toFields(ctx context.Context, kv []any) []zap.Field {
-	fs := make([]zap.Field, 0, len(kv)/2+1)
-	if ctx != nil {
-		fs = append(fs, zap.Any("ctx", ctx))
-	}
+func toFields(kv ...any) []zap.Field {
+	var fields []zap.Field
 	for i := 0; i < len(kv); i += 2 {
-		key, ok := kv[i].(string)
+		k, ok := kv[i].(string)
 		if !ok {
-			fs = append(fs, zap.Any("!BADKEY", kv[i]))
-			i--
-			continue
+			k = fmt.Sprintf("key_%d", i)
 		}
-		if i+1 >= len(kv) {
-			fs = append(fs, zap.String("!BADKEY", key))
-			break
+		var v any
+		if i+1 < len(kv) {
+			v = kv[i+1]
 		}
-		val := kv[i+1]
-		if _, secret := sensitiveKeys[strings.ToLower(key)]; secret {
-			val = "[REDACTED]"
-		}
-		fs = append(fs, zap.Any(key, val))
+		fields = append(fields, zap.Any(k, v))
 	}
-	return fs
+	return fields
 }

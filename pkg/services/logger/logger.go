@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/contrib/bridges/otelzap"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/log/global"
@@ -23,41 +22,30 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-type LogContextService struct {
-	context.Context
-
-	lp *sdklog.LoggerProvider
-	tp *sdktrace.TracerProvider
-
-	z        *zap.Logger
-	buffered *zapcore.BufferedWriteSyncer
-
-	tracer trace.Tracer
-	name   string
-
-	logFormat string
-	logLevel  string
-}
-
-func NewLogContextService(name string, logFormat string, logLevel string) LogContextServices {
+func NewLogContextService(name string, logFormat string, logLevel string) LogContextService {
 	if logFormat == "" {
 		logFormat = "json"
 	}
 	if logLevel == "" {
 		logLevel = "info"
 	}
-	return &LogContextService{name: name, logFormat: logFormat, logLevel: logLevel}
+	return &logContextService{
+		Context: context.Background(),
+		state: &sharedState{
+			name: name,
+		},
+		logFormat: logFormat,
+		logLevel:  logLevel,
+	}
 }
 
-func (l *LogContextService) Start(ctx context.Context) error {
-
+func (l *logContextService) Start(ctx context.Context) error {
 	res, err := resource.New(ctx,
-		resource.WithAttributes(attribute.String("service.name", l.name)),
+		resource.WithAttributes(attribute.String("service.name", l.state.name)),
 		resource.WithFromEnv(),
 		resource.WithTelemetrySDK(),
 		resource.WithHost(),
 	)
-
 	if err != nil {
 		return err
 	}
@@ -70,11 +58,11 @@ func (l *LogContextService) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("otlp trace exporter: %w", err)
 	}
-	l.tp = sdktrace.NewTracerProvider(
+	l.state.tp = sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
 		sdktrace.WithBatcher(traceExp),
 	)
-	otel.SetTracerProvider(l.tp)
+	otel.SetTracerProvider(l.state.tp)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{},
 	))
@@ -83,13 +71,13 @@ func (l *LogContextService) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("otlp log exporter: %w", err)
 	}
-	l.lp = sdklog.NewLoggerProvider(
+	l.state.lp = sdklog.NewLoggerProvider(
 		sdklog.WithResource(res),
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
 	)
-	global.SetLoggerProvider(l.lp)
+	global.SetLoggerProvider(l.state.lp)
 
-	l.tracer = otel.Tracer(l.name)
+	l.state.tracer = otel.Tracer(l.state.name)
 
 	level := zapcore.InfoLevel
 	_ = level.UnmarshalText([]byte(l.logLevel))
@@ -105,76 +93,50 @@ func (l *LogContextService) Start(ctx context.Context) error {
 		encCfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
 		enc = zapcore.NewConsoleEncoder(encCfg)
 	}
+
 	buffered := &zapcore.BufferedWriteSyncer{
 		WS:            zapcore.AddSync(os.Stderr),
 		FlushInterval: time.Second,
 		Size:          256 * 1024,
 	}
-	cores := []zapcore.Core{StderrCore{zapcore.NewCore(enc, buffered, level)}}
-	if l.lp != nil {
-		cores = append(cores, otelzap.NewCore(l.name, otelzap.WithLoggerProvider(l.lp)))
+
+	cores := []zapcore.Core{zapcore.NewCore(enc, buffered, level)}
+	if l.state.lp != nil {
+		cores = append(cores, otelzap.NewCore(l.state.name, otelzap.WithLoggerProvider(l.state.lp)))
 	}
-	l.z = zap.New(zapcore.NewTee(cores...), zap.AddCaller(), zap.AddCallerSkip(2))
-	l.buffered = buffered
+	l.state.z = zap.New(zapcore.NewTee(cores...), zap.AddCaller(), zap.AddCallerSkip(2))
+	l.state.buffered = buffered
 	l.Context = ctx
 	return nil
 }
 
-func (l *LogContextService) Stop(ctx context.Context) error {
+func (l *logContextService) Stop(ctx context.Context) error {
 	var errs []error
-	if l.tp != nil {
-		errs = append(errs, l.tp.Shutdown(ctx))
+	if l.state.tp != nil {
+		errs = append(errs, l.state.tp.Shutdown(ctx))
 	}
-	if l.lp != nil {
-		errs = append(errs, l.lp.Shutdown(ctx))
+	if l.state.lp != nil {
+		errs = append(errs, l.state.lp.Shutdown(ctx))
 	}
-	if err := l.z.Sync(); err != nil {
-		return nil
+	if l.state.z != nil {
+		_ = l.state.z.Sync()
 	}
-	if err := l.buffered.Stop(); err != nil {
-		return nil
+	if l.state.buffered != nil {
+		_ = l.state.buffered.Stop()
 	}
 	return errors.Join(errs...)
 }
 
-func (l *LogContextService) Trace(
-	name string, attrs ...attribute.KeyValue) (context.Context, LoggerLevel, trace.Span) {
-	return l.trace(l.Context, name, attrs...)
-}
-
-func (l *LogContextService) trace(
-	parent context.Context,
-	name string,
-	attrs ...attribute.KeyValue,
-) (context.Context, LoggerLevel, trace.Span) {
-	ctx, span := l.tracer.Start(parent, name, trace.WithAttributes(attrs...))
-	return ctx, LoggerLevel{
-		Debug: func(ctx context.Context, msg string, kv ...any) {
-			l.log(ctx, zapcore.DebugLevel, msg, kv)
-		},
-		Info: func(ctx context.Context, msg string, kv ...any) {
-			l.log(ctx, zapcore.InfoLevel, msg, kv)
-		},
-		Warn: func(ctx context.Context, msg string, kv ...any) {
-			l.log(ctx, zapcore.WarnLevel, msg, kv)
-		},
-		Error: func(ctx context.Context, err error, msg string, kv ...any) {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			l.log(ctx, zapcore.ErrorLevel, msg, kv)
-		},
-		Fatal: func(ctx context.Context, err error, msg string, kv ...any) {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			l.log(ctx, zapcore.FatalLevel, msg, kv)
-		},
-	}, span
-}
-
-func (l *LogContextService) log(ctx context.Context, lvl zapcore.Level, msg string, kv []any) {
-	ce := l.z.Check(lvl, msg)
-	if ce == nil {
-		return
+func (l *logContextService) Trace(name string, attrs ...attribute.KeyValue) (LogContextService, LoggerLevel, trace.Span) {
+	ctx, span := l.state.tracer.Start(l.Context, name, trace.WithAttributes(attrs...))
+	childCtx := &logContextService{
+		Context: ctx,
+		state:   l.state,
 	}
-	ce.Write(toFields(ctx, kv)...)
+	logImpl := &loggerLevelImpl{
+		ctx:  ctx,
+		z:    l.state.z,
+		span: span,
+	}
+	return childCtx, logImpl, span
 }
