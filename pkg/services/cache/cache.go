@@ -41,7 +41,6 @@ func (c *CacheService) applyPrefix(key string) string {
 	return c.prefix + key
 }
 
-// Delete implements [CacheServices].
 func (c *CacheService) Delete(ctx context.Context, key string) error {
 	if c.client == nil {
 		return eris.New("redis client not initialized")
@@ -50,7 +49,6 @@ func (c *CacheService) Delete(ctx context.Context, key string) error {
 	return c.client.Del(ctx, prefixedKey).Err()
 }
 
-// Exists implements [CacheServices].
 func (c *CacheService) Exists(ctx context.Context, key string) (bool, error) {
 	if c.client == nil {
 		return false, eris.New("redis client not initialized")
@@ -64,21 +62,16 @@ func (c *CacheService) Exists(ctx context.Context, key string) (bool, error) {
 
 }
 
-// Expire implements [CacheServices]. dependent to telescope
-// func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-// 	var success bool
-// 	err := c.telescope.Trace(ctx, "Cache.Expire", func(tCtx context.Context) error {
-// 		if c.client == nil {
-// 			return eris.New("redis client is not initialized")
-// 		}
-// 		var err error
-// 		success, err = h.client.Expire(tCtx, h.applyPrefix(key), ttl).Result()
-// 		return err
-// 	})
-// 	return success, err
-//I
+func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	var success bool
+	if c.client == nil {
+		return success, eris.New("redis client is not initialized")
+	}
+	var err error
+	success, err = c.client.Expire(ctx, c.applyPrefix(key), ttl).Result()
+	return success, err
+}
 
-// Flush implements [CacheServices].
 func (c *CacheService) Flush(ctx context.Context) error {
 	if c.client == nil {
 		return eris.New("redis client is not initialized")
@@ -86,7 +79,6 @@ func (c *CacheService) Flush(ctx context.Context) error {
 	return eris.Wrap(c.client.FlushAll(ctx).Err(), "failed to flush Redis")
 }
 
-// Get implements [CacheServices]. dependent to telescope
 func (c *CacheService) Get(ctx context.Context, key string) ([]byte, error) {
 	var val []byte
 	if c.client == nil {
@@ -102,7 +94,6 @@ func (c *CacheService) Get(ctx context.Context, key string) ([]byte, error) {
 	return val, nil
 }
 
-// Incr implements [CacheServices].
 func (c *CacheService) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
 	var val int64
 	const luaScript = `
@@ -124,7 +115,6 @@ func (c *CacheService) Incr(ctx context.Context, key string, ttl time.Duration) 
 	return val, err
 }
 
-// Keys implements [CacheServices].
 func (c *CacheService) Keys(ctx context.Context, pattern string) ([]string, error) {
 	if c.client == nil {
 		return nil, eris.New("redis client is not initialized")
@@ -147,7 +137,6 @@ func (c *CacheService) Keys(ctx context.Context, pattern string) ([]string, erro
 	return keys, nil
 }
 
-// Ping implements [CacheServices].
 func (c *CacheService) Ping(ctx context.Context) error {
 	if c.client == nil {
 		return eris.New("redis client is not initialized")
@@ -158,34 +147,18 @@ func (c *CacheService) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Run implements [CacheServices].
 func (c *CacheService) Run(ctx context.Context) error {
-	// return c.telescope.Trace(ctx, "Cache.Run", func(ctx context.Context) error {
-	// 	return nil
-	// })
-
 	if len(c.sentinelAddress) > 0 {
 		c.client = redis.NewFailoverClusterClient(&redis.FailoverOptions{
-			MasterName:    c.sentinelMasterName,
-			SentinelAddrs: c.sentinelAddress,
-			Password:      c.sentinelPassword,
-			// Same password as Password above -- this topology's
-			// Sentinel processes require REDIS_SENTINEL_PASSWORD to
-			// even start (see the comment on REDIS_SENTINEL_PASSWORD
-			// in .railway/modules/cache.ts), so the client has to
-			// authenticate to the Sentinel connection itself too, not
-			// just the master/replica data connections.
+			MasterName:       c.sentinelMasterName,
+			SentinelAddrs:    c.sentinelAddress,
+			Password:         c.sentinelPassword,
 			SentinelPassword: c.sentinelPassword,
-			// Read-only commands (Get, Exists, ZRange, ...) get sent to
-			// a random replica instead of always the master -- this is
-			// what actually turns the replicas into read capacity
-			// rather than idle failover standbys. Writes still always
-			// go to whichever node is currently master.
-			RouteRandomly: true,
-			DialTimeout:   20 * time.Second,
-			ReadTimeout:   20 * time.Second,
-			WriteTimeout:  20 * time.Second,
-			PoolSize:      20,
+			RouteRandomly:    true,
+			DialTimeout:      20 * time.Second,
+			ReadTimeout:      20 * time.Second,
+			WriteTimeout:     20 * time.Second,
+			PoolSize:         20,
 		})
 	} else {
 		opt, err := redis.ParseURL(c.url)
@@ -198,21 +171,12 @@ func (c *CacheService) Run(ctx context.Context) error {
 		opt.PoolSize = 20
 		c.client = redis.NewClient(opt)
 	}
-	//no current logger
-	// if err := redisotel.InstrumentTracing(h.client); err != nil {
-	// 	c.logger.Error(ctx, "failed to instrument redis tracing", err)
-	// }
-	//no current logger
-	// if err := redisotel.InstrumentMetrics(h.client); err != nil {
-	// 	c.logger.Error(ctx, "failed to instrument redis metrics", err)
-	// }
 	if err := c.client.Ping(ctx).Err(); err != nil {
 		return eris.Wrap(err, "failed to ping Redis server")
 	}
 	return nil
 }
 
-// Set implements [CacheServices].
 func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
 
 	if c.client == nil {
@@ -268,12 +232,8 @@ func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.
 
 }
 
-// SetNX implements [CacheServices].
 func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error) {
 	var acquired bool
-	// err := c.telescope.Trace(ctx, "Cache.SetNX", func(tCtx context.Context) error {
-	// 	return nil
-	// })
 	if c.client == nil {
 		return acquired, eris.New("redis client is not initialized")
 	}
@@ -285,7 +245,6 @@ func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl tim
 	return acquired, innerErr
 }
 
-// Stop implements [CacheServices].
 func (c *CacheService) Stop(ctx context.Context) error {
 
 	if c.client == nil {
@@ -306,7 +265,6 @@ func (c *CacheService) Stop(ctx context.Context) error {
 	return c.client.Close()
 }
 
-// ZAdd implements [CacheServices].
 func (c *CacheService) ZAdd(ctx context.Context, key string, score float64, member any) error {
 	if c.client == nil {
 		return eris.New("redis client is not initialized")
@@ -322,7 +280,6 @@ func (c *CacheService) ZAdd(ctx context.Context, key string, score float64, memb
 	)
 }
 
-// ZCard implements [CacheServices].
 func (c *CacheService) ZCard(ctx context.Context, key string) (int64, error) {
 
 	if c.client == nil {
@@ -336,7 +293,6 @@ func (c *CacheService) ZCard(ctx context.Context, key string) (int64, error) {
 	return result, nil
 }
 
-// ZRange implements [CacheServices].
 func (c *CacheService) ZRange(ctx context.Context, key string, start int64, stop int64) ([]string, error) {
 	if c.client == nil {
 		return nil, eris.New("redis client is not initialized")
@@ -349,7 +305,6 @@ func (c *CacheService) ZRange(ctx context.Context, key string, start int64, stop
 	return result, nil
 }
 
-// ZRangeWithScores implements [CacheServices].
 func (c *CacheService) ZRangeWithScores(ctx context.Context, key string, start int64, stop int64) ([]redis.Z, error) {
 
 	if c.client == nil {
@@ -364,7 +319,6 @@ func (c *CacheService) ZRangeWithScores(ctx context.Context, key string, start i
 	return result, nil
 }
 
-// ZRem implements [CacheServices].
 func (c *CacheService) ZRem(ctx context.Context, key string, members ...any) (int64, error) {
 	if c.client == nil {
 		return 0, eris.New("redis client is not initialized")
