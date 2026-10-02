@@ -38,7 +38,7 @@ func NewSentinelCasheImpl(sentinelAddress []string, masterName, password string)
 }
 
 func (c *CacheService) applyPrefix(key string) string {
-wae5dcfsxyzreturn c.prefix + key
+	return c.prefix + key
 }
 
 func (c *CacheService) Delete(ctx context.Context, key string) error {
