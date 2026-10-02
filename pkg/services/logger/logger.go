@@ -104,7 +104,12 @@ func (l *logContextService) Start(ctx context.Context) error {
 	if l.state.lp != nil {
 		cores = append(cores, otelzap.NewCore(l.state.name, otelzap.WithLoggerProvider(l.state.lp)))
 	}
-	l.state.z = zap.New(zapcore.NewTee(cores...), zap.AddCaller(), zap.AddCallerSkip(2))
+	l.state.z = zap.New(
+		zapcore.NewTee(cores...),
+		zap.AddCaller(),
+		zap.AddCallerSkip(2),
+		zap.WithFatalHook(zapcore.WriteThenNoop),
+	)
 	l.state.buffered = buffered
 	l.Context = ctx
 	return nil
@@ -127,7 +132,7 @@ func (l *logContextService) Stop(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (l *logContextService) Trace(name string, attrs ...attribute.KeyValue) (LogContextService, LoggerLevel, trace.Span) {
+func (l *logContextService) Trace(name string, attrs ...attribute.KeyValue) (LogContextService, LoggerLevel) {
 	ctx, span := l.state.tracer.Start(l.Context, name, trace.WithAttributes(attrs...))
 	childCtx := &logContextService{
 		Context: ctx,
@@ -138,5 +143,6 @@ func (l *logContextService) Trace(name string, attrs ...attribute.KeyValue) (Log
 		z:    l.state.z,
 		span: span,
 	}
-	return childCtx, logImpl, span
+
+	return childCtx, logImpl
 }

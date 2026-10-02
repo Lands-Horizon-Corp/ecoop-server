@@ -4,83 +4,100 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
 	"github.com/joho/godotenv"
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() (exitCode int) {
 	_ = godotenv.Load()
 
 	l := logger.NewLogContextService("sample", "", "")
 	if err := l.Start(context.Background()); err != nil {
-		panic(err)
+		fmt.Fprintln(os.Stderr, "start logger:", err)
+		return 1
+	}
+	defer func() {
+		if err := l.Stop(context.Background()); err != nil {
+			fmt.Fprintln(os.Stderr, "stop logger:", err)
+			exitCode = 1
+		}
+	}()
+
+	c, p := l.Trace("demo.checkout")
+	defer p.Span().End()
+	p.Info("checkout started")
+	if err := apiHandler(c); err != nil {
+		return 1
 	}
 
-	c, log, span := l.Trace("demo.checkout")
-	defer span.End()
-	log.Info("checkout started")
-	_ = apiHandler(c)
-
-	span.End()
-	l.Stop(context.Background())
+	return 0
 }
 
 func apiHandler(ctx logger.LogContextService) error {
-	c, log, span := ctx.Trace("demo.apiHandler")
-	defer span.End()
+	c, p := ctx.Trace("demo.apiHandler")
+	defer p.Span().End()
 
-	log.Info("apiHandler called")
+	p.Info("apiHandler called")
 	return authCheck(c)
 }
 
 func authCheck(ctx logger.LogContextService) error {
-	c, log, span := ctx.Trace("demo.authCheck")
-	defer span.End()
+	c, p := ctx.Trace("demo.authCheck")
+	defer p.Span().End()
 
-	log.Info("authCheck called")
+	p.Info("authCheck called")
 	return orderValidate(c)
 }
 
 func orderValidate(ctx logger.LogContextService) error {
-	c, log, span := ctx.Trace("demo.orderValidate")
-	defer span.End()
+	c, p := ctx.Trace("demo.orderValidate")
+	defer p.Span().End()
 
-	log.Info("orderValidate called")
+	p.Info("orderValidate called")
 	return inventoryReserve(c)
 }
 
 func inventoryReserve(ctx logger.LogContextService) error {
-	c, _, span := ctx.Trace("demo.inventoryReserve")
-	defer span.End()
+	c, p := ctx.Trace("demo.inventoryReserve")
+	defer p.Span().End()
+	p.Info("inventoryReserve called")
 	return paymentCharge(c)
 }
 
 func paymentCharge(ctx logger.LogContextService) error {
-	c, _, span := ctx.Trace("demo.paymentCharge")
-	defer span.End()
+	c, p := ctx.Trace("demo.paymentCharge")
+	defer p.Span().End()
+	p.Info("paymentCharge called")
 	return gatewayCall(c)
 }
 
 func gatewayCall(ctx logger.LogContextService) error {
-	c, _, span := ctx.Trace("demo.gatewayCall")
-	defer span.End()
+	c, p := ctx.Trace("demo.gatewayCall")
+	defer p.Span().End()
+	p.Info("gatewayCall called")
 	return ledgerWrite(c)
 }
 
 func ledgerWrite(ctx logger.LogContextService) error {
-	c, _, span := ctx.Trace("demo.ledgerWrite")
-	defer span.End()
+	c, p := ctx.Trace("demo.ledgerWrite")
+	defer p.Span().End()
+	p.Info("ledgerWrite called")
 	return dbExec(c)
 }
 
 func dbExec(ctx logger.LogContextService) error {
-	_, log, span := ctx.Trace("demo.dbExec")
-	defer span.End()
+	_, p := ctx.Trace("demo.dbExec")
+	defer p.Span().End()
 
 	err := errors.New("duplicate key value violates unique constraint")
 	err = fmt.Errorf("db exec: %w", err)
 
-	log.Error(err, "database transaction failed")
+	p.Fatal(err, "database transaction failed")
 	return err
 }

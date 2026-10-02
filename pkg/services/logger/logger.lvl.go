@@ -15,6 +15,10 @@ type loggerLevelImpl struct {
 	span trace.Span
 }
 
+func (l *loggerLevelImpl) Span() trace.Span {
+	return l.span
+}
+
 func (l *loggerLevelImpl) Debug(msg string, kv ...any) {
 	l.log(zapcore.DebugLevel, msg, kv)
 }
@@ -39,7 +43,7 @@ func (l *loggerLevelImpl) Fatal(err error, msg string, kv ...any) {
 
 func (l *loggerLevelImpl) log(lvl zapcore.Level, msg string, kv []any) {
 	if ce := l.z.Check(lvl, msg); ce != nil {
-		fields := toFields(kv)
+		fields := toFields(kv...)
 		spanCtx := trace.SpanContextFromContext(l.ctx)
 		if spanCtx.IsValid() {
 			fields = append(fields, zap.String("trace_id", spanCtx.TraceID().String()))

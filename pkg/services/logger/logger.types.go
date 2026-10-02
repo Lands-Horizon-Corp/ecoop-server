@@ -12,6 +12,7 @@ import (
 )
 
 type LoggerLevel interface {
+	Span() trace.Span
 	Debug(msg string, kv ...any)
 	Info(msg string, kv ...any)
 	Warn(msg string, kv ...any)
@@ -21,7 +22,7 @@ type LoggerLevel interface {
 
 type LogContextService interface {
 	context.Context
-	Trace(name string, attrs ...attribute.KeyValue) (LogContextService, LoggerLevel, trace.Span)
+	Trace(name string, attrs ...attribute.KeyValue) (LogContextService, LoggerLevel)
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 }
