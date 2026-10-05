@@ -3,7 +3,43 @@ name: ecoop-server
 services:
     redis:
         image: redis:7-alpine
-        ports: ['6379:6379'] # cache integration tests (REDIS_TEST_URL)
+        ports: ['6379:6379'] # cache tests (REDIS_TEST_URL)
+        healthcheck:
+            test: ['CMD', 'redis-cli', 'ping']
+            interval: 2s
+            timeout: 2s
+            retries: 15
+
+    # Sentinel cache tests (REDIS_SENTINEL_ADDRS). The sentinel shares the master's
+    # network namespace so it reports 127.0.0.1:6380, which the host can reach.
+    # The password is a throwaway test credential.
+    redis-master:
+        image: redis:7-alpine
+        command: redis-server --port 6380 --requirepass sentinel-test-pass
+        ports:
+            - '6380:6380' # master
+            - '26379:26379' # sentinel (published here because it shares this namespace)
+        healthcheck:
+            test: ['CMD', 'redis-cli', '-p', '6380', '-a', 'sentinel-test-pass', '--no-auth-warning', 'ping']
+            interval: 2s
+            timeout: 2s
+            retries: 15
+
+    redis-sentinel:
+        image: redis:7-alpine
+        network_mode: 'service:redis-master'
+        depends_on:
+            redis-master:
+                condition: service_healthy
+        # Sentinel rewrites its config, so it is generated in a writable path.
+        command: >
+            sh -c 'printf "port 26379\nsentinel monitor mymaster 127.0.0.1 6380 1\nsentinel auth-pass mymaster sentinel-test-pass\nsentinel down-after-milliseconds mymaster 1000\n" > /tmp/sentinel.conf
+            && exec redis-sentinel /tmp/sentinel.conf'
+        healthcheck:
+            test: ['CMD', 'redis-cli', '-p', '26379', 'sentinel', 'get-master-addr-by-name', 'mymaster']
+            interval: 2s
+            timeout: 2s
+            retries: 15
 
     loki:
         image: grafana/loki:latest

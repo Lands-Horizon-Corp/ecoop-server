@@ -10,8 +10,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// incrScript increments the key and sets the TTL only when the key is created,
-// so the window is fixed from the first increment. PEXPIRE keeps sub-second TTLs.
 var incrScript = redis.NewScript(`
 local current = redis.call('INCR', KEYS[1])
 if current == 1 and tonumber(ARGV[1]) > 0 then
@@ -20,14 +18,12 @@ end
 return current
 `)
 
-// CacheService is a Redis-backed implementation of CacheServices.
-//
-// Every key is stored with the configured prefix prepended. Keys returned by
-// Keys have the prefix stripped, and Flush only removes keys under the prefix.
 type CacheService struct {
 	url              []string
 	password         string
 	sentinelPassword string
+	sentinelAddrs    []string
+	masterName       string
 	client           *redis.Client
 	prefix           string
 }
@@ -43,17 +39,40 @@ func NewCacheService(
 	}
 }
 
-func (c *CacheService) Run(ctx context.Context) error {
-	if c.client != nil {
-		return errors.New("cache: service already running")
+func NewSentinelCacheService(
+	sentinelAddrs []string, masterName, password, sentinelPassword, prefix string,
+) CacheServices {
+	return &CacheService{
+		sentinelAddrs:    sentinelAddrs,
+		masterName:       masterName,
+		password:         password,
+		sentinelPassword: sentinelPassword,
+		prefix:           prefix,
+	}
+}
+
+func (c *CacheService) newClient() (*redis.Client, error) {
+	if len(c.sentinelAddrs) > 0 {
+		if c.masterName == "" {
+			return nil, errors.New("cache: sentinel master name is required")
+		}
+		return redis.NewFailoverClient(&redis.FailoverOptions{
+			MasterName:       c.masterName,
+			SentinelAddrs:    c.sentinelAddrs,
+			Password:         c.password,
+			SentinelPassword: c.sentinelPassword,
+			DialTimeout:      dialTimeout,
+			ReadTimeout:      ioTimeout,
+			WriteTimeout:     ioTimeout,
+			PoolSize:         poolSize,
+		}), nil
 	}
 	if len(c.url) != 1 {
-		return fmt.Errorf("cache: expected exactly one redis url, got %d", len(c.url))
+		return nil, fmt.Errorf("cache: expected exactly one redis url, got %d", len(c.url))
 	}
-
 	opt, err := redis.ParseURL(c.url[0])
 	if err != nil {
-		return fmt.Errorf("cache: parse redis url: %w", err)
+		return nil, fmt.Errorf("cache: parse redis url: %w", err)
 	}
 	if c.password != "" {
 		opt.Password = c.password
@@ -62,8 +81,17 @@ func (c *CacheService) Run(ctx context.Context) error {
 	opt.ReadTimeout = ioTimeout
 	opt.WriteTimeout = ioTimeout
 	opt.PoolSize = poolSize
+	return redis.NewClient(opt), nil
+}
 
-	client := redis.NewClient(opt)
+func (c *CacheService) Run(ctx context.Context) error {
+	if c.client != nil {
+		return errors.New("cache: service already running")
+	}
+	client, err := c.newClient()
+	if err != nil {
+		return err
+	}
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()
 		return fmt.Errorf("cache: ping redis: %w", err)

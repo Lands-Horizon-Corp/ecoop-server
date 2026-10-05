@@ -3,28 +3,30 @@ package regressions
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/cache"
+	"github.com/redis/go-redis/v9"
 )
 
-// TestCacheService_Integration runs the cache contract against a real Redis.
+// TestCacheService_Docker runs the cache contract against the real Redis in docker-compose.yml.
 //
-// It is skipped unless REDIS_TEST_URL is set. Locally:
+//	docker compose up -d --wait redis
+//	go test ./test/regressions/ -run TestCacheService_Docker -v
 //
-//	docker compose up -d redis
-//	REDIS_TEST_URL=redis://localhost:6379/0 go test ./test/regressions/ -run TestCacheService_Integration -v
-func TestCacheService_Integration(t *testing.T) {
-	url := os.Getenv("REDIS_TEST_URL")
-	if url == "" {
-		t.Skip("REDIS_TEST_URL not set; skipping real Redis integration tests")
+// REDIS_TEST_URL (default redis://localhost:6379/0) and REDIS_TEST_PASSWORD override the target.
+func TestCacheService_Docker(t *testing.T) {
+	url := envOr("REDIS_TEST_URL", "redis://localhost:6379/0")
+	opt, err := redis.ParseURL(url)
+	if err != nil {
+		t.Fatalf("REDIS_TEST_URL: %v", err)
 	}
+	requireReachable(t, opt.Addr)
 
 	factory := func(t *testing.T, prefix string) cache.CacheServices {
 		t.Helper()
-		svc := cache.NewCacheService([]string{url}, os.Getenv("REDIS_TEST_PASSWORD"), "", prefix)
+		svc := cache.NewCacheService([]string{url}, envOr("REDIS_TEST_PASSWORD", ""), "", prefix)
 		if err := svc.Run(context.Background()); err != nil {
 			t.Fatalf("run against %s: %v", url, err)
 		}
@@ -33,6 +35,7 @@ func TestCacheService_Integration(t *testing.T) {
 	}
 
 	runCacheContract(t, factory)
+	runCacheExtras(t, factory)
 
 	t.Run("TTLExpiresInRealTime", func(t *testing.T) {
 		ctx := context.Background()
@@ -53,16 +56,20 @@ func TestCacheService_Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("SubSecondIncrWindowExpires", func(t *testing.T) {
+	t.Run("StopThenRunAgainRestoresAccess", func(t *testing.T) {
 		ctx := context.Background()
 		svc := newIsolatedCache(t, factory)
-		if _, err := svc.Incr(ctx, "burst", 100*time.Millisecond); err != nil {
-			t.Fatalf("incr: %v", err)
+		if err := svc.Set(ctx, "k", "v", time.Minute); err != nil {
+			t.Fatalf("set: %v", err)
 		}
-		time.Sleep(300 * time.Millisecond)
-		n, err := svc.Incr(ctx, "burst", 100*time.Millisecond)
-		if err != nil || n != 1 {
-			t.Fatalf("incr after sub-second window = %d, %v; want 1", n, err)
+		if err := svc.Stop(ctx); err != nil {
+			t.Fatalf("stop: %v", err)
+		}
+		if err := svc.Run(ctx); err != nil {
+			t.Fatalf("second run: %v", err)
+		}
+		if got, err := svc.Get(ctx, "k"); err != nil || string(got) != "v" {
+			t.Fatalf("Get after restart = %q, %v; want v", got, err)
 		}
 	})
 }
