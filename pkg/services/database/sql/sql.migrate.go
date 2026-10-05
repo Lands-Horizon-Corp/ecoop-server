@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/pressly/goose/v3"
 )
@@ -24,6 +25,9 @@ func (s *SQLService) Migrate(ctx context.Context) error {
 
 func (s *SQLService) Fresh(ctx context.Context) error {
 	migrator, err := s.provider()
+	if errors.Is(err, goose.ErrNoMigrations) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -37,6 +41,9 @@ func (s *SQLService) Fresh(ctx context.Context) error {
 }
 
 func (s *SQLService) Create(ctx context.Context, name string) error {
+	if err := os.MkdirAll(migrationsDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create migrations directory: %w", err)
+	}
 	if err := goose.Create(nil, migrationsDir, name, "sql"); err != nil {
 		return fmt.Errorf("failed to create migration %q: %w", name, err)
 	}

@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"text/tabwriter"
 	"time"
@@ -12,6 +13,10 @@ import (
 // Status prints every migration with whether it is applied or pending.
 func (s *SQLService) Status(ctx context.Context) error {
 	migrator, err := s.provider()
+	if errors.Is(err, goose.ErrNoMigrations) {
+		_, err = fmt.Fprintln(s.out(), "no migrations found")
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -36,6 +41,10 @@ func (s *SQLService) Status(ctx context.Context) error {
 // Version prints the version of the most recently applied migration (0 if none).
 func (s *SQLService) Version(ctx context.Context) error {
 	migrator, err := s.provider()
+	if errors.Is(err, goose.ErrNoMigrations) {
+		_, err = fmt.Fprintln(s.out(), "database version: 0")
+		return err
+	}
 	if err != nil {
 		return err
 	}

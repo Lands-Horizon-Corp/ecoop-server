@@ -3,6 +3,8 @@ package sql
 import (
 	"context"
 	"fmt"
+
+	"github.com/pressly/goose/v3"
 )
 
 // Rollback reverts the most recently applied migration.
@@ -53,6 +55,9 @@ func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
 	if err != nil {
 		return err
 	}
+	if err := requireSteps(ctx, migrator, steps, goose.StateApplied); err != nil {
+		return err
+	}
 	for i := range steps {
 		if _, err := migrator.Down(ctx); err != nil {
 			return fmt.Errorf("failed to roll back step %d of %d: %w", i+1, steps, err)
@@ -70,10 +75,31 @@ func (s *SQLService) UpSteps(ctx context.Context, steps int) error {
 	if err != nil {
 		return err
 	}
+	if err := requireSteps(ctx, migrator, steps, goose.StatePending); err != nil {
+		return err
+	}
 	for i := range steps {
 		if _, err := migrator.UpByOne(ctx); err != nil {
 			return fmt.Errorf("failed to apply step %d of %d: %w", i+1, steps, err)
 		}
+	}
+	return nil
+}
+
+// requireSteps fails before anything runs when fewer than steps migrations are in the given state.
+func requireSteps(ctx context.Context, migrator *goose.Provider, steps int, state goose.State) error {
+	statuses, err := migrator.Status(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get migration status: %w", err)
+	}
+	available := 0
+	for _, st := range statuses {
+		if st.State == state {
+			available++
+		}
+	}
+	if steps > available {
+		return fmt.Errorf("%w: %d requested, %d available", ErrTooManySteps, steps, available)
 	}
 	return nil
 }

@@ -24,17 +24,21 @@ func (s *SQLService) Run(ctx context.Context) error {
 		_ = s.Stop(ctx)
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
-	if err := s.Migrate(ctx); err != nil {
-		_ = s.Stop(ctx)
-		return fmt.Errorf("failed to run goose migrations: %w", err)
+	if s.autoMigrate {
+		if err := s.Migrate(ctx); err != nil {
+			_ = s.Stop(ctx)
+			return fmt.Errorf("failed to run goose migrations: %w", err)
+		}
 	}
 	return nil
 }
 
 func (s *SQLService) Stop(ctx context.Context) error {
+	db := s.db
 	s.sqldb = nil
-	if s.db != nil {
-		return s.db.Close()
+	s.db = nil
+	if db != nil {
+		return db.Close()
 	}
 	return nil
 }
