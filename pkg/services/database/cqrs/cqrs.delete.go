@@ -54,7 +54,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) DeleteMany(
 	}
 	_, err := c.WriteSQLService.Client().NewDelete().
 		Model((*TData)(nil)).
-		Where("? IN (?)", bun.Ident(c.ColumnDefaultID), bun.In(ids)).
+		Where("? IN (?)", bun.Ident(c.ColumnDefaultID), bun.List(ids)).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("bulk deleting records: %w", err)
@@ -72,7 +72,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) DeleteManyWithTx(
 	}
 	_, err := tx.NewDelete().
 		Model((*TData)(nil)).
-		Where("? IN (?)", bun.Ident(c.ColumnDefaultID), bun.In(ids)).
+		Where("? IN (?)", bun.Ident(c.ColumnDefaultID), bun.List(ids)).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("bulk deleting records in tx: %w", err)

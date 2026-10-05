@@ -1,0 +1,163 @@
+package pagination
+
+import (
+	"context"
+	"fmt"
+	"math"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
+	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
+)
+
+func (c *PaginationService[TData, TID]) Pagination(
+	ctx context.Context,
+	pagination database.Pagination,
+	preloads ...string,
+) (*database.PaginationResult[TData], error) {
+	if err := c.checkReady(); err != nil {
+		return nil, err
+	}
+	return c.paginate(ctx, c.ReadSQLService.Client(), database.StructuredFilter{}, pagination, false, preloads...)
+}
+
+func (c *PaginationService[TData, TID]) checkReady() error {
+	if c.ReadSQLService == nil {
+		return fmt.Errorf("pagination requires ReadSQLService to be set")
+	}
+	if c.ColumnDefaultID == "" {
+		return fmt.Errorf("pagination requires ColumnDefaultID to be set")
+	}
+	return nil
+}
+func (c *PaginationService[TData, TID]) paginate(
+	ctx context.Context,
+	db bun.IDB,
+	extraFilter database.StructuredFilter,
+	pagination database.Pagination,
+	forUpdate bool,
+	preloads ...string,
+) (*database.PaginationResult[TData], error) {
+	if pagination.PageSize <= 0 {
+		pagination.PageSize = 30
+	} else if pagination.PageSize > math.MaxInt-1 {
+		pagination.PageSize = math.MaxInt - 1
+	}
+
+	pagination.Filter.Filters = c.normalizeFilters(ctx, pagination.Filter.Filters)
+
+	sortFields, err := c.resolveSortFields(pagination.Filter.SortFields)
+	if err != nil {
+		return nil, fmt.Errorf("resolving sort fields: %w", err)
+	}
+	payload, hasCursor, err := c.decodeCursor(pagination.Cursor, sortFields)
+	if err != nil {
+		return nil, fmt.Errorf("applying cursor: %w", err)
+	}
+	backward := hasCursor && payload.Backward
+	op, uniform := cursorIsUniform(sortFields, backward)
+	if uniform && anyNullableSortField[TData](sortFields) {
+		uniform = false
+	}
+	limit := int64(pagination.PageSize + 1)
+
+	var data []TData
+	if hasCursor && !uniform {
+		if forUpdate {
+			return nil, fmt.Errorf("pagination: row locking (FOR UPDATE) is not supported with mixed-direction cursor pagination")
+		}
+		if err := c.paginateMixedDirection(ctx, db, &data, extraFilter, pagination.Filter, sortFields, payload, backward, limit); err != nil {
+			return nil, err
+		}
+	} else {
+		q := db.NewSelect().Model(&data)
+		if q, err = c.applyFilters(q, extraFilter); err != nil {
+			return nil, fmt.Errorf("applying hardcoded filter: %w", err)
+		}
+		if q, err = c.applyFilters(q, pagination.Filter); err != nil {
+			return nil, fmt.Errorf("applying filters: %w", err)
+		}
+		if hasCursor {
+			q = applyCursorUniform(q, sortFields, payload.Values, op)
+		}
+		orderFields := sortFields
+		if backward {
+			orderFields = reverseSortFields(sortFields)
+		}
+		for _, sf := range orderFields {
+			dir := "DESC"
+			if sf.Order == database.SortOrderAsc {
+				dir = "ASC"
+			}
+			q = q.OrderExpr("? "+dir+" NULLS LAST", bun.Ident(sf.Field))
+		}
+		q = q.Limit(limit)
+		if forUpdate && db.Dialect().Name() == dialect.PG {
+			q = q.For("UPDATE")
+		}
+		if err := q.Scan(ctx); err != nil {
+			return nil, fmt.Errorf("scanning page: %w", err)
+		}
+	}
+
+	hasMore := len(data) > pagination.PageSize
+	if hasMore {
+		data = data[:pagination.PageSize]
+	}
+	if backward {
+		for i, j := 0, len(data)-1; i < j; i, j = i+1, j-1 {
+			data[i], data[j] = data[j], data[i]
+		}
+	}
+
+	droppedPreloads, err := utils.ApplyPreloadsMany(ctx, db, &data, c.Preloads, preloads...)
+	for _, d := range droppedPreloads {
+		c.warn(ctx, fmt.Sprintf("pagination: dropping unknown preload relation %q", d))
+	}
+	if err != nil {
+		return nil, fmt.Errorf("loading preloads: %w", err)
+	}
+
+	result := &database.PaginationResult[TData]{
+		PageSize:      pagination.PageSize,
+		CurrentCursor: pagination.Cursor,
+	}
+	if len(data) > 0 {
+		if !backward {
+			if hasMore {
+				next, err := c.encodeCursor(&data[len(data)-1], sortFields, false)
+				if err != nil {
+					return nil, fmt.Errorf("encoding next cursor: %w", err)
+				}
+				result.NextCursor = &next
+			}
+			if hasCursor {
+				prev, err := c.encodeCursor(&data[0], sortFields, true)
+				if err != nil {
+					return nil, fmt.Errorf("encoding previous cursor: %w", err)
+				}
+				result.PreviousCursor = &prev
+			}
+		} else {
+			next, err := c.encodeCursor(&data[len(data)-1], sortFields, false)
+			if err != nil {
+				return nil, fmt.Errorf("encoding next cursor: %w", err)
+			}
+			result.NextCursor = &next
+			if hasMore {
+				prev, err := c.encodeCursor(&data[0], sortFields, true)
+				if err != nil {
+					return nil, fmt.Errorf("encoding previous cursor: %w", err)
+				}
+				result.PreviousCursor = &prev
+			}
+		}
+	}
+
+	result.Data = make([]*TData, len(data))
+	for i := range data {
+		result.Data[i] = &data[i]
+	}
+	return result, nil
+}

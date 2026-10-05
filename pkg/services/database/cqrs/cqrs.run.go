@@ -128,7 +128,7 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 	err := r.ReadSQLService.Client().NewSelect().
 		Model((*database.ProcessedEvent)(nil)).
 		Column("event_id").
-		Where("event_id IN (?)", bun.In(*eventIDsPtr)).
+		Where("event_id IN (?)", bun.List(*eventIDsPtr)).
 		Scan(ctx, existingIDsPtr)
 	if err != nil {
 		return nil, fmt.Errorf("querying existing event ids: %w", err)
