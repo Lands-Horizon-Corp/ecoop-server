@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 	"github.com/go-playground/validator/v10"
 )
@@ -22,13 +23,13 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	Deleted     func(*TData) database.Events
 	Dispatch    func(channel database.Channel, events database.Events, payload *TResponse) error
 
-	ReadSQLService       database.SQLService
-	WriteSQLService      database.SQLService
+	ReadSQLService       database.SQLServices
+	WriteSQLService      database.SQLServices
 	LogService           database.LogService
 	BroadcastService     database.BroadcastService
 	MessageBrokerService database.MessageBrokerService
 
-	PaginationService database.PaginationServices[TData, TID]
+	PaginationService pagination.PaginationServices[TData, TID]
 	Validator         *validator.Validate
 
 	BatchSize     int
@@ -36,14 +37,14 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 
 	stringSlicePool     *utils.BufferPool[string]
 	stringSetPool       *utils.MapPool[string, bool]
-	processedEventsPool *utils.BufferPool[database.ProcessedEvent]
+	processedEventsPool *utils.BufferPool[ProcessedEvent]
 
 	idFieldIndex int
 }
 
 func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 	c CQRSService[TData, TResponse, TRequest, TID],
-) database.CQRSServices[TData, TResponse, TRequest, TID] {
+) CQRSServices[TData, TResponse, TRequest, TID] {
 	if c.WriteSQLService == nil {
 		panic("WriteSQLService must be initialized")
 	}
@@ -88,7 +89,7 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		Validator:            c.Validator,
 		stringSlicePool:      utils.NewBufferPool[string](),
 		stringSetPool:        utils.NewMapPool[string, bool](),
-		processedEventsPool:  utils.NewBufferPool[database.ProcessedEvent](),
+		processedEventsPool:  utils.NewBufferPool[ProcessedEvent](),
 		BatchSize:            c.BatchSize,
 		FlushInterval:        c.FlushInterval,
 		idFieldIndex:         utils.BunColumnFieldIndex[TData](c.ColumnDefaultID),

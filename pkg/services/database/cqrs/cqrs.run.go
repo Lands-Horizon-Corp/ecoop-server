@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 	"github.com/bytedance/sonic"
 	"github.com/uptrace/bun"
@@ -26,13 +25,13 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) 
 		return errors.New("message broker service is not initialized")
 	}
 	c.info(ctx, fmt.Sprintf("starting outbox batch runner for channel: %s", c.Channel))
-	batcher := utils.NewBatcher(utils.BatcherConfig[database.CQRSQueuePayload[TData]]{
+	batcher := utils.NewBatcher(utils.BatcherConfig[CQRSQueuePayload[TData]]{
 		BatchSize:     c.BatchSize,
 		FlushInterval: c.FlushInterval,
-		Handler: func(batchCtx context.Context, batch []database.CQRSQueuePayload[TData]) error {
+		Handler: func(batchCtx context.Context, batch []CQRSQueuePayload[TData]) error {
 			return c.processBatch(batchCtx, batch)
 		},
-		OnError: func(err error, batch []database.CQRSQueuePayload[TData]) {
+		OnError: func(err error, batch []CQRSQueuePayload[TData]) {
 			c.error(ctx, fmt.Sprintf("processing outbox batch for channel %s failed: %v", c.Channel, err))
 		},
 	})
@@ -40,7 +39,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) 
 	defer batcher.Stop()
 
 	return c.MessageBrokerService.Subscribe(ctx, string(c.Channel), func(key, value []byte) error {
-		var env database.CQRSQueuePayload[TData]
+		var env CQRSQueuePayload[TData]
 		if err := sonic.Unmarshal(value, &env); err != nil {
 			c.error(ctx, fmt.Sprintf("unmarshaling message payload for channel %s: %v", c.Channel, err))
 			return nil
@@ -59,7 +58,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) 
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) processBatch(
 	ctx context.Context,
-	batch []database.CQRSQueuePayload[TData],
+	batch []CQRSQueuePayload[TData],
 ) error {
 	if len(batch) == 0 {
 		return nil
@@ -74,11 +73,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) processBatch(
 	for i := range appliedMessages {
 		msg := &appliedMessages[i]
 		switch msg.ChangeType {
-		case database.ChangeTypeCreated:
+		case ChangeTypeCreated:
 			c.OnCreated(ctx, &msg.Payload)
-		case database.ChangeTypeUpdated:
+		case ChangeTypeUpdated:
 			c.OnUpdated(ctx, &msg.Payload)
-		case database.ChangeTypeDeleted:
+		case ChangeTypeDeleted:
 			c.OnDeleted(ctx, &msg.Payload)
 		default:
 			c.handleEvent(ctx, msg.ChangeType, &msg.Payload, nil)
@@ -89,8 +88,8 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) processBatch(
 
 func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 	ctx context.Context,
-	batch []database.CQRSQueuePayload[TData],
-) ([]database.CQRSQueuePayload[TData], error) {
+	batch []CQRSQueuePayload[TData],
+) ([]CQRSQueuePayload[TData], error) {
 	if r.ReadSQLService == nil {
 		return nil, errors.New("read db is not initialized")
 	}
@@ -110,7 +109,7 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 	defer r.processedEventsPool.Put(eventsToInsertPtr)
 
 	eventIDs := *eventIDsPtr
-	uniqueBatch := make([]database.CQRSQueuePayload[TData], 0, len(batch))
+	uniqueBatch := make([]CQRSQueuePayload[TData], 0, len(batch))
 
 	for _, msg := range batch {
 		if !seenInBatch[msg.EventID] {
@@ -126,7 +125,7 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 	}
 
 	err := r.ReadSQLService.Client().NewSelect().
-		Model((*database.ProcessedEvent)(nil)).
+		Model((*ProcessedEvent)(nil)).
 		Column("event_id").
 		Where("event_id IN (?)", bun.List(*eventIDsPtr)).
 		Scan(ctx, existingIDsPtr)
@@ -137,9 +136,9 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 	for _, id := range *existingIDsPtr {
 		existingMap[id] = true
 	}
-	newMessages := make([]database.CQRSQueuePayload[TData], 0, len(uniqueBatch))
+	newMessages := make([]CQRSQueuePayload[TData], 0, len(uniqueBatch))
 	eventsToInsert := *eventsToInsertPtr
-	latestEntityState := make(map[string]database.CQRSQueuePayload[TData], len(uniqueBatch))
+	latestEntityState := make(map[string]CQRSQueuePayload[TData], len(uniqueBatch))
 	entityOrder := make([]string, 0, len(uniqueBatch))
 	now := time.Now()
 
@@ -148,7 +147,7 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 			continue
 		}
 		newMessages = append(newMessages, msg)
-		eventsToInsert = append(eventsToInsert, database.ProcessedEvent{
+		eventsToInsert = append(eventsToInsert, ProcessedEvent{
 			EventID:   msg.EventID,
 			Channel:   string(r.Channel),
 			CreatedAt: now,
@@ -172,9 +171,9 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 	for _, key := range entityOrder {
 		msg := latestEntityState[key]
 		switch msg.ChangeType {
-		case database.ChangeTypeCreated, database.ChangeTypeUpdated:
+		case ChangeTypeCreated, ChangeTypeUpdated:
 			upsertEntities = append(upsertEntities, msg.Payload)
-		case database.ChangeTypeDeleted:
+		case ChangeTypeDeleted:
 			deleteEntities = append(deleteEntities, msg.Payload)
 		}
 	}

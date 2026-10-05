@@ -4,23 +4,22 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 )
 
 func (c *PaginationService[TData, TID]) normalizeFilters(
-	ctx context.Context, filters []database.Filter,
-) []database.Filter {
+	ctx context.Context, filters []Filter,
+) []Filter {
 	if len(filters) == 0 {
 		return filters
 	}
-	normalized := make([]database.Filter, 0, len(filters))
+	normalized := make([]Filter, 0, len(filters))
 	for _, f := range filters {
-		if f.Mode == database.ModeSearch && f.Field == "" {
+		if f.Mode == ModeSearch && f.Field == "" {
 			normalized = append(normalized, f)
 			continue
 		}
-		if f.Mode == database.ModeCustom {
+		if f.Mode == ModeCustom {
 			if f.Custom == nil {
 				c.warn(ctx, fmt.Sprintf("pagination: dropping custom filter %q without a function", f.Field))
 				continue

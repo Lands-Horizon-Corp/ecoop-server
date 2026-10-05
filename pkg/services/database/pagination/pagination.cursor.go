@@ -7,7 +7,6 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 )
 
@@ -18,9 +17,9 @@ type cursorPayload struct {
 }
 
 func (c *PaginationService[TData, TID]) resolveSortFields(
-	sortFields []database.SortField,
-) ([]database.SortField, error) {
-	resolved := make([]database.SortField, 0, len(sortFields)+1)
+	sortFields []SortField,
+) ([]SortField, error) {
+	resolved := make([]SortField, 0, len(sortFields)+1)
 	if len(sortFields) == 0 {
 		resolved = append(resolved, c.defaultSortField())
 	} else {
@@ -28,8 +27,8 @@ func (c *PaginationService[TData, TID]) resolveSortFields(
 			if utils.BunColumnFieldIndex[TData](sf.Field) == -1 {
 				return nil, fmt.Errorf("unknown sort field %q", sf.Field)
 			}
-			if sf.Order != database.SortOrderAsc && sf.Order != database.SortOrderDesc {
-				sf.Order = database.SortOrderAsc
+			if sf.Order != SortOrderAsc && sf.Order != SortOrderDesc {
+				sf.Order = SortOrderAsc
 			}
 			resolved = append(resolved, sf)
 		}
@@ -39,24 +38,24 @@ func (c *PaginationService[TData, TID]) resolveSortFields(
 			return resolved, nil
 		}
 	}
-	return append(resolved, database.SortField{Field: c.ColumnDefaultID, Order: database.SortOrderDesc}), nil
+	return append(resolved, SortField{Field: c.ColumnDefaultID, Order: SortOrderDesc}), nil
 }
 
-func (c *PaginationService[TData, TID]) defaultSortField() database.SortField {
-	sf := database.SortField{Field: c.ColumnDefaultID, Order: database.SortOrderDesc}
+func (c *PaginationService[TData, TID]) defaultSortField() SortField {
+	sf := SortField{Field: c.ColumnDefaultID, Order: SortOrderDesc}
 	parts := strings.Fields(c.ColumnDefaultSort)
 	if len(parts) == 0 {
 		return sf
 	}
 	sf.Field = parts[0]
 	if len(parts) > 1 && strings.EqualFold(parts[1], "asc") {
-		sf.Order = database.SortOrderAsc
+		sf.Order = SortOrderAsc
 	}
 	return sf
 }
 
 func (c *PaginationService[TData, TID]) encodeCursor(
-	data *TData, sortFields []database.SortField, backward bool,
+	data *TData, sortFields []SortField, backward bool,
 ) (string, error) {
 	values := make([]string, len(sortFields))
 	nulls := make([]bool, len(sortFields))
@@ -69,7 +68,7 @@ func (c *PaginationService[TData, TID]) encodeCursor(
 }
 
 func (c *PaginationService[TData, TID]) decodeCursor(
-	cursor *string, sortFields []database.SortField,
+	cursor *string, sortFields []SortField,
 ) (payload cursorPayload, ok bool, err error) {
 	if cursor == nil || *cursor == "" {
 		return cursorPayload{}, false, nil
@@ -90,8 +89,8 @@ func (c *PaginationService[TData, TID]) decodeCursor(
 	return payload, true, nil
 }
 
-func cursorOperator(order database.SortOrder, backward bool) string {
-	lessThan := order == database.SortOrderDesc
+func cursorOperator(order SortOrder, backward bool) string {
+	lessThan := order == SortOrderDesc
 	if backward {
 		lessThan = !lessThan
 	}
@@ -101,7 +100,7 @@ func cursorOperator(order database.SortOrder, backward bool) string {
 	return ">"
 }
 
-func cursorIsUniform(sortFields []database.SortField, backward bool) (op string, uniform bool) {
+func cursorIsUniform(sortFields []SortField, backward bool) (op string, uniform bool) {
 	if len(sortFields) == 0 {
 		return "", true
 	}
@@ -115,7 +114,7 @@ func cursorIsUniform(sortFields []database.SortField, backward bool) (op string,
 }
 
 func applyCursorUniform(
-	q *bun.SelectQuery, sortFields []database.SortField, values []string, op string,
+	q *bun.SelectQuery, sortFields []SortField, values []string, op string,
 ) *bun.SelectQuery {
 	n := len(sortFields)
 	args := make([]any, 0, n*2)
@@ -130,7 +129,7 @@ func applyCursorUniform(
 }
 
 func appendCursorTerm(
-	q *bun.SelectQuery, sortFields []database.SortField, values []string, nulls []bool, idx int, backward bool,
+	q *bun.SelectQuery, sortFields []SortField, values []string, nulls []bool, idx int, backward bool,
 ) *bun.SelectQuery {
 	for i := range idx {
 		field := bun.Ident(sortFields[i].Field)
@@ -154,7 +153,7 @@ func appendCursorTerm(
 	return q.Where(fmt.Sprintf("? %s ?", op), field, values[idx])
 }
 
-func anyNullableSortField[TData any](sortFields []database.SortField) bool {
+func anyNullableSortField[TData any](sortFields []SortField) bool {
 	t := reflect.TypeFor[TData]()
 	for _, sf := range sortFields {
 		idx := utils.BunColumnFieldIndex[TData](sf.Field)
@@ -168,14 +167,14 @@ func anyNullableSortField[TData any](sortFields []database.SortField) bool {
 	return false
 }
 
-func reverseSortFields(sortFields []database.SortField) []database.SortField {
-	reversed := make([]database.SortField, len(sortFields))
+func reverseSortFields(sortFields []SortField) []SortField {
+	reversed := make([]SortField, len(sortFields))
 	for i, sf := range sortFields {
-		order := database.SortOrderDesc
-		if sf.Order == database.SortOrderDesc {
-			order = database.SortOrderAsc
+		order := SortOrderDesc
+		if sf.Order == SortOrderDesc {
+			order = SortOrderAsc
 		}
-		reversed[i] = database.SortField{Field: sf.Field, Order: order}
+		reversed[i] = SortField{Field: sf.Field, Order: order}
 	}
 	return reversed
 }

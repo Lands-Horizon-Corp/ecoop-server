@@ -3,7 +3,7 @@ package cqrs
 import (
 	"context"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
 	"github.com/uptrace/bun"
 )
 
@@ -31,8 +31,8 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) GetByIDWithTxFormat(
 	return c.FindOneWithTxFormat(ctx, tx, c.idFilter(id), preloads...)
 }
 
-func (c *CQRSService[TData, TResponse, TRequest, TID]) idFilter(id TID) database.StructuredFilter {
-	return database.StructuredFilter{
-		Filters: []database.Filter{{Field: c.ColumnDefaultID, Mode: database.ModeEqual, Value: id}},
+func (c *CQRSService[TData, TResponse, TRequest, TID]) idFilter(id TID) pagination.StructuredFilter {
+	return pagination.StructuredFilter{
+		Filters: []pagination.Filter{{Field: c.ColumnDefaultID, Mode: pagination.ModeEqual, Value: id}},
 	}
 }

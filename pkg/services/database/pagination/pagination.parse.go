@@ -1,4 +1,4 @@
-package database
+package pagination
 
 import (
 	"fmt"

@@ -4,12 +4,11 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/uptrace/bun"
 )
 
 func (c *PaginationService[TData, TID]) FindOne(
-	ctx context.Context, filter database.StructuredFilter, preloads ...string,
+	ctx context.Context, filter StructuredFilter, preloads ...string,
 ) (*TData, error) {
 	if err := c.checkReady(); err != nil {
 		return nil, err
@@ -18,7 +17,7 @@ func (c *PaginationService[TData, TID]) FindOne(
 }
 
 func (c *PaginationService[TData, TID]) FindOneWithTx(
-	ctx context.Context, tx *bun.Tx, filter database.StructuredFilter, preloads ...string,
+	ctx context.Context, tx *bun.Tx, filter StructuredFilter, preloads ...string,
 ) (*TData, error) {
 	if err := c.checkReady(); err != nil {
 		return nil, err
@@ -27,9 +26,9 @@ func (c *PaginationService[TData, TID]) FindOneWithTx(
 }
 
 func (c *PaginationService[TData, TID]) findOne(
-	ctx context.Context, db bun.IDB, filter database.StructuredFilter, forUpdate bool, preloads ...string,
+	ctx context.Context, db bun.IDB, filter StructuredFilter, forUpdate bool, preloads ...string,
 ) (*TData, error) {
-	result, err := c.paginate(ctx, db, filter, database.Pagination{PageSize: 1}, forUpdate, preloads...)
+	result, err := c.paginate(ctx, db, filter, Pagination{PageSize: 1}, forUpdate, preloads...)
 	if err != nil {
 		return nil, err
 	}

@@ -4,12 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/uptrace/bun"
 )
 
 func (c *PaginationService[TData, TID]) Exists(
-	ctx context.Context, filter database.StructuredFilter,
+	ctx context.Context, filter StructuredFilter,
 ) (bool, error) {
 	if err := c.checkReady(); err != nil {
 		return false, err
@@ -18,7 +17,7 @@ func (c *PaginationService[TData, TID]) Exists(
 }
 
 func (c *PaginationService[TData, TID]) ExistsWithTx(
-	ctx context.Context, tx *bun.Tx, filter database.StructuredFilter,
+	ctx context.Context, tx *bun.Tx, filter StructuredFilter,
 ) (bool, error) {
 	if err := c.checkReady(); err != nil {
 		return false, err
@@ -27,7 +26,7 @@ func (c *PaginationService[TData, TID]) ExistsWithTx(
 }
 
 func (c *PaginationService[TData, TID]) exists(
-	ctx context.Context, db bun.IDB, filter database.StructuredFilter,
+	ctx context.Context, db bun.IDB, filter StructuredFilter,
 ) (bool, error) {
 	var data []TData
 	q := db.NewSelect().Model(&data)

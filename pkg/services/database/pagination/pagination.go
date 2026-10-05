@@ -5,8 +5,8 @@ import (
 )
 
 type PaginationService[TData any, TID comparable] struct {
-	ReadSQLService    database.SQLService
-	WriteSQLService   database.SQLService
+	ReadSQLService    database.SQLServices
+	WriteSQLService   database.SQLServices
 	LogService        database.LogService
 	ColumnDefaultID   string
 	ColumnDefaultSort string
@@ -15,7 +15,7 @@ type PaginationService[TData any, TID comparable] struct {
 
 func NewPaginationService[TData any, TID comparable](
 	p PaginationService[TData, TID],
-) database.PaginationServices[TData, TID] {
+) PaginationServices[TData, TID] {
 	if p.ColumnDefaultID == "" {
 		p.ColumnDefaultID = "id"
 	}

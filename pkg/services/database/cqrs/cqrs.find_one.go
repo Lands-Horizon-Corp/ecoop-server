@@ -3,18 +3,18 @@ package cqrs
 import (
 	"context"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
 	"github.com/uptrace/bun"
 )
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) FindOne(
-	ctx context.Context, filter database.StructuredFilter, preloads ...string,
+	ctx context.Context, filter pagination.StructuredFilter, preloads ...string,
 ) (*TData, error) {
 	return c.PaginationService.FindOne(ctx, filter, preloads...)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) FindOneFormat(
-	ctx context.Context, filter database.StructuredFilter, preloads ...string,
+	ctx context.Context, filter pagination.StructuredFilter, preloads ...string,
 ) (*TResponse, error) {
 	result, err := c.FindOne(ctx, filter, preloads...)
 	if err != nil {
@@ -27,13 +27,13 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) FindOneFormat(
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) FindOneWithTx(
-	ctx context.Context, tx *bun.Tx, filter database.StructuredFilter, preloads ...string,
+	ctx context.Context, tx *bun.Tx, filter pagination.StructuredFilter, preloads ...string,
 ) (*TData, error) {
 	return c.PaginationService.FindOneWithTx(ctx, tx, filter, preloads...)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) FindOneWithTxFormat(
-	ctx context.Context, tx *bun.Tx, filter database.StructuredFilter, preloads ...string,
+	ctx context.Context, tx *bun.Tx, filter pagination.StructuredFilter, preloads ...string,
 ) (*TResponse, error) {
 	result, err := c.FindOneWithTx(ctx, tx, filter, preloads...)
 	if err != nil {

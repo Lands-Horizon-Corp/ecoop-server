@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/uptrace/bun"
 )
 
@@ -14,9 +13,9 @@ func (c *PaginationService[TData, TID]) paginateMixedDirection(
 	ctx context.Context,
 	db bun.IDB,
 	data *[]TData,
-	extraFilter database.StructuredFilter,
-	filterRoot database.StructuredFilter,
-	sortFields []database.SortField,
+	extraFilter StructuredFilter,
+	filterRoot StructuredFilter,
+	sortFields []SortField,
 	payload cursorPayload,
 	backward bool,
 	limit int64,
@@ -28,7 +27,7 @@ func (c *PaginationService[TData, TID]) paginateMixedDirection(
 	applyOrder := func(q *bun.SelectQuery) *bun.SelectQuery {
 		for _, sf := range orderFields {
 			dir := "DESC"
-			if sf.Order == database.SortOrderAsc {
+			if sf.Order == SortOrderAsc {
 				dir = "ASC"
 			}
 			q = q.OrderExpr("? "+dir+" NULLS LAST", bun.Ident(sf.Field))

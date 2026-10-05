@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
@@ -13,13 +12,13 @@ import (
 
 func (c *PaginationService[TData, TID]) Pagination(
 	ctx context.Context,
-	pagination database.Pagination,
+	pagination Pagination,
 	preloads ...string,
-) (*database.PaginationResult[TData], error) {
+) (*PaginationResult[TData], error) {
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	return c.paginate(ctx, c.ReadSQLService.Client(), database.StructuredFilter{}, pagination, false, preloads...)
+	return c.paginate(ctx, c.ReadSQLService.Client(), StructuredFilter{}, pagination, false, preloads...)
 }
 
 func (c *PaginationService[TData, TID]) checkReady() error {
@@ -35,11 +34,11 @@ func (c *PaginationService[TData, TID]) checkReady() error {
 func (c *PaginationService[TData, TID]) paginate(
 	ctx context.Context,
 	db bun.IDB,
-	extraFilter database.StructuredFilter,
-	pagination database.Pagination,
+	extraFilter StructuredFilter,
+	pagination Pagination,
 	forUpdate bool,
 	preloads ...string,
-) (*database.PaginationResult[TData], error) {
+) (*PaginationResult[TData], error) {
 	if pagination.PageSize <= 0 {
 		pagination.PageSize = 30
 	} else if pagination.PageSize > math.MaxInt-1 {
@@ -88,7 +87,7 @@ func (c *PaginationService[TData, TID]) paginate(
 		}
 		for _, sf := range orderFields {
 			dir := "DESC"
-			if sf.Order == database.SortOrderAsc {
+			if sf.Order == SortOrderAsc {
 				dir = "ASC"
 			}
 			q = q.OrderExpr("? "+dir+" NULLS LAST", bun.Ident(sf.Field))
@@ -120,7 +119,7 @@ func (c *PaginationService[TData, TID]) paginate(
 		return nil, fmt.Errorf("loading preloads: %w", err)
 	}
 
-	result := &database.PaginationResult[TData]{
+	result := &PaginationResult[TData]{
 		PageSize:      pagination.PageSize,
 		CurrentCursor: pagination.Cursor,
 	}

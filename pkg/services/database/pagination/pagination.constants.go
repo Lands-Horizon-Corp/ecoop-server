@@ -1,4 +1,4 @@
-package database
+package pagination
 
 const (
 	ModeEqual       Mode = "equal"
@@ -32,8 +32,4 @@ const (
 
 	SortOrderAsc  SortOrder = "asc"
 	SortOrderDesc SortOrder = "desc"
-
-	ChangeTypeCreated ChangeType = iota
-	ChangeTypeUpdated
-	ChangeTypeDeleted
 )

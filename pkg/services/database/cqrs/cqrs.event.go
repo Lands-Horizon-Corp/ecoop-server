@@ -8,20 +8,20 @@ import (
 )
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) OnCreated(ctx context.Context, data *TData) {
-	c.handleEvent(ctx, database.ChangeTypeCreated, data, c.Created)
+	c.handleEvent(ctx, ChangeTypeCreated, data, c.Created)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) OnUpdated(ctx context.Context, data *TData) {
-	c.handleEvent(ctx, database.ChangeTypeUpdated, data, c.Updated)
+	c.handleEvent(ctx, ChangeTypeUpdated, data, c.Updated)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) OnDeleted(ctx context.Context, data *TData) {
-	c.handleEvent(ctx, database.ChangeTypeDeleted, data, c.Deleted)
+	c.handleEvent(ctx, ChangeTypeDeleted, data, c.Deleted)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) handleEvent(
 	ctx context.Context,
-	eventType database.ChangeType,
+	eventType ChangeType,
 	data *TData,
 	getEvents func(*TData) database.Events,
 ) {
