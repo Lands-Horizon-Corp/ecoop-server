@@ -1,4 +1,4 @@
-package cqrs
+package database
 
 const (
 	ModeEqual       Mode = "equal"

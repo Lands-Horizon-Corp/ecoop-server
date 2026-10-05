@@ -1,4 +1,4 @@
-package cqrs
+package database
 
 import (
 	"context"
@@ -123,7 +123,7 @@ type (
 		GetMinWithTx(ctx context.Context, tx *bun.Tx, field string, filter StructuredFilter, preloads ...string) (*TData, error)
 	}
 
-	CQRS[TData any, TResponse any, TRequest any, TID comparable] interface {
+	CQRSServices[TData any, TResponse any, TRequest any, TID comparable] interface {
 		// Lifecycle
 		Run(ctx context.Context) error
 

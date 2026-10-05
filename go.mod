@@ -7,6 +7,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/bytedance/sonic v1.15.4
 	github.com/cloudwego/hertz v0.10.6
+	github.com/go-playground/validator/v10 v10.30.5
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.20.1
 	github.com/redis/go-redis/v9 v9.22.0
@@ -31,12 +32,16 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
+	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-playground/locales v0.14.1 // indirect
+	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
+	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
