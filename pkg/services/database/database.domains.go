@@ -103,7 +103,7 @@ type (
 		Client() *bun.DB
 	}
 
-	PaginationService[TData any, TID comparable] interface {
+	PaginationServices[TData any, TID comparable] interface {
 		Paginate(ctx context.Context, pagination Pagination) (PaginationResult[TData], error)
 		PaginateFilter(ctx context.Context, filter StructuredFilter, pagination Pagination) (PaginationResult[TData], error)
 		Filter(ctx context.Context, filter StructuredFilter) ([]*TData, error)
@@ -124,23 +124,18 @@ type (
 	}
 
 	CQRSServices[TData any, TResponse any, TRequest any, TID comparable] interface {
-		// Lifecycle
 		Run(ctx context.Context) error
 
-		// Transactions
 		StartTx(ctx context.Context) (bun.Tx, error)
 		EndTx(ctx context.Context, tx bun.Tx, err error) error
 
-		// Events
 		OnCreated(ctx context.Context, data *TData)
 		OnUpdated(ctx context.Context, data *TData)
 		OnDeleted(ctx context.Context, data *TData)
 
-		// Model conversion
 		ToModel(data *TData) *TResponse
 		ToModels(data []*TData) []*TResponse
 
-		// Create
 		Create(ctx context.Context, data TData, preload ...string) (*TData, error)
 		CreateFormat(ctx context.Context, data TData, preload ...string) (*TResponse, error)
 		CreateMany(ctx context.Context, data []TData, preload ...string) ([]*TData, error)
@@ -150,7 +145,6 @@ type (
 		CreateManyWithTx(ctx context.Context, tx bun.Tx, data []TData, preload ...string) ([]*TData, error)
 		CreateManyWithTxFormat(ctx context.Context, tx bun.Tx, data []TData, preload ...string) ([]*TResponse, error)
 
-		// Create (validates TRequest, converts via FromRequest)
 		CreateWithValidation(ctx context.Context, request TRequest, preload ...string) (*TData, error)
 		CreateWithValidationFormat(ctx context.Context, request TRequest, preload ...string) (*TResponse, error)
 		CreateManyWithValidation(ctx context.Context, requests []TRequest, preload ...string) ([]*TData, error)
@@ -160,7 +154,6 @@ type (
 		CreateManyWithValidationTx(ctx context.Context, tx bun.Tx, requests []TRequest, preload ...string) ([]*TData, error)
 		CreateManyWithValidationTxFormat(ctx context.Context, tx bun.Tx, requests []TRequest, preload ...string) ([]*TResponse, error)
 
-		// Update
 		UpdateByID(ctx context.Context, id TID, data TData, preload ...string) (*TData, error)
 		UpdateByIDFormat(ctx context.Context, id TID, data TData, preload ...string) (*TResponse, error)
 		UpdateByIDWithTx(ctx context.Context, tx bun.Tx, id TID, data TData, preload ...string) (*TData, error)
@@ -170,7 +163,6 @@ type (
 		UpdateManyWithTx(ctx context.Context, tx bun.Tx, data []TData, preload ...string) ([]*TData, error)
 		UpdateManyWithTxFormat(ctx context.Context, tx bun.Tx, data []TData, preload ...string) ([]*TResponse, error)
 
-		// Update (validates TRequest, converts via FromRequest)
 		UpdateByIDWithValidation(ctx context.Context, id TID, request TRequest, preload ...string) (*TData, error)
 		UpdateByIDWithValidationFormat(ctx context.Context, id TID, request TRequest, preload ...string) (*TResponse, error)
 		UpdateByIDWithValidationTx(ctx context.Context, tx bun.Tx, id TID, request TRequest, preload ...string) (*TData, error)
@@ -180,41 +172,34 @@ type (
 		UpdateManyWithValidationTx(ctx context.Context, tx bun.Tx, requests []TRequest, preload ...string) ([]*TData, error)
 		UpdateManyWithValidationTxFormat(ctx context.Context, tx bun.Tx, requests []TRequest, preload ...string) ([]*TResponse, error)
 
-		// Increment
 		IncrementByID(ctx context.Context, id TID, field string, delta float64) (*TData, error)
 		IncrementByIDWithTx(ctx context.Context, tx bun.Tx, id TID, field string, delta float64) (*TData, error)
 
-		// Delete
 		DeleteByID(ctx context.Context, id TID) error
 		DeleteByIDWithTx(ctx context.Context, tx bun.Tx, id TID) error
 		DeleteMany(ctx context.Context, ids []TID) error
 		DeleteManyWithTx(ctx context.Context, tx bun.Tx, ids []TID) error
 
-		// Get by ID
 		GetByID(ctx context.Context, id TID, preloads ...string) (*TData, error)
 		GetByIDFormat(ctx context.Context, id TID, preloads ...string) (*TResponse, error)
 		GetByIDWithTx(ctx context.Context, tx *bun.Tx, id TID, preloads ...string) (*TData, error)
 		GetByIDWithTxFormat(ctx context.Context, tx *bun.Tx, id TID, preloads ...string) (*TResponse, error)
 
-		// Find
 		Find(ctx context.Context, filter StructuredFilter, preloads ...string) ([]*TData, error)
 		FindFormat(ctx context.Context, filter StructuredFilter, preloads ...string) ([]*TResponse, error)
 		FindWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter, preloads ...string) ([]*TData, error)
 		FindWithTxFormat(ctx context.Context, tx *bun.Tx, filter StructuredFilter, preloads ...string) ([]*TResponse, error)
 
-		// FindOne
 		FindOne(ctx context.Context, filter StructuredFilter, preloads ...string) (*TData, error)
 		FindOneFormat(ctx context.Context, filter StructuredFilter, preloads ...string) (*TResponse, error)
 		FindOneWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter, preloads ...string) (*TData, error)
 		FindOneWithTxFormat(ctx context.Context, tx *bun.Tx, filter StructuredFilter, preloads ...string) (*TResponse, error)
 
-		// Count / Exists
 		Count(ctx context.Context, filter StructuredFilter) (int64, error)
 		CountWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter) (int64, error)
 		Exists(ctx context.Context, filter StructuredFilter) (bool, error)
 		ExistsWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter) (bool, error)
 
-		// Max / Min
 		Max(ctx context.Context, field string, filter StructuredFilter, preloads ...string) (*TData, error)
 		MaxFormat(ctx context.Context, field string, filter StructuredFilter, preloads ...string) (*TResponse, error)
 		MaxWithTx(ctx context.Context, tx *bun.Tx, field string, filter StructuredFilter, preloads ...string) (*TData, error)
@@ -224,7 +209,6 @@ type (
 		MinWithTx(ctx context.Context, tx *bun.Tx, field string, filter StructuredFilter, preloads ...string) (*TData, error)
 		MinWithTxFormat(ctx context.Context, tx *bun.Tx, field string, filter StructuredFilter, preloads ...string) (*TResponse, error)
 
-		// Filter / Pagination
 		Filter(ctx context.Context, filter StructuredFilter) ([]*TData, error)
 		FilterFormat(ctx context.Context, filter StructuredFilter) ([]*TResponse, error)
 		FilterWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter) ([]*TData, error)

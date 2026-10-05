@@ -28,7 +28,7 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	BroadcastService     database.BroadcastService
 	MessageBrokerService database.MessageBrokerService
 
-	PaginationService database.PaginationService[TData, TID]
+	PaginationService database.PaginationServices[TData, TID]
 	Validator         *validator.Validate
 
 	BatchSize     int
