@@ -7,7 +7,6 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// Rollback reverts the most recently applied migration.
 func (s *SQLService) Rollback(ctx context.Context) error {
 	migrator, err := s.provider()
 	if err != nil {
@@ -19,7 +18,6 @@ func (s *SQLService) Rollback(ctx context.Context) error {
 	return nil
 }
 
-// RollbackTo reverts every applied migration newer than version, leaving the database at version.
 func (s *SQLService) RollbackTo(ctx context.Context, version int64) error {
 	migrator, err := s.provider()
 	if err != nil {
@@ -31,7 +29,6 @@ func (s *SQLService) RollbackTo(ctx context.Context, version int64) error {
 	return nil
 }
 
-// Redo reverts the most recently applied migration and applies it again.
 func (s *SQLService) Redo(ctx context.Context) error {
 	migrator, err := s.provider()
 	if err != nil {
@@ -46,7 +43,6 @@ func (s *SQLService) Redo(ctx context.Context) error {
 	return nil
 }
 
-// RollbackSteps reverts the most recent steps migrations, one at a time.
 func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
 	if steps <= 0 {
 		return fmt.Errorf("%w, got %d", ErrInvalidSteps, steps)
@@ -66,7 +62,6 @@ func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
 	return nil
 }
 
-// UpSteps applies the next steps pending migrations, one at a time.
 func (s *SQLService) UpSteps(ctx context.Context, steps int) error {
 	if steps <= 0 {
 		return fmt.Errorf("%w, got %d", ErrInvalidSteps, steps)
@@ -82,24 +77,6 @@ func (s *SQLService) UpSteps(ctx context.Context, steps int) error {
 		if _, err := migrator.UpByOne(ctx); err != nil {
 			return fmt.Errorf("failed to apply step %d of %d: %w", i+1, steps, err)
 		}
-	}
-	return nil
-}
-
-// requireSteps fails before anything runs when fewer than steps migrations are in the given state.
-func requireSteps(ctx context.Context, migrator *goose.Provider, steps int, state goose.State) error {
-	statuses, err := migrator.Status(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get migration status: %w", err)
-	}
-	available := 0
-	for _, st := range statuses {
-		if st.State == state {
-			available++
-		}
-	}
-	if steps > available {
-		return fmt.Errorf("%w: %d requested, %d available", ErrTooManySteps, steps, available)
 	}
 	return nil
 }

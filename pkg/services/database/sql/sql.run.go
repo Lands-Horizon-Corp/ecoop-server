@@ -17,14 +17,13 @@ func (s *SQLService) Run(ctx context.Context) error {
 	}
 	sqldb.SetMaxIdleConns(s.maxIdleConn)
 	sqldb.SetMaxOpenConns(s.maxOpenConn)
-
 	s.sqldb = sqldb
 	s.db = bun.NewDB(sqldb, pgdialect.New())
 	if err := s.Ping(ctx); err != nil {
 		_ = s.Stop(ctx)
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
-	if s.autoMigrate {
+	if s.autoMigrate && s.migrations != nil {
 		if err := s.Migrate(ctx); err != nil {
 			_ = s.Stop(ctx)
 			return fmt.Errorf("failed to run goose migrations: %w", err)

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/qr"
-	qrService "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/qr"
 )
 
 // Regression guards for qr.QRService.
@@ -32,20 +31,53 @@ func sampleQRData() qr.QRData {
 
 func newQR(t testing.TB) qr.QRServices {
 	t.Helper()
-	svc := qrService.NewQRService(qrSecret)
-	return svc
+	return qr.NewQRService(qrSecret)
 }
 
-func TestQRRoundTripKeepsData(t *testing.T) {
+func BenchmarkQRService_RoundTrip(b *testing.B) {
+	svc := newQR(b)
+	data := sampleQRData()
+	b.ReportAllocs()
+	for b.Loop() {
+		enc, err := svc.Encode(bg, &data)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, err := svc.Decode(bg, enc); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkQRService_RoundTripParallel(b *testing.B) {
+	svc := newQR(b)
+	data := sampleQRData()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			enc, err := svc.Encode(bg, &data)
+			if err != nil {
+				b.Error(err)
+				return
+			}
+			if _, err := svc.Decode(bg, enc); err != nil {
+				b.Error(err)
+				return
+			}
+		}
+	})
+}
+
+func TestQRService_RoundTripKeepsData(t *testing.T) {
 	ctx := context.Background()
-	qr := newQR(t)
+	svc := newQR(t)
 	want := sampleQRData()
 
-	enc, err := qr.Encode(ctx, &want)
+	enc, err := svc.Encode(ctx, &want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := qr.Decode(ctx, enc)
+	got, err := svc.Decode(ctx, enc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,9 +87,9 @@ func TestQRRoundTripKeepsData(t *testing.T) {
 }
 
 // Every value must survive Encode -> Decode byte-for-byte, for both fields.
-func TestQRPreservesSpecialData(t *testing.T) {
+func TestQRService_PreservesSpecialData(t *testing.T) {
 	ctx := context.Background()
-	q := newQR(t)
+	svc := newQR(t)
 
 	cases := map[string]string{
 		"empty":               "",
@@ -102,11 +134,11 @@ func TestQRPreservesSpecialData(t *testing.T) {
 			// Put the value in both fields so Data and Type are both covered.
 			want := qr.QRData{Data: value, Type: value}
 
-			enc, err := q.Encode(ctx, &want)
+			enc, err := svc.Encode(ctx, &want)
 			if err != nil {
 				t.Fatalf("encode: %v", err)
 			}
-			got, err := q.Decode(ctx, enc)
+			got, err := svc.Decode(ctx, enc)
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
@@ -122,12 +154,12 @@ func TestQRPreservesSpecialData(t *testing.T) {
 
 // The encoded output goes into a QR code, so it must stay plain base64 text
 // no matter what the input contains.
-func TestQREncodedOutputIsPlainBase64(t *testing.T) {
+func TestQRService_EncodedOutputIsPlainBase64(t *testing.T) {
 	ctx := context.Background()
-	q := newQR(t)
+	svc := newQR(t)
 
 	for _, value := range []string{"🎫", "مرحبا", "a\x00b", `"quoted"`, "全球"} {
-		enc, err := q.Encode(ctx, &qr.QRData{Data: value, Type: "ticket"})
+		enc, err := svc.Encode(ctx, &qr.QRData{Data: value, Type: "ticket"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,16 +176,16 @@ func TestQREncodedOutputIsPlainBase64(t *testing.T) {
 // Invalid UTF-8 bytes (e.g. raw binary or a mis-decoded string) must come back
 // unchanged. sonic does this; the stdlib encoding/json would silently replace
 // them with U+FFFD, so this guards against swapping the JSON library.
-func TestQRPreservesInvalidUTF8(t *testing.T) {
+func TestQRService_PreservesInvalidUTF8(t *testing.T) {
 	ctx := context.Background()
-	q := newQR(t)
+	svc := newQR(t)
 	want := qr.QRData{Data: "ok\xff\xfe\xc3\x28end", Type: "ticket"}
 
-	enc, err := q.Encode(ctx, &want)
+	enc, err := svc.Encode(ctx, &want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := q.Decode(ctx, enc)
+	got, err := svc.Decode(ctx, enc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,38 +202,38 @@ func trunc(s string) string {
 	return s
 }
 
-func TestQREncodeIsNonDeterministic(t *testing.T) {
+func TestQRService_EncodeIsNonDeterministic(t *testing.T) {
 	ctx := context.Background()
-	qr := newQR(t)
+	svc := newQR(t)
 	data := sampleQRData()
 
-	a, _ := qr.Encode(ctx, &data)
-	b, _ := qr.Encode(ctx, &data)
+	a, _ := svc.Encode(ctx, &data)
+	b, _ := svc.Encode(ctx, &data)
 	if a == b {
 		t.Fatal("two encodes produced identical output: nonce is being reused")
 	}
 }
 
-func TestQRRejectsBadInput(t *testing.T) {
+func TestQRService_RejectsBadInput(t *testing.T) {
 	ctx := context.Background()
-	q := newQR(t)
+	svc := newQR(t)
 	data := sampleQRData()
-	enc, _ := q.Encode(ctx, &data)
+	enc, _ := svc.Encode(ctx, &data)
 
 	tampered := []byte(enc)
 	tampered[len(tampered)/2] ^= 1
 
-	other := qrService.NewQRService("a-different-secret")
+	other := qr.NewQRService("a-different-secret")
 
 	cases := map[string]struct {
 		svc   qr.QRServices
 		input string
 	}{
-		"tampered ciphertext": {q, string(tampered)},
+		"tampered ciphertext": {svc, string(tampered)},
 		"wrong secret":        {other, enc},
-		"not base64":          {q, "!!!not-base64!!!"},
-		"too short":           {q, "YWJj"},
-		"empty":               {q, ""},
+		"not base64":          {svc, "!!!not-base64!!!"},
+		"too short":           {svc, "YWJj"},
+		"empty":               {svc, ""},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -214,17 +246,17 @@ func TestQRRejectsBadInput(t *testing.T) {
 
 // Fails if per-call construction of the encoder/decoder/AEAD returns
 // (that version allocated hundreds of KB and dozens of objects per call).
-func TestQRAllocationBudget(t *testing.T) {
+func TestQRService_AllocationBudget(t *testing.T) {
 	ctx := context.Background()
-	qr := newQR(t)
+	svc := newQR(t)
 	data := sampleQRData()
 
 	allocs := testing.AllocsPerRun(200, func() {
-		enc, err := qr.Encode(ctx, &data)
+		enc, err := svc.Encode(ctx, &data)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := qr.Decode(ctx, enc); err != nil {
+		if _, err := svc.Decode(ctx, enc); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -236,7 +268,7 @@ func TestQRAllocationBudget(t *testing.T) {
 }
 
 // 10,000 round trips took ~0.26s when fixed and ~40s with the old per-call setup.
-func TestQRSpeedBudget(t *testing.T) {
+func TestQRService_SpeedBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping timing test in -short mode")
 	}
@@ -244,7 +276,7 @@ func TestQRSpeedBudget(t *testing.T) {
 		t.Skip("skipping timing test under -race (timings are ~14x slower)")
 	}
 	ctx := context.Background()
-	qr := newQR(t)
+	svc := newQR(t)
 	data := sampleQRData()
 
 	const n = 10_000
@@ -252,11 +284,11 @@ func TestQRSpeedBudget(t *testing.T) {
 
 	start := time.Now()
 	for range n {
-		enc, err := qr.Encode(ctx, &data)
+		enc, err := svc.Encode(ctx, &data)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := qr.Decode(ctx, enc); err != nil {
+		if _, err := svc.Decode(ctx, enc); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -266,9 +298,9 @@ func TestQRSpeedBudget(t *testing.T) {
 }
 
 // The service is shared across goroutines; run with -race to catch data races.
-func TestQRConcurrentUse(t *testing.T) {
+func TestQRService_ConcurrentUse(t *testing.T) {
 	ctx := context.Background()
-	qr := newQR(t)
+	svc := newQR(t)
 	data := sampleQRData()
 
 	var wg sync.WaitGroup
@@ -276,12 +308,12 @@ func TestQRConcurrentUse(t *testing.T) {
 	for range 16 {
 		wg.Go(func() {
 			for range 200 {
-				enc, err := qr.Encode(ctx, &data)
+				enc, err := svc.Encode(ctx, &data)
 				if err != nil {
 					errs <- err
 					return
 				}
-				got, err := qr.Decode(ctx, enc)
+				got, err := svc.Decode(ctx, enc)
 				if err != nil {
 					errs <- err
 					return

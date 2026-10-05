@@ -41,7 +41,7 @@ func (s sentinelTarget) service(prefix string) cache.CacheServices {
 
 // TestCacheSentinel_Docker runs the cache contract through the real Sentinel in docker-compose.yml.
 //
-//	docker compose up -d --wait redis-master redis-sentinel
+//	make test-up
 //	go test ./test/regressions/ -run TestCacheSentinel_Docker -v
 func TestCacheSentinel_Docker(t *testing.T) {
 	s := dockerSentinel(t)

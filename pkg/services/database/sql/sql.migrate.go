@@ -41,10 +41,14 @@ func (s *SQLService) Fresh(ctx context.Context) error {
 }
 
 func (s *SQLService) Create(ctx context.Context, name string) error {
-	if err := os.MkdirAll(migrationsDir, 0o755); err != nil {
+	dir, err := s.migrationsPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create migrations directory: %w", err)
 	}
-	if err := goose.Create(nil, migrationsDir, name, "sql"); err != nil {
+	if err := goose.Create(nil, dir, name, "sql"); err != nil {
 		return fmt.Errorf("failed to create migration %q: %w", name, err)
 	}
 	return nil

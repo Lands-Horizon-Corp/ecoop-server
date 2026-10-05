@@ -82,7 +82,7 @@ func TestSQLService_Lifecycle(t *testing.T) {
 	})
 
 	t.Run("Run fails when the database is unreachable", func(t *testing.T) {
-		svc := sqlsvc.NewSQLService("postgres://u:p@"+closedAddr(t)+"/db?sslmode=disable&connect_timeout=2", 1, 1, nil)
+		svc := sqlsvc.NewSQLService("postgres://u:p@"+closedAddr(t)+"/db?sslmode=disable&connect_timeout=2", 1, 1, nil, true, nil)
 		if err := svc.Run(bg); err == nil {
 			_ = svc.Stop(bg)
 			t.Fatal("Run succeeded against a closed port")
@@ -93,7 +93,7 @@ func TestSQLService_Lifecycle(t *testing.T) {
 	})
 
 	t.Run("Run fails on a malformed DSN", func(t *testing.T) {
-		svc := sqlsvc.NewSQLService("not a dsn ://", 1, 1, nil)
+		svc := sqlsvc.NewSQLService("not a dsn ://", 1, 1, nil, true, nil)
 		if err := svc.Run(bg); err == nil {
 			_ = svc.Stop(bg)
 			t.Fatal("Run succeeded with a malformed DSN")
@@ -120,7 +120,7 @@ func TestSQLService_WithAutoMigrateDisabledLeavesMigrationsPending(t *testing.T)
 	e := newSQLEnv(t)
 	e.write(1, "users", `CREATE TABLE users (id bigserial PRIMARY KEY);`, `DROP TABLE users;`)
 
-	svc := sqlsvc.NewSQLService(e.dsn, 2, 5, e.status, sqlsvc.WithAutoMigrate(false))
+	svc := e.newServiceWith(false)
 	if err := svc.Run(bg); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -167,14 +167,69 @@ func TestSQLService_RunWithNoMigrationsIsFine(t *testing.T) {
 
 func TestSQLService_RunWithMissingMigrationsDirectory(t *testing.T) {
 	e := newSQLEnv(t)
-	if err := os.RemoveAll("src"); err != nil {
+	svc := e.newService()
+	if err := os.RemoveAll("src"); err != nil { // the directory vanishes after the service was built
 		t.Fatal(err)
 	}
-	svc := e.newService()
 	if err := svc.Run(bg); err != nil {
 		t.Fatalf("Run without a migrations directory = %v; want it treated as no migrations", err)
 	}
 	_ = svc.Stop(bg)
+}
+
+// A service built without a migrations directory is a plain database connection.
+func TestSQLService_WithoutMigrationsDirectoryOnlyConnects(t *testing.T) {
+	e := newSQLEnv(t)
+	e.write(1, "users", `CREATE TABLE users (id int);`, `DROP TABLE users;`)
+
+	svc := sqlsvc.NewSQLService(e.dsn, 2, 5, nil, true, nil)
+	if err := svc.Run(bg); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Stop(bg) })
+	if err := svc.Ping(bg); err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
+	if e.hasTable("users") {
+		t.Fatal("Run applied migrations without a migrations directory")
+	}
+
+	_, diffErr := svc.Diff(bg, "x", (*dOrg)(nil))
+	calls := map[string]error{
+		"Migrate":    svc.Migrate(bg),
+		"Status":     svc.Status(bg),
+		"Version":    svc.Version(bg),
+		"Rollback":   svc.Rollback(bg),
+		"UpSteps":    svc.UpSteps(bg, 1),
+		"Fresh":      svc.Fresh(bg),
+		"Create":     svc.Create(bg, "x"),
+		"Diff":       diffErr,
+		"RollbackTo": svc.RollbackTo(bg, 0),
+	}
+	for name, err := range calls {
+		if !errors.Is(err, sqlsvc.ErrNoMigrationsDir) {
+			t.Errorf("%s = %v; want ErrNoMigrationsDir", name, err)
+		}
+	}
+}
+
+// The migrations argument must be a directory.
+func TestSQLService_MigrationsPathMustBeADirectory(t *testing.T) {
+	e := newSQLEnv(t)
+	notADir, err := os.CreateTemp(t.TempDir(), "file-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notADir.Close() })
+
+	svc := sqlsvc.NewSQLService(e.dsn, 2, 5, notADir, true, nil)
+	if err := svc.Run(bg); !errors.Is(err, sqlsvc.ErrInvalidMigrationsDir) {
+		_ = svc.Stop(bg)
+		t.Fatalf("Run with a regular file = %v; want ErrInvalidMigrationsDir", err)
+	}
+	if err := svc.Create(bg, "x"); !errors.Is(err, sqlsvc.ErrInvalidMigrationsDir) {
+		t.Fatalf("Create with a regular file = %v; want ErrInvalidMigrationsDir", err)
+	}
 }
 
 func TestSQLService_MigrateAndRollbackOperations(t *testing.T) {
@@ -434,7 +489,7 @@ func TestSQLService_Create(t *testing.T) {
 	t.Run("a hostile name cannot write outside the migrations directory", func(t *testing.T) {
 		_ = svc.Create(bg, "../../escape")
 		var escaped []string
-		_ = filepathWalkFiles(".", func(path string) {
+		_ = walkFiles(".", func(path string) {
 			if strings.Contains(path, "escape") && !strings.HasPrefix(path, e.dir) {
 				escaped = append(escaped, path)
 			}

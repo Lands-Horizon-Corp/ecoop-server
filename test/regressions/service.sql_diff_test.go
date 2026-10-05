@@ -100,88 +100,6 @@ type dPersonV2 struct { // column renamed, same type
 	FullName      string `bun:"full_name,notnull"`
 }
 
-// ---- helpers ----------------------------------------------------------------
-
-// diffApply generates a migration for models, checks it, applies it and returns its text.
-func diffApply(t *testing.T, e *sqlEnv, svc sqlsvc.SQLServices, name string, models ...any) string {
-	t.Helper()
-	path, err := svc.Diff(bg, name, models...)
-	if err != nil {
-		t.Fatalf("Diff(%s): %v", name, err)
-	}
-	if path == "" {
-		t.Fatalf("Diff(%s) found nothing to do", name)
-	}
-	content := readFile(t, path)
-	if !strings.HasPrefix(content, "-- +goose Up\n") || !strings.Contains(content, "\n-- +goose Down\n") {
-		t.Fatalf("Diff(%s) did not write a goose Up/Down file:\n%s", name, content)
-	}
-	if err := svc.Migrate(bg); err != nil {
-		t.Fatalf("Migrate after Diff(%s): %v\n%s", name, err, content)
-	}
-	return content
-}
-
-// requireConverged asserts that the database already matches models: a second Diff has nothing to say.
-func requireConverged(t *testing.T, e *sqlEnv, svc sqlsvc.SQLServices, models ...any) {
-	t.Helper()
-	before := len(e.migrationFiles())
-	path, err := svc.Diff(bg, "converge-check", models...)
-	if err != nil {
-		t.Fatalf("convergence Diff: %v", err)
-	}
-	if path != "" {
-		t.Fatalf("schema did not converge; a second Diff still wants:\n%s", readFile(t, path))
-	}
-	if after := len(e.migrationFiles()); after != before {
-		t.Fatalf("a no-op Diff wrote a file (%d -> %d files)", before, after)
-	}
-}
-
-// settle applies Diff repeatedly until the models and database agree, returning each migration's text.
-// bun adds a NOT NULL column in two phases (add, then SET NOT NULL), so one model change can need two
-// migrations; after is called once per applied migration.
-func settle(t *testing.T, e *sqlEnv, svc sqlsvc.SQLServices, name string, model any, after func()) []string {
-	t.Helper()
-	var contents []string
-	for round := 1; round <= 4; round++ {
-		path, err := svc.Diff(bg, fmt.Sprintf("%s round %d", name, round), model)
-		if err != nil {
-			t.Fatalf("Diff(%s) round %d: %v", name, round, err)
-		}
-		if path == "" {
-			if len(contents) == 0 {
-				t.Fatalf("Diff(%s) found nothing to do", name)
-			}
-			return contents
-		}
-		content := readFile(t, path)
-		if err := svc.Migrate(bg); err != nil {
-			t.Fatalf("Migrate after Diff(%s) round %d: %v\n%s", name, round, err, content)
-		}
-		contents = append(contents, content)
-		if after != nil {
-			after()
-		}
-	}
-	t.Fatalf("Diff(%s) did not converge after 4 migrations", name)
-	return nil
-}
-
-func hasConstraint(e *sqlEnv, table, kind string) int64 {
-	return e.scanInt(`SELECT count(*) FROM information_schema.table_constraints WHERE table_schema='public' AND table_name=$1 AND constraint_type=$2`, table, kind)
-}
-
-func up(content string) string {
-	u, _, _ := strings.Cut(content, "-- +goose Down")
-	return u
-}
-
-func down(content string) string {
-	_, d, _ := strings.Cut(content, "-- +goose Down")
-	return d
-}
-
 // ---- tests ------------------------------------------------------------------
 
 func TestSQLDiff_NewSchemaWithRelations(t *testing.T) {
@@ -189,16 +107,16 @@ func TestSQLDiff_NewSchemaWithRelations(t *testing.T) {
 	svc := e.running()
 	models := []any{(*dTransaction)(nil), (*dAccount)(nil), (*dUser)(nil), (*dOrg)(nil)} // deliberately child-first
 
-	content := diffApply(t, e, svc, "core schema", models...)
+	content := diffApply(t, svc, "core schema", models...)
 	for _, table := range []string{"orgs", "users", "accounts", "transactions"} {
 		if !e.hasTable(table) {
 			t.Fatalf("table %s missing after applying:\n%s", table, content)
 		}
 	}
-	if n := hasConstraint(e, "transactions", "FOREIGN KEY"); n != 1 {
+	if n := e.constraintCount("transactions", "f"); n != 1 {
 		t.Errorf("transactions has %d foreign keys; want 1\n%s", n, content)
 	}
-	if n := hasConstraint(e, "users", "PRIMARY KEY"); n != 1 {
+	if n := e.constraintCount("users", "p"); n != 1 {
 		t.Errorf("users has %d primary keys; want 1", n)
 	}
 	requireConverged(t, e, svc, models...)
@@ -207,7 +125,7 @@ func TestSQLDiff_NewSchemaWithRelations(t *testing.T) {
 
 	// Down must tear it all down in dependency order (children before parents), and Up must restore it.
 	if err := svc.Rollback(bg); err != nil {
-		t.Fatalf("Rollback: %v\n%s", err, down(content))
+		t.Fatalf("Rollback: %v\n%s", err, gooseDown(content))
 	}
 	if e.schema() != "" {
 		t.Fatalf("schema not empty after rollback:\n%s", e.schema())
@@ -248,8 +166,8 @@ func TestSQLDiff_EvolutionHistoryReplaysToTheSameSchema(t *testing.T) {
 			// Rows written under earlier versions must survive every later migration.
 			e.exec(`INSERT INTO items (name, qty) VALUES ($1, $2)`, fmt.Sprintf("row-%d", i), i)
 		}
-		contents := settle(t, e, svc, step.name, step.model, func() { snapshots = append(snapshots, e.schema()) })
-		allUp := up(strings.Join(contents, "\n"))
+		contents := settleModels(t, svc, step.name, []any{step.model}, func() { snapshots = append(snapshots, e.schema()) })
+		allUp := gooseUp(strings.Join(contents, "\n"))
 		for _, frag := range step.expect {
 			if !strings.Contains(allUp, frag) {
 				t.Errorf("%s: Up SQL lacks %q:\n%s", step.name, frag, strings.Join(contents, "\n---\n"))
@@ -275,7 +193,7 @@ func TestSQLDiff_EvolutionHistoryReplaysToTheSameSchema(t *testing.T) {
 	if got := e.scanInt(`SELECT count(*) FROM information_schema.columns WHERE table_name='items' AND column_name='qty' AND data_type='bigint'`); got != 1 {
 		t.Error("qty was not widened to bigint")
 	}
-	if n := hasConstraint(e, "items", "UNIQUE"); n != 1 {
+	if n := e.constraintCount("items", "u"); n != 1 {
 		t.Errorf("items has %d unique constraints; want 1", n)
 	}
 	final := e.schema()
@@ -330,7 +248,7 @@ func TestSQLDiff_RenamedColumn(t *testing.T) {
 	e := newSQLEnv(t)
 	svc := e.running()
 
-	diffApply(t, e, svc, "people", (*dPersonV1)(nil))
+	diffApply(t, svc, "people", (*dPersonV1)(nil))
 	e.exec(`INSERT INTO people (name) VALUES ('Ada'), ('Grace')`)
 
 	path, err := svc.Diff(bg, "rename name to full name", (*dPersonV2)(nil))
@@ -338,7 +256,7 @@ func TestSQLDiff_RenamedColumn(t *testing.T) {
 		t.Fatalf("Diff = %q, %v", path, err)
 	}
 	content := readFile(t, path)
-	upSQL := strings.ToUpper(up(content))
+	upSQL := strings.ToUpper(gooseUp(content))
 
 	// A same-type column swap must be a rename, never drop+add, which would lose the data.
 	if !strings.Contains(upSQL, "RENAME COLUMN") || strings.Contains(upSQL, "DROP COLUMN") {
@@ -365,17 +283,17 @@ func TestSQLDiff_ModelsOmittedFromDiffAreDropped(t *testing.T) {
 	e := newSQLEnv(t)
 	svc := e.running()
 
-	diffApply(t, e, svc, "both", (*dOrg)(nil), (*dPersonV1)(nil))
+	diffApply(t, svc, "both", (*dOrg)(nil), (*dPersonV1)(nil))
 
 	path, err := svc.Diff(bg, "forgot a model", (*dOrg)(nil))
 	if err != nil || path == "" {
 		t.Fatalf("Diff = %q, %v", path, err)
 	}
 	content := readFile(t, path)
-	if !strings.Contains(up(content), "DROP TABLE") || !strings.Contains(up(content), "people") {
+	if !strings.Contains(gooseUp(content), "DROP TABLE") || !strings.Contains(gooseUp(content), "people") {
 		t.Fatalf("an omitted model must show up as DROP TABLE (so reviewers can catch it):\n%s", content)
 	}
-	if !strings.Contains(down(content), "people") {
+	if !strings.Contains(gooseDown(content), "people") {
 		t.Fatalf("Down for a dropped table should mention it:\n%s", content)
 	}
 	// Nothing is applied by Diff itself.
@@ -387,13 +305,13 @@ func TestSQLDiff_ModelsOmittedFromDiffAreDropped(t *testing.T) {
 func TestSQLDiff_DetectsDriftFromManualChanges(t *testing.T) {
 	e := newSQLEnv(t)
 	svc := e.running()
-	diffApply(t, e, svc, "orgs", (*dOrg)(nil))
+	diffApply(t, svc, "orgs", (*dOrg)(nil))
 
 	e.exec(`ALTER TABLE orgs ADD COLUMN hotfix text`)          // someone patched prod by hand
 	e.exec(`ALTER TABLE orgs ALTER COLUMN name DROP NOT NULL`) // and loosened a constraint
 
-	content := diffApply(t, e, svc, "undo manual changes", (*dOrg)(nil))
-	if !strings.Contains(up(content), "DROP COLUMN") || !strings.Contains(up(content), "SET NOT NULL") {
+	content := diffApply(t, svc, "undo manual changes", (*dOrg)(nil))
+	if !strings.Contains(gooseUp(content), "DROP COLUMN") || !strings.Contains(gooseUp(content), "SET NOT NULL") {
 		t.Fatalf("drift was not reverted by the generated migration:\n%s", content)
 	}
 	if e.hasColumn("orgs", "hotfix") {
@@ -405,7 +323,7 @@ func TestSQLDiff_DetectsDriftFromManualChanges(t *testing.T) {
 func TestSQLDiff_NoChangeWritesNothing(t *testing.T) {
 	e := newSQLEnv(t)
 	svc := e.running()
-	diffApply(t, e, svc, "orgs", (*dOrg)(nil))
+	diffApply(t, svc, "orgs", (*dOrg)(nil))
 
 	tmpBefore, _ := filepath.Glob(filepath.Join(os.TempDir(), "goose-diff-*"))
 	for range 3 {
@@ -422,9 +340,9 @@ func TestSQLDiff_BackToBackMigrationsStayOrdered(t *testing.T) {
 	svc := e.running()
 
 	// Generated within the same second: versions must still be strictly increasing and apply cleanly.
-	diffApply(t, e, svc, "one", (*dItemV1)(nil))
-	diffApply(t, e, svc, "two", (*dItemV2)(nil))
-	diffApply(t, e, svc, "three", (*dItemV3)(nil))
+	diffApply(t, svc, "one", (*dItemV1)(nil))
+	diffApply(t, svc, "two", (*dItemV2)(nil))
+	diffApply(t, svc, "three", (*dItemV3)(nil))
 
 	files := e.migrationFiles()
 	if len(files) != 3 {
@@ -478,7 +396,7 @@ func TestSQLDiff_ManyTablesWithForeignKeyChain(t *testing.T) {
 
 	// Twelve tables is too many to spell out, so use eight where each references the previous one.
 	models := []any{(*c8)(nil), (*c7)(nil), (*c6)(nil), (*c5)(nil), (*c4)(nil), (*c3)(nil), (*c2)(nil), (*c1)(nil)}
-	content := diffApply(t, e, svc, "chain", models...)
+	content := diffApply(t, svc, "chain", models...)
 	for i := 1; i <= 8; i++ {
 		if !e.hasTable(fmt.Sprintf("chain_%d", i)) {
 			t.Fatalf("chain_%d missing\n%s", i, content)

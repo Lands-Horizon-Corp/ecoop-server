@@ -3,6 +3,7 @@
 //	go run ./cmd/migrate <command> [args]
 //
 // It reads DATABASE_URL (a .env file is loaded if present) and never applies migrations implicitly.
+// Migration files live in MIGRATIONS_DIR (default src/database/migrations).
 package main
 
 import (
@@ -33,8 +34,22 @@ const usage = `usage: migrate <command> [args]
   diff <name>        apply pending migrations, then write a migration for model changes
                      (models are listed in src/models/models.go)`
 
+const defaultMigrationsDir = "src/database/migrations"
+
 func main() {
 	os.Exit(run(os.Args[1:]))
+}
+
+// openMigrationsDir opens MIGRATIONS_DIR, creating it when missing. The caller closes it.
+func openMigrationsDir() (*os.File, error) {
+	dir := os.Getenv("MIGRATIONS_DIR")
+	if dir == "" {
+		dir = defaultMigrationsDir
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	return os.Open(dir)
 }
 
 func run(args []string) int {
@@ -47,19 +62,25 @@ func run(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	dir, err := openMigrationsDir()
+	if err != nil {
+		return fail("migrations directory: %v", err)
+	}
+	defer dir.Close()
+
 	cmd, rest := args[0], args[1:]
 	if cmd == "create" {
 		if len(rest) != 1 {
 			return fail("create needs a name")
 		}
-		return report(sql.NewSQLService("", 1, 1, nil).Create(ctx, rest[0]))
+		return report(sql.NewSQLService("", 1, 1, dir, false, os.Stdout).Create(ctx, rest[0]))
 	}
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		return fail("DATABASE_URL is not set")
 	}
-	svc := sql.NewSQLService(dsn, 2, 5, os.Stdout, sql.WithAutoMigrate(false))
+	svc := sql.NewSQLService(dsn, 2, 5, dir, false, os.Stdout)
 	if err := svc.Run(ctx); err != nil {
 		return fail("connect: %v", err)
 	}

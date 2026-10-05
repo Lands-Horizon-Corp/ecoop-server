@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
+	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/uptrace/bun"
 )
 
@@ -305,31 +306,6 @@ ALTER TABLE accounts DROP CONSTRAINT accounts_balance_nonneg;
 
 // ---- deployment helpers -----------------------------------------------------
 
-// settleModels runs Diff + Migrate until the database matches models (bun adds NOT NULL columns in
-// two phases) and returns each generated migration.
-func settleModels(t *testing.T, svc sqlsvc.SQLServices, name string, models []any) []string {
-	t.Helper()
-	var out []string
-	for round := 1; round <= 4; round++ {
-		path, err := svc.Diff(bg, fmt.Sprintf("%s r%d", name, round), models...)
-		if err != nil {
-			t.Fatalf("Diff(%s) round %d: %v", name, round, err)
-		}
-		if path == "" {
-			if len(out) == 0 {
-				t.Fatalf("Diff(%s) found nothing to do", name)
-			}
-			return out
-		}
-		out = append(out, readFile(t, path))
-		if err := svc.Migrate(bg); err != nil {
-			t.Fatalf("Migrate after Diff(%s) round %d: %v\n%s", name, round, err, out[len(out)-1])
-		}
-	}
-	t.Fatalf("Diff(%s) did not converge", name)
-	return nil
-}
-
 // bootstrapBank deploys the released schema to e: generated tables, then the hardening migration.
 func bootstrapBank(t *testing.T, e *sqlEnv) sqlsvc.SQLServices {
 	t.Helper()
@@ -362,13 +338,6 @@ func seedBank(t *testing.T, e *sqlEnv, n int, balance int64) []int64 {
 }
 
 var errInsufficientFunds = errors.New("insufficient funds")
-
-func pgCode(err error) string {
-	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
-		return pg.Code
-	}
-	return ""
-}
 
 // bankTransfer moves amount from one account to another as a single ACID transaction: an idempotent
 // transaction row, row locks taken in id order, the balance update, and a balanced pair of ledger entries.
@@ -465,34 +434,45 @@ func accountsChecksum(e *sqlEnv) string {
 	return s
 }
 
-func (e *sqlEnv) countTables(names []string) int {
-	n := 0
-	for _, name := range names {
-		if e.hasTable(name) {
-			n++
-		}
-	}
-	return n
-}
-
 func (e *sqlEnv) triggerCount() int64 {
 	return e.scanInt(`SELECT count(*) FROM pg_trigger WHERE tgname IN ('ledger_no_update', 'ledger_balanced_trg')`)
 }
 
-func (e *sqlEnv) gooseRows() int64 {
-	return e.scanInt(`SELECT count(*) FROM goose_db_version WHERE version_id > 0`)
-}
-
-// versionOutput returns the version printed by Version.
-func (e *sqlEnv) versionOutput(svc sqlsvc.SQLServices) int64 {
-	e.t.Helper()
-	e.resetStatusOutput()
-	if err := svc.Version(bg); err != nil {
-		e.t.Fatalf("Version: %v", err)
+// transferLoad runs workers moving random amounts between ids until each did perWorker transfers, or
+// until stop is closed when perWorker is 0. Only unexpected errors are returned.
+func transferLoad(e *sqlEnv, ids []int64, workers, perWorker int, stop <-chan struct{}) (committed int64, failures []error) {
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+		ok atomic.Int64
+	)
+	for w := range workers {
+		wg.Go(func() {
+			rng := rand.New(rand.NewSource(int64(w) + 1))
+			for i := 0; perWorker == 0 || i < perWorker; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				from := ids[rng.Intn(len(ids))]
+				to := ids[rng.Intn(len(ids))]
+				if from == to {
+					continue
+				}
+				key := fmt.Sprintf("load-%d-%d-%d", w, i, time.Now().UnixNano())
+				switch err := bankTransfer(bg, e.db, key, from, to, int64(rng.Intn(5_000)+1)); {
+				case err == nil:
+					ok.Add(1)
+				case errors.Is(err, errInsufficientFunds):
+				default:
+					mu.Lock()
+					failures = append(failures, err)
+					mu.Unlock()
+				}
+			}
+		})
 	}
-	var v int64
-	if _, err := fmt.Sscanf(strings.TrimSpace(e.statusOutput()), "database version: %d", &v); err != nil {
-		e.t.Fatalf("cannot parse Version output %q: %v", e.statusOutput(), err)
-	}
-	return v
+	wg.Wait()
+	return ok.Load(), failures
 }

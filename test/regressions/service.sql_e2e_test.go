@@ -5,12 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,45 +17,6 @@ import (
 
 // Migration end-to-end tests: the whole path from an empty database to a loaded, evolving bank,
 // checking the ACID properties a ledger needs at each step of the migration lifecycle.
-
-// transferLoad runs workers moving random amounts between ids until each did perWorker transfers, or
-// until stop is closed when perWorker is 0. Only unexpected errors are returned.
-func transferLoad(e *sqlEnv, ids []int64, workers, perWorker int, stop <-chan struct{}) (committed int64, failures []error) {
-	var (
-		wg sync.WaitGroup
-		mu sync.Mutex
-		ok atomic.Int64
-	)
-	for w := range workers {
-		wg.Go(func() {
-			rng := rand.New(rand.NewSource(int64(w) + 1))
-			for i := 0; perWorker == 0 || i < perWorker; i++ {
-				select {
-				case <-stop:
-					return
-				default:
-				}
-				from := ids[rng.Intn(len(ids))]
-				to := ids[rng.Intn(len(ids))]
-				if from == to {
-					continue
-				}
-				key := fmt.Sprintf("load-%d-%d-%d", w, i, time.Now().UnixNano())
-				switch err := bankTransfer(bg, e.db, key, from, to, int64(rng.Intn(5_000)+1)); {
-				case err == nil:
-					ok.Add(1)
-				case errors.Is(err, errInsufficientFunds):
-				default:
-					mu.Lock()
-					failures = append(failures, err)
-					mu.Unlock()
-				}
-			}
-		})
-	}
-	wg.Wait()
-	return ok.Load(), failures
-}
 
 // Happy: a brand-new environment is built from nothing into the full, hardened, drift-free schema.
 func TestMigrationE2E_HappyBootstrapFromAnEmptyDatabase(t *testing.T) {

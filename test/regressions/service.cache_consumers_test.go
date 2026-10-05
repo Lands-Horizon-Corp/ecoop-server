@@ -131,7 +131,7 @@ func runConsumerScenario(t *testing.T, c cache.CacheServices) {
 	})
 }
 
-func TestConsumers_RunOnAnyCacheImplementation(t *testing.T) {
+func TestCacheConsumers_RunOnAnyCacheImplementation(t *testing.T) {
 	t.Run("memory", func(t *testing.T) {
 		runConsumerScenario(t, newMemoryCache())
 	})
@@ -142,7 +142,7 @@ func TestConsumers_RunOnAnyCacheImplementation(t *testing.T) {
 	})
 }
 
-func TestConsumers_ErrorsPropagateThroughInterface(t *testing.T) {
+func TestCacheConsumers_ErrorsPropagateThroughInterface(t *testing.T) {
 	ctx := context.Background()
 	errBackend := errors.New("backend down")
 
@@ -176,7 +176,7 @@ var (
 	_ cache.CacheServices = (*memoryCache)(nil)
 )
 
-func TestCacheServices_ConcreteTypeExposesOnlyTheInterface(t *testing.T) {
+func TestCacheService_ExposesOnlyTheInterface(t *testing.T) {
 	iface := reflect.TypeFor[cache.CacheServices]()
 	svc := cache.NewCacheService([]string{"redis://127.0.0.1:1"}, "", "", "")
 	concrete := reflect.TypeOf(svc)

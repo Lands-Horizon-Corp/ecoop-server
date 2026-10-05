@@ -10,7 +10,6 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// Status prints every migration with whether it is applied or pending.
 func (s *SQLService) Status(ctx context.Context) error {
 	migrator, err := s.provider()
 	if errors.Is(err, goose.ErrNoMigrations) {
@@ -38,7 +37,6 @@ func (s *SQLService) Status(ctx context.Context) error {
 	return w.Flush()
 }
 
-// Version prints the version of the most recently applied migration (0 if none).
 func (s *SQLService) Version(ctx context.Context) error {
 	migrator, err := s.provider()
 	if errors.Is(err, goose.ErrNoMigrations) {

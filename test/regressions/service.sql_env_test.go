@@ -1,8 +1,8 @@
 package regressions
 
 import (
-	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -14,13 +14,11 @@ import (
 	"time"
 
 	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// The SQL tests run against the Postgres in docker-compose.yml:
-//
-//	docker compose up -d --wait postgres
-//
+// The SQL tests run against the Postgres in docker-compose.yml (`make test-up`).
 // SQL_TEST_DSN overrides the target. Each test gets its own throwaway database and a
 // temp working directory, so the relative migrations directory never touches the repo.
 
@@ -114,6 +112,11 @@ func (e *sqlEnv) dropDatabase() {
 	}
 }
 
+// gooseBody renders a goose migration file from its Up and Down SQL.
+func gooseBody(up, down string) string {
+	return "-- +goose Up\n" + up + "\n\n-- +goose Down\n" + down + "\n"
+}
+
 // writeNext adds a hand-written goose migration whose version is just past every existing one.
 func (e *sqlEnv) writeNext(name, up, down string) string {
 	e.t.Helper()
@@ -129,37 +132,46 @@ func (e *sqlEnv) writeNext(name, up, down string) string {
 		}
 	}
 	path := filepath.Join(e.dir, fmt.Sprintf("%d_%s.sql", max+1, name))
-	body := "-- +goose Up\n" + up + "\n\n-- +goose Down\n" + down + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(gooseBody(up, down)), 0o644); err != nil {
 		e.t.Fatal(err)
 	}
 	return path
 }
 
-// newService returns a service that has not been started.
+// write adds a hand-written goose migration with an explicit version number.
+func (e *sqlEnv) write(version int64, name, up, down string) {
+	e.t.Helper()
+	path := filepath.Join(e.dir, fmt.Sprintf("%05d_%s.sql", version, name))
+	if err := os.WriteFile(path, []byte(gooseBody(up, down)), 0o644); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// newService returns an auto-migrating service on this env's migrations directory that has not been started.
 func (e *sqlEnv) newService() sqlsvc.SQLServices {
-	return sqlsvc.NewSQLService(e.dsn, 2, 8, e.status)
+	e.t.Helper()
+	return e.newServiceWith(true)
+}
+
+func (e *sqlEnv) newServiceWith(autoMigrate bool) sqlsvc.SQLServices {
+	e.t.Helper()
+	dir, err := os.Open(e.dir)
+	if err != nil {
+		e.t.Fatalf("open migrations directory: %v", err)
+	}
+	e.t.Cleanup(func() { _ = dir.Close() })
+	return sqlsvc.NewSQLService(e.dsn, 2, 8, dir, autoMigrate, e.status)
 }
 
 // running returns a started service that is stopped when the test ends.
 func (e *sqlEnv) running() sqlsvc.SQLServices {
 	e.t.Helper()
 	svc := e.newService()
-	if err := svc.Run(context.Background()); err != nil {
+	if err := svc.Run(bg); err != nil {
 		e.t.Fatalf("run: %v", err)
 	}
-	e.t.Cleanup(func() { _ = svc.Stop(context.Background()) })
+	e.t.Cleanup(func() { _ = svc.Stop(bg) })
 	return svc
-}
-
-// write adds a hand-written goose migration with an explicit version number.
-func (e *sqlEnv) write(version int64, name, up, down string) {
-	e.t.Helper()
-	body := "-- +goose Up\n" + up + "\n\n-- +goose Down\n" + down + "\n"
-	path := filepath.Join(e.dir, fmt.Sprintf("%05d_%s.sql", version, name))
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		e.t.Fatal(err)
-	}
 }
 
 func (e *sqlEnv) exec(query string, args ...any) {
@@ -255,26 +267,48 @@ func (e *sqlEnv) migrationFiles() []string {
 	return files
 }
 
-func readFile(t *testing.T, path string) string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+// countTables reports how many of names exist as tables.
+func (e *sqlEnv) countTables(names []string) int {
+	n := 0
+	for _, name := range names {
+		if e.hasTable(name) {
+			n++
+		}
 	}
-	return string(b)
+	return n
 }
 
-var bg = context.Background()
+// constraintCount counts constraints of a pg_constraint kind ('f' foreign key, 'u' unique, 'c' check).
+func (e *sqlEnv) constraintCount(table, kind string) int64 {
+	e.t.Helper()
+	return e.scanInt(`SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
+		WHERE t.relname = $1 AND c.contype = $2`, table, kind)
+}
 
-// filepathWalkFiles calls fn for every regular file under root.
-func filepathWalkFiles(root string, fn func(path string)) error {
-	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() {
-			fn(path)
-		}
-		return nil
-	})
+// gooseRows counts applied migration records, excluding goose's version-0 bootstrap row.
+func (e *sqlEnv) gooseRows() int64 {
+	e.t.Helper()
+	return e.scanInt(`SELECT count(*) FROM goose_db_version WHERE version_id > 0`)
+}
+
+// versionOutput returns the version printed by svc.Version.
+func (e *sqlEnv) versionOutput(svc sqlsvc.SQLServices) int64 {
+	e.t.Helper()
+	e.resetStatusOutput()
+	if err := svc.Version(bg); err != nil {
+		e.t.Fatalf("Version: %v", err)
+	}
+	var v int64
+	if _, err := fmt.Sscanf(strings.TrimSpace(e.statusOutput()), "database version: %d", &v); err != nil {
+		e.t.Fatalf("cannot parse Version output %q: %v", e.statusOutput(), err)
+	}
+	return v
+}
+
+// pgCode returns the SQLSTATE of a Postgres error, or "" when err is not one.
+func pgCode(err error) string {
+	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
+		return pg.Code
+	}
+	return ""
 }

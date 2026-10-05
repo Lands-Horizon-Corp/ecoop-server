@@ -12,7 +12,7 @@ import (
 
 // TestCacheService_Docker runs the cache contract against the real Redis in docker-compose.yml.
 //
-//	docker compose up -d --wait redis
+//	make test-up
 //	go test ./test/regressions/ -run TestCacheService_Docker -v
 //
 // REDIS_TEST_URL (default redis://localhost:6379/0) and REDIS_TEST_PASSWORD override the target.

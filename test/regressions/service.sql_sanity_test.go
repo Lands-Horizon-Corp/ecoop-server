@@ -126,7 +126,7 @@ func TestMigrationSanity_SadDriftAndPendingMigrationsAreCaught(t *testing.T) {
 		t.Fatalf("Diff did not report the drift: %q, %v", path, err)
 	}
 	content := readFile(t, path)
-	if !strings.Contains(up(content), "DROP COLUMN") || !strings.Contains(up(content), "sneaky") {
+	if !strings.Contains(gooseUp(content), "DROP COLUMN") || !strings.Contains(gooseUp(content), "sneaky") {
 		t.Fatalf("the drift migration should remove the manual column:\n%s", content)
 	}
 

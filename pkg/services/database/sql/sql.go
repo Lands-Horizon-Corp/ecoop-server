@@ -12,9 +12,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// migrationsDir is relative to the working directory the service runs from.
-const migrationsDir = "src/database/migrations"
-
 type SQLService struct {
 	dsn         string
 	maxIdleConn int
@@ -22,36 +19,31 @@ type SQLService struct {
 	autoMigrate bool
 	db          *bun.DB
 	sqldb       *sql.DB
-	file        *os.File
+	migrations  *os.File // opened migrations directory; nil turns migration features off
+	output      io.Writer
 }
 
-// Option customizes a SQLService.
-type Option func(*SQLService)
-
-// WithAutoMigrate controls whether Run applies pending migrations (default true).
-// Tools such as the migration CLI turn it off so they can inspect or step migrations themselves.
-func WithAutoMigrate(enabled bool) Option {
-	return func(s *SQLService) { s.autoMigrate = enabled }
-}
-
+// NewSQLService builds a service whose migrations live in the directory migrations points at.
+// The caller opens and closes that directory. Pass nil for a service that only needs a connection
+// (a read replica, say): Run then skips migrating and the migration methods return ErrNoMigrationsDir.
+// autoMigrate makes Run apply pending migrations; the migration CLI passes false to step them itself.
+// Status and Version print to output (nil means os.Stdout).
 func NewSQLService(
 	dsn string,
 	maxIdleConn int,
 	maxOpenConn int,
-	file *os.File,
-	opts ...Option,
+	migrations *os.File,
+	autoMigrate bool,
+	output io.Writer,
 ) SQLServices {
-	s := &SQLService{
+	return &SQLService{
 		dsn:         dsn,
 		maxIdleConn: maxIdleConn,
 		maxOpenConn: maxOpenConn,
-		autoMigrate: true,
-		file:        file,
+		autoMigrate: autoMigrate,
+		migrations:  migrations,
+		output:      output,
 	}
-	for _, opt := range opts {
-		opt(s)
-	}
-	return s
 }
 
 func (s *SQLService) Client() *bun.DB {
@@ -65,22 +57,39 @@ func (s *SQLService) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
-// provider builds a goose provider per call so migration files created after Run are picked up.
-// A Postgres advisory lock serializes migration runs, so replicas starting together cannot race.
 func (s *SQLService) provider() (*goose.Provider, error) {
 	if s.sqldb == nil {
 		return nil, ErrNotInitialized
+	}
+	dir, err := s.migrationsPath()
+	if err != nil {
+		return nil, err
 	}
 	locker, err := lock.NewPostgresSessionLocker(lock.WithLockTimeout(1, 300))
 	if err != nil {
 		return nil, fmt.Errorf("creating migration lock: %w", err)
 	}
-	return goose.NewProvider(goose.DialectPostgres, s.sqldb, os.DirFS(migrationsDir), goose.WithSessionLocker(locker))
+	return goose.NewProvider(goose.DialectPostgres, s.sqldb, os.DirFS(dir), goose.WithSessionLocker(locker))
+}
+
+// migrationsPath returns the path of the migrations directory the service was given.
+func (s *SQLService) migrationsPath() (string, error) {
+	if s.migrations == nil {
+		return "", ErrNoMigrationsDir
+	}
+	info, err := s.migrations.Stat()
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidMigrationsDir, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%w: %s is not a directory", ErrInvalidMigrationsDir, s.migrations.Name())
+	}
+	return s.migrations.Name(), nil
 }
 
 func (s *SQLService) out() io.Writer {
-	if s.file != nil {
-		return s.file
+	if s.output != nil {
+		return s.output
 	}
 	return os.Stdout
 }

@@ -62,7 +62,7 @@ func requireSafeOutcome(t *testing.T, e *sqlEnv, svc sqlsvc.SQLServices, name st
 func TestSQLDiff_StringDefaultOnExistingTableIsSafe(t *testing.T) {
 	e := newSQLEnv(t)
 	svc := e.running()
-	diffApply(t, e, svc, "settings", (*dSettingsV1)(nil))
+	diffApply(t, svc, "settings", (*dSettingsV1)(nil))
 	e.exec(`INSERT INTO settings (name) VALUES ('a'), ('b')`)
 
 	requireSafeOutcome(t, e, svc, "add mode", (*dSettingsV2)(nil))
@@ -83,7 +83,7 @@ func TestSQLDiff_InvalidMigrationErrorIsDistinguishable(t *testing.T) {
 	svc := e.running()
 	// A hand-made drift the diff will try to revert, combined with a table that has a dependent view:
 	// dropping the column fails, which must surface as ErrInvalidMigration rather than a saved file.
-	diffApply(t, e, svc, "settings", (*dSettingsV1)(nil))
+	diffApply(t, svc, "settings", (*dSettingsV1)(nil))
 	e.exec(`ALTER TABLE settings ADD COLUMN extra text`)
 	e.exec(`CREATE VIEW settings_view AS SELECT id, extra FROM settings`)
 
