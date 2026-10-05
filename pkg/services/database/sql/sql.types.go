@@ -20,7 +20,7 @@ type SQLServices interface {
 	Version(ctx context.Context) error
 	Fresh(ctx context.Context) error
 	Create(ctx context.Context, name string) error
-	Diff(ctx context.Context, name string, models ...any) (string, error)
+	Diff(ctx context.Context, name string) (string, error)
 	RollbackSteps(ctx context.Context, steps int) error
 	UpSteps(ctx context.Context, steps int) error
 }

@@ -120,6 +120,12 @@ func gooseBody(up, down string) string {
 // writeNext adds a hand-written goose migration whose version is just past every existing one.
 func (e *sqlEnv) writeNext(name, up, down string) string {
 	e.t.Helper()
+	return e.writeNextBody(name, gooseBody(up, down))
+}
+
+// writeNextBody is writeNext for a migration file whose full text the caller controls.
+func (e *sqlEnv) writeNextBody(name, body string) string {
+	e.t.Helper()
 	var max int64
 	entries, err := os.ReadDir(e.dir)
 	if err != nil {
@@ -132,7 +138,7 @@ func (e *sqlEnv) writeNext(name, up, down string) string {
 		}
 	}
 	path := filepath.Join(e.dir, fmt.Sprintf("%d_%s.sql", max+1, name))
-	if err := os.WriteFile(path, []byte(gooseBody(up, down)), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		e.t.Fatal(err)
 	}
 	return path
@@ -153,14 +159,14 @@ func (e *sqlEnv) newService() sqlsvc.SQLServices {
 	return e.newServiceWith(true)
 }
 
-func (e *sqlEnv) newServiceWith(autoMigrate bool) sqlsvc.SQLServices {
+func (e *sqlEnv) newServiceWith(autoMigrate bool, models ...any) sqlsvc.SQLServices {
 	e.t.Helper()
 	dir, err := os.Open(e.dir)
 	if err != nil {
 		e.t.Fatalf("open migrations directory: %v", err)
 	}
 	e.t.Cleanup(func() { _ = dir.Close() })
-	return sqlsvc.NewSQLService(e.dsn, 2, 8, dir, autoMigrate, e.status)
+	return sqlsvc.NewSQLService(e.dsn, 2, 8, dir, autoMigrate, e.status, models)
 }
 
 // running returns a started service that is stopped when the test ends.
@@ -172,6 +178,28 @@ func (e *sqlEnv) running() sqlsvc.SQLServices {
 	}
 	e.t.Cleanup(func() { _ = svc.Stop(bg) })
 	return svc
+}
+
+// diff runs Diff through a short-lived service that holds models, since a service's models are fixed at construction.
+func (e *sqlEnv) diff(name string, models ...any) (string, error) {
+	e.t.Helper()
+	svc := e.newServiceWith(false, models...)
+	if err := svc.Run(bg); err != nil {
+		e.t.Fatalf("run: %v", err)
+	}
+	defer func() { _ = svc.Stop(bg) }()
+	return svc.Diff(bg, name)
+}
+
+// migrate applies pending migrations through a short-lived service.
+func (e *sqlEnv) migrate() error {
+	e.t.Helper()
+	svc := e.newServiceWith(false)
+	if err := svc.Run(bg); err != nil {
+		e.t.Fatalf("run: %v", err)
+	}
+	defer func() { _ = svc.Stop(bg) }()
+	return svc.Migrate(bg)
 }
 
 func (e *sqlEnv) exec(query string, args ...any) {

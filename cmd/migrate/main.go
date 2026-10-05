@@ -73,14 +73,14 @@ func run(args []string) int {
 		if len(rest) != 1 {
 			return fail("create needs a name")
 		}
-		return report(sql.NewSQLService("", 1, 1, dir, false, os.Stdout).Create(ctx, rest[0]))
+		return report(sql.NewSQLService("", 1, 1, dir, false, os.Stdout, nil).Create(ctx, rest[0]))
 	}
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		return fail("DATABASE_URL is not set")
 	}
-	svc := sql.NewSQLService(dsn, 2, 5, dir, false, os.Stdout)
+	svc := sql.NewSQLService(dsn, 2, 5, dir, false, os.Stdout, models.All())
 	if err := svc.Run(ctx); err != nil {
 		return fail("connect: %v", err)
 	}
@@ -133,7 +133,7 @@ func diff(ctx context.Context, svc sql.SQLServices, name string) int {
 	if err := svc.Migrate(ctx); err != nil {
 		return fail("applying pending migrations: %v", err)
 	}
-	path, err := svc.Diff(ctx, name, models.All()...)
+	path, err := svc.Diff(ctx, name)
 	switch {
 	case errors.Is(err, sql.ErrNoModels):
 		return fail("no models registered: add them to src/models/models.go")

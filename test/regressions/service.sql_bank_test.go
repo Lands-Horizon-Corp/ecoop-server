@@ -310,7 +310,7 @@ ALTER TABLE accounts DROP CONSTRAINT accounts_balance_nonneg;
 func bootstrapBank(t *testing.T, e *sqlEnv) sqlsvc.SQLServices {
 	t.Helper()
 	svc := e.running()
-	settleModels(t, svc, "bank baseline", bankModels())
+	settleModels(t, e, "bank baseline", bankModels())
 	e.writeNext("bank_hardening", bankHardeningUp, bankHardeningDown)
 	if err := svc.Migrate(bg); err != nil {
 		t.Fatalf("applying the hardening migration: %v", err)

@@ -24,7 +24,7 @@ func TestMigrationE2E_HappyBootstrapFromAnEmptyDatabase(t *testing.T) {
 	if e.schema() != "" {
 		t.Fatal("the test database is not empty")
 	}
-	svc := bootstrapBank(t, e)
+	bootstrapBank(t, e)
 
 	if got := e.countTables(bankTables); got != len(bankTables) {
 		t.Fatalf("%d of %d tables created", got, len(bankTables))
@@ -43,7 +43,7 @@ func TestMigrationE2E_HappyBootstrapFromAnEmptyDatabase(t *testing.T) {
 			t.Fatalf("index %s is missing", idx)
 		}
 	}
-	requireConverged(t, e, svc, bankModels()...)
+	requireConverged(t, e, bankModels()...)
 	seedBank(t, e, 3, 10_000)
 	requireBankInvariants(t, e, 3, 10_000)
 }
@@ -221,8 +221,8 @@ func TestMigrationE2E_HappyOnlineMigrationUnderLoad(t *testing.T) {
 
 	// Author the release on a scratch environment, without load, so the files exist before the rollout.
 	scratch := e.sibling()
-	author := scratch.running()
-	settleModels(t, author, "release v2", bankModelsV2())
+	scratch.running() // applies the baseline, so the release diff has nothing pending
+	settleModels(t, scratch, "release v2", bankModelsV2())
 
 	stop := make(chan struct{})
 	var (
@@ -301,7 +301,7 @@ func TestMigrationE2E_HappyDataSurvivesTheMigrationLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	same("a rollback and re-apply")
-	settleModels(t, restarted, "release v2", bankModelsV2())
+	settleModels(t, e, "release v2", bankModelsV2())
 	same("a schema release")
 }
 
@@ -394,7 +394,7 @@ func TestMigrationE2E_HappyFullLifecycleExercisesEveryServiceMethod(t *testing.T
 	}
 
 	// Diff, Migrate: the released schema, then the hand-written hardening
-	settleModels(t, svc, "bank baseline", bankModels())
+	settleModels(t, e, "bank baseline", bankModels())
 	baseChecks := e.scanInt(`SELECT count(*) FROM pg_constraint WHERE contype = 'c'`)
 	e.writeNext("bank_hardening", bankHardeningUp, bankHardeningDown)
 	if err := svc.Migrate(bg); err != nil {
@@ -431,7 +431,7 @@ func TestMigrationE2E_HappyFullLifecycleExercisesEveryServiceMethod(t *testing.T
 		t.Fatal(err)
 	}
 	want := accountsChecksum(e)
-	settleModels(t, svc, "release v2", bankModelsV2())
+	settleModels(t, e, "release v2", bankModelsV2())
 	if accountsChecksum(e) != want {
 		t.Fatal("the release changed data")
 	}
@@ -451,7 +451,7 @@ func TestMigrationE2E_HappyFullLifecycleExercisesEveryServiceMethod(t *testing.T
 	if e.countTables(bankTables) != len(bankTables) || e.scanInt(`SELECT count(*) FROM accounts`) != 0 {
 		t.Fatal("Fresh did not rebuild an empty schema")
 	}
-	requireConverged(t, e, svc, bankModelsV2()...)
+	requireConverged(t, e, bankModelsV2()...)
 
 	// Stop
 	if err := svc.Stop(bg); err != nil {

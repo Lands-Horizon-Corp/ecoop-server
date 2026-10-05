@@ -20,7 +20,7 @@ func TestMigrationCanary_HappyCanaryThenFleetConverge(t *testing.T) {
 	}
 
 	canaryEnv := prodEnv.sibling()
-	canary := canaryEnv.running() // deployed from the same files as production
+	canaryEnv.running() // deployed from the same files as production
 	canaryIDs := seedBank(t, canaryEnv, 3, 80_000)
 	if err := bankTransfer(bg, canaryEnv.db, "canary-1", canaryIDs[0], canaryIDs[1], 1_000); err != nil {
 		t.Fatal(err)
@@ -28,7 +28,7 @@ func TestMigrationCanary_HappyCanaryThenFleetConverge(t *testing.T) {
 	canaryBefore := accountsChecksum(canaryEnv)
 
 	// Release the next version to the canary only.
-	settleModels(t, canary, "release v2", bankModelsV2())
+	settleModels(t, canaryEnv, "release v2", bankModelsV2())
 	if accountsChecksum(canaryEnv) != canaryBefore {
 		t.Fatal("the release changed the canary's data")
 	}
@@ -36,7 +36,7 @@ func TestMigrationCanary_HappyCanaryThenFleetConverge(t *testing.T) {
 		t.Fatal("the canary did not receive the release")
 	}
 	requireBankInvariants(t, canaryEnv, 3, 80_000)
-	requireConverged(t, canaryEnv, canary, bankModelsV2()...)
+	requireConverged(t, canaryEnv, bankModelsV2()...)
 
 	// The canary is healthy, so promote to production.
 	prodBefore := accountsChecksum(prodEnv)
@@ -103,7 +103,7 @@ func TestMigrationCanary_HappyRollbackRestoresSchemaAndData(t *testing.T) {
 	}
 	schemaBefore, dataBefore := e.schema(), accountsChecksum(e)
 
-	applied := settleModels(t, canary, "release v2", bankModelsV2())
+	applied := settleModels(t, e, "release v2", bankModelsV2())
 	schemaAfter := e.schema()
 	if schemaAfter == schemaBefore {
 		t.Fatal("the release did not change the schema")
@@ -166,7 +166,7 @@ func TestMigrationCanary_SadLockContentionTimesOutWithoutChange(t *testing.T) {
 // Happy: a staged rollout, canary then two tenants, ends with every database on the same schema and version.
 func TestMigrationCanary_HappyStagedRolloutAcrossTenants(t *testing.T) {
 	canaryEnv := newSQLEnv(t)
-	canary := bootstrapBank(t, canaryEnv)
+	bootstrapBank(t, canaryEnv)
 
 	tenants := []struct {
 		env      *sqlEnv
@@ -185,7 +185,7 @@ func TestMigrationCanary_HappyStagedRolloutAcrossTenants(t *testing.T) {
 	}
 	seedBank(t, canaryEnv, 2, 20_000)
 
-	settleModels(t, canary, "release v2", bankModelsV2())
+	settleModels(t, canaryEnv, "release v2", bankModelsV2())
 	for i, tenant := range tenants {
 		sum := accountsChecksum(tenant.env)
 		if tenant.env.hasColumn("accounts", "risk_score") {

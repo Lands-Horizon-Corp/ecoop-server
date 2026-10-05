@@ -53,8 +53,8 @@ func TestMigrationSanity_HappyEveryMigrationIsReversible(t *testing.T) {
 // Happy: the migrations produce exactly the schema the models describe, so CI sees no drift.
 func TestMigrationSanity_HappyModelsMatchMigratedSchema(t *testing.T) {
 	e := newSQLEnv(t)
-	svc := bootstrapBank(t, e)
-	requireConverged(t, e, svc, bankModels()...)
+	bootstrapBank(t, e)
+	requireConverged(t, e, bankModels()...)
 }
 
 // Sad: two migrations sharing a version are refused before anything runs.
@@ -121,7 +121,7 @@ func TestMigrationSanity_SadDriftAndPendingMigrationsAreCaught(t *testing.T) {
 	svc := bootstrapBank(t, e)
 
 	e.exec(`ALTER TABLE customers ADD COLUMN sneaky text`) // a hotfix applied by hand, never migrated
-	path, err := svc.Diff(bg, "catch drift", bankModels()...)
+	path, err := e.diff("catch drift", bankModels()...)
 	if err != nil || path == "" {
 		t.Fatalf("Diff did not report the drift: %q, %v", path, err)
 	}
@@ -131,11 +131,11 @@ func TestMigrationSanity_SadDriftAndPendingMigrationsAreCaught(t *testing.T) {
 	}
 
 	// The generated file is unapplied, so a second diff must refuse rather than stack duplicates.
-	if _, err := svc.Diff(bg, "again", bankModels()...); !errors.Is(err, sqlsvc.ErrPendingMigrations) {
+	if _, err := e.diff("again", bankModels()...); !errors.Is(err, sqlsvc.ErrPendingMigrations) {
 		t.Fatalf("Diff with a pending migration = %v; want ErrPendingMigrations", err)
 	}
 	if err := svc.Migrate(bg); err != nil {
 		t.Fatal(err)
 	}
-	requireConverged(t, e, svc, bankModels()...)
+	requireConverged(t, e, bankModels()...)
 }

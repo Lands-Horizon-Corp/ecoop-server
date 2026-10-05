@@ -19,15 +19,11 @@ type SQLService struct {
 	autoMigrate bool
 	db          *bun.DB
 	sqldb       *sql.DB
-	migrations  *os.File // opened migrations directory; nil turns migration features off
+	migrations  *os.File
 	output      io.Writer
+	models      []any
 }
 
-// NewSQLService builds a service whose migrations live in the directory migrations points at.
-// The caller opens and closes that directory. Pass nil for a service that only needs a connection
-// (a read replica, say): Run then skips migrating and the migration methods return ErrNoMigrationsDir.
-// autoMigrate makes Run apply pending migrations; the migration CLI passes false to step them itself.
-// Status and Version print to output (nil means os.Stdout).
 func NewSQLService(
 	dsn string,
 	maxIdleConn int,
@@ -35,6 +31,7 @@ func NewSQLService(
 	migrations *os.File,
 	autoMigrate bool,
 	output io.Writer,
+	models []any,
 ) SQLServices {
 	return &SQLService{
 		dsn:         dsn,
@@ -43,6 +40,7 @@ func NewSQLService(
 		autoMigrate: autoMigrate,
 		migrations:  migrations,
 		output:      output,
+		models:      models,
 	}
 }
 
@@ -72,7 +70,6 @@ func (s *SQLService) provider() (*goose.Provider, error) {
 	return goose.NewProvider(goose.DialectPostgres, s.sqldb, os.DirFS(dir), goose.WithSessionLocker(locker))
 }
 
-// migrationsPath returns the path of the migrations directory the service was given.
 func (s *SQLService) migrationsPath() (string, error) {
 	if s.migrations == nil {
 		return "", ErrNoMigrationsDir

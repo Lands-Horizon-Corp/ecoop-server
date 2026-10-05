@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,57 @@ func nextMigrationPath(dir, slug string) (string, error) {
 
 func gooseFile(up, down string) string {
 	return "-- +goose Up\n" + strings.TrimSpace(up) + "\n\n-- +goose Down\n" + strings.TrimSpace(down) + "\n"
+}
+
+// orderStatements puts the statements bun generated into dependency order. bun walks its change set in
+// map order, so it can emit a foreign key before the column it uses or drop a column before its constraint.
+// Statements of the same kind keep bun's relative order.
+func orderStatements(sql string) string {
+	var stmts, cur []string
+	inComment := false
+	for line := range strings.SplitSeq(strings.TrimSpace(sql), "\n") {
+		cur = append(cur, line)
+		if strings.Contains(line, "/*") && !strings.Contains(line, "*/") {
+			inComment = true
+		}
+		if inComment {
+			if !strings.Contains(line, "*/") {
+				continue
+			}
+			inComment = false
+		}
+		if strings.HasSuffix(strings.TrimSpace(line), ";") {
+			stmts = append(stmts, strings.Join(cur, "\n"))
+			cur = nil
+		}
+	}
+	if len(cur) > 0 {
+		stmts = append(stmts, strings.Join(cur, "\n"))
+	}
+	sort.SliceStable(stmts, func(i, j int) bool { return statementRank(stmts[i]) < statementRank(stmts[j]) })
+	return strings.Join(stmts, "\n")
+}
+
+func statementRank(stmt string) int {
+	s := strings.ToUpper(strings.TrimSpace(blockComment.ReplaceAllString(stmt, "")))
+	switch {
+	case strings.HasPrefix(s, "CREATE TABLE"):
+		return 0
+	case strings.HasPrefix(s, "DROP TABLE"):
+		return 6
+	case !strings.HasPrefix(s, "ALTER TABLE"):
+		return 3
+	case strings.Contains(s, " DROP CONSTRAINT"):
+		return 1
+	case strings.Contains(s, " ADD COLUMN"):
+		return 2
+	case strings.Contains(s, " DROP COLUMN"):
+		return 5
+	case strings.Contains(s, " ADD CONSTRAINT") && strings.Contains(s, "FOREIGN KEY"):
+		return 4
+	default:
+		return 3
+	}
 }
 
 func nameDroppedConstraints(up, down string) string {

@@ -36,7 +36,7 @@ type dMoney struct { // numeric with precision and scale, as money columns usual
 func requireSafeOutcome(t *testing.T, e *sqlEnv, svc sqlsvc.SQLServices, name string, models ...any) {
 	t.Helper()
 	filesBefore := len(e.migrationFiles())
-	path, err := svc.Diff(bg, name, models...)
+	path, err := e.diff(name, models...)
 	if err != nil {
 		if len(e.migrationFiles()) != filesBefore {
 			t.Fatalf("Diff failed (%v) but still wrote a migration file", err)
@@ -56,13 +56,13 @@ func requireSafeOutcome(t *testing.T, e *sqlEnv, svc sqlsvc.SQLServices, name st
 	if err := svc.Migrate(bg); err != nil {
 		t.Fatalf("re-applying the saved migration failed: %v", err)
 	}
-	requireConverged(t, e, svc, models...)
+	requireConverged(t, e, models...)
 }
 
 func TestSQLDiff_StringDefaultOnExistingTableIsSafe(t *testing.T) {
 	e := newSQLEnv(t)
 	svc := e.running()
-	diffApply(t, svc, "settings", (*dSettingsV1)(nil))
+	diffApply(t, e, "settings", (*dSettingsV1)(nil))
 	e.exec(`INSERT INTO settings (name) VALUES ('a'), ('b')`)
 
 	requireSafeOutcome(t, e, svc, "add mode", (*dSettingsV2)(nil))
@@ -80,15 +80,14 @@ func TestSQLDiff_NumericWithPrecisionIsSafe(t *testing.T) {
 
 func TestSQLDiff_InvalidMigrationErrorIsDistinguishable(t *testing.T) {
 	e := newSQLEnv(t)
-	svc := e.running()
 	// A hand-made drift the diff will try to revert, combined with a table that has a dependent view:
 	// dropping the column fails, which must surface as ErrInvalidMigration rather than a saved file.
-	diffApply(t, svc, "settings", (*dSettingsV1)(nil))
+	diffApply(t, e, "settings", (*dSettingsV1)(nil))
 	e.exec(`ALTER TABLE settings ADD COLUMN extra text`)
 	e.exec(`CREATE VIEW settings_view AS SELECT id, extra FROM settings`)
 
 	filesBefore := len(e.migrationFiles())
-	_, err := svc.Diff(bg, "revert drift", (*dSettingsV1)(nil))
+	_, err := e.diff("revert drift", (*dSettingsV1)(nil))
 	if !errors.Is(err, sqlsvc.ErrInvalidMigration) {
 		t.Fatalf("Diff = %v; want ErrInvalidMigration (DROP COLUMN is blocked by a dependent view)", err)
 	}

@@ -11,11 +11,11 @@ import (
 	"github.com/uptrace/bun/migrate"
 )
 
-func (s *SQLService) Diff(ctx context.Context, name string, models ...any) (string, error) {
+func (s *SQLService) Diff(ctx context.Context, name string) (string, error) {
 	if s.db == nil {
 		return "", ErrNotInitialized
 	}
-	if len(models) == 0 {
+	if len(s.models) == 0 {
 		return "", ErrNoModels
 	}
 	slug := strings.Trim(nonNameChars.ReplaceAllString(strings.ToLower(name), "_"), "_")
@@ -40,7 +40,7 @@ func (s *SQLService) Diff(ctx context.Context, name string, models ...any) (stri
 	}
 	defer os.RemoveAll(tmp)
 	am, err := migrate.NewAutoMigrator(s.db,
-		migrate.WithModel(models...),
+		migrate.WithModel(s.models...),
 		migrate.WithExcludeTable(goose.DefaultTablename),
 		migrate.WithMigrationsDirectoryAuto(tmp),
 	)
@@ -55,8 +55,8 @@ func (s *SQLService) Diff(ctx context.Context, name string, models ...any) (stri
 		return "", nil
 	}
 
-	upSQL := files[0].Content
-	downSQL := nameDroppedConstraints(upSQL, files[1].Content)
+	upSQL := orderStatements(files[0].Content)
+	downSQL := orderStatements(nameDroppedConstraints(files[0].Content, files[1].Content))
 	if err := s.validateMigration(ctx, upSQL, downSQL); err != nil {
 		return "", err
 	}

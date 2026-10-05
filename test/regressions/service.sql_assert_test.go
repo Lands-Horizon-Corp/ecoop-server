@@ -4,17 +4,15 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 )
 
 // Assertions shared by every test that generates migrations with Diff.
 
 // diffApply generates one migration for models, checks it is a goose Up/Down file, applies it and
 // returns its text. Use settleModels when the change may need more than one migration.
-func diffApply(t *testing.T, svc sqlsvc.SQLServices, name string, models ...any) string {
+func diffApply(t *testing.T, e *sqlEnv, name string, models ...any) string {
 	t.Helper()
-	path, err := svc.Diff(bg, name, models...)
+	path, err := e.diff(name, models...)
 	if err != nil {
 		t.Fatalf("Diff(%s): %v", name, err)
 	}
@@ -25,7 +23,7 @@ func diffApply(t *testing.T, svc sqlsvc.SQLServices, name string, models ...any)
 	if !strings.HasPrefix(content, "-- +goose Up\n") || !strings.Contains(content, "\n-- +goose Down\n") {
 		t.Fatalf("Diff(%s) did not write a goose Up/Down file:\n%s", name, content)
 	}
-	if err := svc.Migrate(bg); err != nil {
+	if err := e.migrate(); err != nil {
 		t.Fatalf("Migrate after Diff(%s): %v\n%s", name, err, content)
 	}
 	return content
@@ -34,11 +32,11 @@ func diffApply(t *testing.T, svc sqlsvc.SQLServices, name string, models ...any)
 // settleModels applies Diff and Migrate repeatedly until the database matches models, and returns each
 // migration's text. bun adds a NOT NULL column in two phases (add, then SET NOT NULL), so one model
 // change can need two migrations. onApplied, if given, runs after each applied migration.
-func settleModels(t *testing.T, svc sqlsvc.SQLServices, name string, models []any, onApplied ...func()) []string {
+func settleModels(t *testing.T, e *sqlEnv, name string, models []any, onApplied ...func()) []string {
 	t.Helper()
 	var contents []string
 	for round := 1; round <= 4; round++ {
-		path, err := svc.Diff(bg, fmt.Sprintf("%s round %d", name, round), models...)
+		path, err := e.diff(fmt.Sprintf("%s round %d", name, round), models...)
 		if err != nil {
 			t.Fatalf("Diff(%s) round %d: %v", name, round, err)
 		}
@@ -49,7 +47,7 @@ func settleModels(t *testing.T, svc sqlsvc.SQLServices, name string, models []an
 			return contents
 		}
 		content := readFile(t, path)
-		if err := svc.Migrate(bg); err != nil {
+		if err := e.migrate(); err != nil {
 			t.Fatalf("Migrate after Diff(%s) round %d: %v\n%s", name, round, err, content)
 		}
 		contents = append(contents, content)
@@ -63,10 +61,10 @@ func settleModels(t *testing.T, svc sqlsvc.SQLServices, name string, models []an
 
 // requireConverged asserts that the database already matches models: a second Diff has nothing to say
 // and writes no file.
-func requireConverged(t *testing.T, e *sqlEnv, svc sqlsvc.SQLServices, models ...any) {
+func requireConverged(t *testing.T, e *sqlEnv, models ...any) {
 	t.Helper()
 	before := len(e.migrationFiles())
-	path, err := svc.Diff(bg, "converge-check", models...)
+	path, err := e.diff("converge-check", models...)
 	if err != nil {
 		t.Fatalf("convergence Diff: %v", err)
 	}

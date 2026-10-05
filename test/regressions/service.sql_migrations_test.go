@@ -30,7 +30,7 @@ func TestSQLService_Lifecycle(t *testing.T) {
 			"RollbackSteps": svc.RollbackSteps(bg, 1),
 			"UpSteps":       svc.UpSteps(bg, 1),
 		}
-		_, calls["Diff"] = svc.Diff(bg, "x", struct{}{})
+		_, calls["Diff"] = svc.Diff(bg, "x")
 		for name, err := range calls {
 			if !errors.Is(err, sqlsvc.ErrNotInitialized) {
 				t.Errorf("%s before Run = %v; want ErrNotInitialized", name, err)
@@ -82,7 +82,7 @@ func TestSQLService_Lifecycle(t *testing.T) {
 	})
 
 	t.Run("Run fails when the database is unreachable", func(t *testing.T) {
-		svc := sqlsvc.NewSQLService("postgres://u:p@"+closedAddr(t)+"/db?sslmode=disable&connect_timeout=2", 1, 1, nil, true, nil)
+		svc := sqlsvc.NewSQLService("postgres://u:p@"+closedAddr(t)+"/db?sslmode=disable&connect_timeout=2", 1, 1, nil, true, nil, nil)
 		if err := svc.Run(bg); err == nil {
 			_ = svc.Stop(bg)
 			t.Fatal("Run succeeded against a closed port")
@@ -93,7 +93,7 @@ func TestSQLService_Lifecycle(t *testing.T) {
 	})
 
 	t.Run("Run fails on a malformed DSN", func(t *testing.T) {
-		svc := sqlsvc.NewSQLService("not a dsn ://", 1, 1, nil, true, nil)
+		svc := sqlsvc.NewSQLService("not a dsn ://", 1, 1, nil, true, nil, nil)
 		if err := svc.Run(bg); err == nil {
 			_ = svc.Stop(bg)
 			t.Fatal("Run succeeded with a malformed DSN")
@@ -182,7 +182,7 @@ func TestSQLService_WithoutMigrationsDirectoryOnlyConnects(t *testing.T) {
 	e := newSQLEnv(t)
 	e.write(1, "users", `CREATE TABLE users (id int);`, `DROP TABLE users;`)
 
-	svc := sqlsvc.NewSQLService(e.dsn, 2, 5, nil, true, nil)
+	svc := sqlsvc.NewSQLService(e.dsn, 2, 5, nil, true, nil, []any{(*dOrg)(nil)})
 	if err := svc.Run(bg); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestSQLService_WithoutMigrationsDirectoryOnlyConnects(t *testing.T) {
 		t.Fatal("Run applied migrations without a migrations directory")
 	}
 
-	_, diffErr := svc.Diff(bg, "x", (*dOrg)(nil))
+	_, diffErr := svc.Diff(bg, "x")
 	calls := map[string]error{
 		"Migrate":    svc.Migrate(bg),
 		"Status":     svc.Status(bg),
@@ -222,7 +222,7 @@ func TestSQLService_MigrationsPathMustBeADirectory(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = notADir.Close() })
 
-	svc := sqlsvc.NewSQLService(e.dsn, 2, 5, notADir, true, nil)
+	svc := sqlsvc.NewSQLService(e.dsn, 2, 5, notADir, true, nil, nil)
 	if err := svc.Run(bg); !errors.Is(err, sqlsvc.ErrInvalidMigrationsDir) {
 		_ = svc.Stop(bg)
 		t.Fatalf("Run with a regular file = %v; want ErrInvalidMigrationsDir", err)
