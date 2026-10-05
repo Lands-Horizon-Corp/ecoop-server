@@ -1,6 +1,10 @@
 name: ecoop-server
 
 services:
+    redis:
+        image: redis:7-alpine
+        ports: ['6379:6379'] # cache integration tests (REDIS_TEST_URL)
+
     loki:
         image: grafana/loki:latest
         command: -config.file=/etc/loki/loki-config.yaml

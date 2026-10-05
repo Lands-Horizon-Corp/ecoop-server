@@ -2,9 +2,17 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+)
+
+var (
+	// ErrNotFound is returned by Get when the key does not exist.
+	ErrNotFound = errors.New("cache: key not found")
+	// ErrNotRunning is returned when a method is called before Run or after Stop.
+	ErrNotRunning = errors.New("cache: service not running; call Run first")
 )
 
 type CacheServices interface {
