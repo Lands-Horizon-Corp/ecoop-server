@@ -14,6 +14,7 @@ var (
 )
 
 type CacheServices interface {
+	Client() (*redis.Client, error)
 	Run(ctx context.Context) error
 	Stop(ctx context.Context) error
 	Ping(ctx context.Context) error

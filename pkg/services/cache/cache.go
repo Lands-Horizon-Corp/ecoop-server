@@ -51,7 +51,7 @@ func NewSentinelCacheService(
 	}
 }
 
-func (c *CacheService) newClient() (*redis.Client, error) {
+func (c *CacheService) Client() (*redis.Client, error) {
 	if len(c.sentinelAddrs) > 0 {
 		if c.masterName == "" {
 			return nil, errors.New("cache: sentinel master name is required")
@@ -88,7 +88,7 @@ func (c *CacheService) Run(ctx context.Context) error {
 	if c.client != nil {
 		return errors.New("cache: service already running")
 	}
-	client, err := c.newClient()
+	client, err := c.Client()
 	if err != nil {
 		return err
 	}
@@ -122,6 +122,7 @@ func (c *CacheService) Ping(ctx context.Context) error {
 	}
 	return nil
 }
+
 func (c *CacheService) Flush(ctx context.Context) error {
 	client, err := c.connected()
 	if err != nil {
@@ -164,8 +165,6 @@ func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.
 	return nil
 }
 
-// SetNX stores value only if the key does not exist. It reports whether the
-// value was stored.
 func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error) {
 	client, err := c.connected()
 	if err != nil {
@@ -205,8 +204,6 @@ func (c *CacheService) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// Keys returns the keys matching pattern, without the prefix. The pattern uses
-// Redis glob syntax (*, ?, [...]). It uses SCAN, so it does not block the server.
 func (c *CacheService) Keys(ctx context.Context, pattern string) ([]string, error) {
 	client, err := c.connected()
 	if err != nil {
@@ -223,8 +220,6 @@ func (c *CacheService) Keys(ctx context.Context, pattern string) ([]string, erro
 	return keys, nil
 }
 
-// Expire sets a TTL on an existing key. It reports false if the key does not
-// exist. ttl must be positive; a zero TTL would delete the key immediately.
 func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	client, err := c.connected()
 	if err != nil {
@@ -240,9 +235,6 @@ func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration
 	return ok, nil
 }
 
-// Incr atomically increments the counter and returns the new value. The TTL is
-// set when the counter is created, so it is a fixed window. A zero TTL means
-// no expiry.
 func (c *CacheService) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
 	client, err := c.connected()
 	if err != nil {
@@ -306,7 +298,6 @@ func (c *CacheService) ZCard(ctx context.Context, key string) (int64, error) {
 	return n, nil
 }
 
-// ZRem removes members from the sorted set and returns how many were removed.
 func (c *CacheService) ZRem(ctx context.Context, key string, members ...any) (int64, error) {
 	client, err := c.connected()
 	if err != nil {
@@ -325,8 +316,6 @@ func (c *CacheService) ZRem(ctx context.Context, key string, members ...any) (in
 	return n, nil
 }
 
-// ZRemRangeByScore removes members with scores in [min, max]. Bounds use Redis
-// syntax, such as "-inf", "+inf", "(1" for exclusive.
 func (c *CacheService) ZRemRangeByScore(ctx context.Context, key string, min, max string) (int64, error) {
 	client, err := c.connected()
 	if err != nil {
@@ -350,7 +339,6 @@ func (c *CacheService) key(key string) string {
 	return c.prefix + key
 }
 
-// scan returns every raw key matching glob, which must already include the escaped prefix.
 func (c *CacheService) scan(ctx context.Context, client *redis.Client, glob string) ([]string, error) {
 	var (
 		cursor uint64

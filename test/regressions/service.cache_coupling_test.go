@@ -207,7 +207,10 @@ type memoryEntry struct {
 	expires time.Time // zero means no expiry
 }
 
-var errMemoryUnsupported = errors.New("memoryCache: sorted sets not implemented")
+var (
+	errMemoryUnsupported = errors.New("memoryCache: sorted sets not implemented")
+	errMemoryNoClient    = errors.New("memoryCache: has no redis client")
+)
 
 func newMemoryCache() *memoryCache {
 	return &memoryCache{entries: make(map[string]memoryEntry)}
@@ -234,6 +237,8 @@ func (m *memoryCache) put(key string, value []byte, ttl time.Duration) {
 	}
 	m.entries[key] = e
 }
+
+func (m *memoryCache) Client() (*redis.Client, error) { return nil, errMemoryNoClient }
 
 func (m *memoryCache) Run(ctx context.Context) error  { return m.err }
 func (m *memoryCache) Stop(ctx context.Context) error { return nil }

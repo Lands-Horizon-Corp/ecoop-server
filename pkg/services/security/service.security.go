@@ -62,6 +62,14 @@ func (s *SecurityService) VerifyPassword(ctx context.Context, hash string, passw
 	if _, err := fmt.Sscanf(vals[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil {
 		return false, err
 	}
+	// argon2.IDKey panics on zero rounds or parallelism.
+	if t < 1 || p < 1 {
+		return false, fmt.Errorf("invalid hash parameters")
+	}
+	// The hash supplies its own cost, so cap it to stop a crafted hash exhausting memory or CPU.
+	if m > maxVerifyMemory || t > maxVerifyIterations || p > maxVerifyParallelism {
+		return false, fmt.Errorf("hash parameters exceed allowed limits")
+	}
 	salt, err := base64.RawStdEncoding.Strict().DecodeString(vals[4])
 	if err != nil {
 		return false, err
