@@ -128,8 +128,8 @@ type (
 		Run(ctx context.Context) error
 
 		// Transactions
-		Start(ctx context.Context) (bun.Tx, error)
-		End(ctx context.Context, tx bun.Tx, err error) error
+		StartTx(ctx context.Context) (bun.Tx, error)
+		EndTx(ctx context.Context, tx bun.Tx, err error) error
 
 		// Events
 		OnCreated(ctx context.Context, data *TData)
