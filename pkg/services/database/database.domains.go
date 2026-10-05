@@ -3,11 +3,8 @@ package database
 import (
 	"context"
 	"time"
-
-	"github.com/uptrace/bun"
 )
 
-// Shared infrastructure contracts. This package must not import pagination or cqrs.
 type (
 	Channel string
 	Events  []string
@@ -32,11 +29,5 @@ type (
 	CacheService interface {
 		Get(ctx context.Context, key string) ([]byte, error)
 		Set(ctx context.Context, key string, value any, ttl time.Duration) error
-	}
-
-	SQLServices interface {
-		Ping(ctx context.Context) error
-		Client() *bun.DB
-		Find(ctx context.Context, model any, dest any) error
 	}
 )

@@ -2,11 +2,12 @@ package pagination
 
 import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 )
 
 type PaginationService[TData any, TID comparable] struct {
-	ReadSQLService    database.SQLServices
-	WriteSQLService   database.SQLServices
+	ReadSQLService    sql.SQLServices
+	WriteSQLService   sql.SQLServices
 	LogService        database.LogService
 	ColumnDefaultID   string
 	ColumnDefaultSort string

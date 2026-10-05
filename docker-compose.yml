@@ -41,6 +41,20 @@ services:
             timeout: 2s
             retries: 15
 
+    # Postgres for the SQL service tests (SQL_TEST_DSN). Throwaway test credentials.
+    postgres:
+        image: postgres:17-alpine
+        environment:
+            POSTGRES_USER: ecoop
+            POSTGRES_PASSWORD: ecoop-test-pass
+            POSTGRES_DB: ecoop_test
+        ports: ['5432:5432']
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U ecoop -d ecoop_test']
+            interval: 2s
+            timeout: 2s
+            retries: 15
+
     loki:
         image: grafana/loki:latest
         command: -config.file=/etc/loki/loki-config.yaml

@@ -5,6 +5,7 @@ import (
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 	"github.com/go-playground/validator/v10"
 )
@@ -23,8 +24,8 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	Deleted     func(*TData) database.Events
 	Dispatch    func(channel database.Channel, events database.Events, payload *TResponse) error
 
-	ReadSQLService       database.SQLServices
-	WriteSQLService      database.SQLServices
+	ReadSQLService       sql.SQLServices
+	WriteSQLService      sql.SQLServices
 	LogService           database.LogService
 	BroadcastService     database.BroadcastService
 	MessageBrokerService database.MessageBrokerService
