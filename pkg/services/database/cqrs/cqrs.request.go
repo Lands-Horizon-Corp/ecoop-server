@@ -149,8 +149,6 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithValidationT
 	return c.ToModels(result), nil
 }
 
-// UpdateByIDWithValidation validates request, converts it via FromRequest,
-// and updates the row matching id. The TData-based UpdateByID is unchanged.
 func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateByIDWithValidation(
 	ctx context.Context,
 	id TID,

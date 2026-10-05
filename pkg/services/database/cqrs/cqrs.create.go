@@ -63,10 +63,6 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateManyFormat(
 	return c.ToModels(result), nil
 }
 
-// CreateWithTx is Create run against a caller-supplied transaction,
-// returning the persisted row itself (TData) rather than running it through
-// ToResource. Use CreateWithTxFormat instead when the caller wants the
-// TResponse-shaped view.
 func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateWithTx(
 	ctx context.Context,
 	tx bun.Tx,

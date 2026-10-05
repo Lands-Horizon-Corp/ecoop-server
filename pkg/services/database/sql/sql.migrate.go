@@ -8,7 +8,6 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// Migrate applies every pending migration. An empty migrations directory is not an error.
 func (s *SQLService) Migrate(ctx context.Context) error {
 	migrator, err := s.provider()
 	if errors.Is(err, goose.ErrNoMigrations) {
