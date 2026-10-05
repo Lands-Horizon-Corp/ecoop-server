@@ -23,10 +23,10 @@ func (c *PaginationService[TData, TID]) Pagination(
 
 func (c *PaginationService[TData, TID]) checkReady() error {
 	if c.ReadSQLService == nil {
-		return fmt.Errorf("pagination requires ReadSQLService to be set")
+		return ErrReadServiceRequired
 	}
 	if c.ColumnDefaultID == "" {
-		return fmt.Errorf("pagination requires ColumnDefaultID to be set")
+		return ErrColumnDefaultIDMissing
 	}
 	return nil
 }
@@ -65,7 +65,7 @@ func (c *PaginationService[TData, TID]) paginate(
 	var data []TData
 	if hasCursor && !uniform {
 		if forUpdate {
-			return nil, fmt.Errorf("pagination: row locking (FOR UPDATE) is not supported with mixed-direction cursor pagination")
+			return nil, ErrRowLockUnsupported
 		}
 		if err := c.paginateMixedDirection(ctx, db, &data, extraFilter, pagination.Filter, sortFields, payload, backward, limit); err != nil {
 			return nil, err

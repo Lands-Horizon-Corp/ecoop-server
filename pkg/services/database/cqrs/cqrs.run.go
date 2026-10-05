@@ -3,7 +3,6 @@ package cqrs
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -22,7 +21,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) 
 		}
 	}
 	if c.MessageBrokerService == nil {
-		return errors.New("message broker service is not initialized")
+		return ErrMessageBrokerNotInitialized
 	}
 	c.info(ctx, fmt.Sprintf("starting outbox batch runner for channel: %s", c.Channel))
 	batcher := utils.NewBatcher(utils.BatcherConfig[CQRSQueuePayload[TData]]{
@@ -91,7 +90,7 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 	batch []CQRSQueuePayload[TData],
 ) ([]CQRSQueuePayload[TData], error) {
 	if r.ReadSQLService == nil {
-		return nil, errors.New("read db is not initialized")
+		return nil, ErrReadDBNotInitialized
 	}
 	eventIDsPtr := r.stringSlicePool.Get()
 	defer r.stringSlicePool.Put(eventIDsPtr)

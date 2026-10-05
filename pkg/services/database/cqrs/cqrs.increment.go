@@ -26,7 +26,7 @@ func incrementByID[TData any](
 	ctx context.Context, db bun.IDB, columnDefaultID string, id any, field string, delta float64,
 ) (*TData, error) {
 	if utils.BunColumnFieldIndex[TData](field) == -1 {
-		return nil, fmt.Errorf("increment: unknown field %q", field)
+		return nil, fmt.Errorf("%w: increment %q", ErrUnknownField, field)
 	}
 	var data TData
 	_, err := db.NewUpdate().

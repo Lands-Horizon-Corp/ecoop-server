@@ -3,7 +3,6 @@ package sql
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"io"
 	"os"
 
@@ -14,15 +13,12 @@ import (
 // migrationsDir is relative to the working directory the service runs from.
 const migrationsDir = "src/database/migrations"
 
-var errNotInitialized = errors.New("database connection is not initialized")
-
 type SQLService struct {
 	dsn         string
 	maxIdleConn int
 	maxOpenConn int
 	db          *bun.DB
 	sqldb       *sql.DB
-	migrator    *goose.Provider
 	file        *os.File
 }
 
@@ -46,17 +42,18 @@ func (s *SQLService) Client() *bun.DB {
 
 func (s *SQLService) Ping(ctx context.Context) error {
 	if s.db == nil {
-		return errNotInitialized
+		return ErrNotInitialized
 	}
 	return s.db.PingContext(ctx)
 }
 
-// provider returns the goose provider created by Run.
+// provider builds a goose provider from the migrations directory. It is built per call so
+// migration files created after Run (see Create) are picked up.
 func (s *SQLService) provider() (*goose.Provider, error) {
-	if s.migrator == nil {
-		return nil, errNotInitialized
+	if s.sqldb == nil {
+		return nil, ErrNotInitialized
 	}
-	return s.migrator, nil
+	return goose.NewProvider(goose.DialectPostgres, s.sqldb, os.DirFS(migrationsDir))
 }
 
 // out is where Status and Version print. Falls back to stdout when no file was given.

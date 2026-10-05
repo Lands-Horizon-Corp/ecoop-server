@@ -14,11 +14,11 @@ func (c *PaginationService[TData, TID]) EnableSearchIndex(
 	ctx context.Context, fields ...string,
 ) error {
 	if c.ReadSQLService == nil {
-		return fmt.Errorf("enabling search index requires ReadSQLService to be set")
+		return ErrReadServiceRequired
 	}
 	for _, field := range fields {
 		if utils.BunColumnFieldIndex[TData](field) == -1 {
-			return fmt.Errorf("unknown search index column %q", field)
+			return fmt.Errorf("%w: search index column %q", ErrUnknownField, field)
 		}
 	}
 

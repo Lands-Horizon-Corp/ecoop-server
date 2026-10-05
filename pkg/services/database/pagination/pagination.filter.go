@@ -29,7 +29,7 @@ func (c *PaginationService[TData, TID]) applyFilters(
 			wholeIndexSearch := f.Mode == ModeSearch && f.Field == ""
 			isCustom := f.Mode == ModeCustom
 			if !wholeIndexSearch && !isCustom && utils.BunColumnFieldIndex[TData](f.Field) == -1 {
-				groupErr = fmt.Errorf("unknown filter field %q", f.Field)
+				groupErr = fmt.Errorf("%w: filter %q", ErrUnknownField, f.Field)
 				break
 			}
 			q = q.WhereGroup(sep, func(inner *bun.SelectQuery) *bun.SelectQuery {
@@ -54,14 +54,14 @@ func (c *PaginationService[TData, TID]) applyTerm(q *bun.SelectQuery, f Filter) 
 		return applyFilterTerm(q, f, c.ColumnDefaultID)
 	}
 	if f.Custom == nil {
-		return nil, fmt.Errorf("ModeCustom requires Filter.Custom")
+		return nil, fmt.Errorf("%w: ModeCustom requires Filter.Custom", ErrInvalidFilter)
 	}
 	built, err := f.Custom(q, f.Value)
 	if err != nil {
 		return nil, err
 	}
 	if built == nil {
-		return nil, fmt.Errorf("custom filter returned a nil query")
+		return nil, fmt.Errorf("%w: custom filter returned a nil query", ErrInvalidFilter)
 	}
 	return built, nil
 }
@@ -75,16 +75,16 @@ func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string) (*bun
 		ModeSearch, ModeRange:
 		if f.Value == nil {
 			return nil, fmt.Errorf(
-				"mode %q requires a non-nil value (use ModeIsEmpty/ModeIsNotEmpty to match null/empty values instead)",
-				f.Mode,
+				"%w: mode %q requires a non-nil value (use ModeIsEmpty/ModeIsNotEmpty to match null/empty values instead)",
+				ErrInvalidFilter, f.Mode,
 			)
 		}
 	case ModeInside, ModeOutside:
 		if f.Value == nil {
-			return nil, fmt.Errorf("mode %q requires a non-nil list value", f.Mode)
+			return nil, fmt.Errorf("%w: mode %q requires a non-nil list value", ErrInvalidFilter, f.Mode)
 		}
 		if k := reflect.ValueOf(f.Value).Kind(); k != reflect.Slice && k != reflect.Array {
-			return nil, fmt.Errorf("mode %q requires a list value, got %T", f.Mode, f.Value)
+			return nil, fmt.Errorf("%w: mode %q requires a list value, got %T", ErrInvalidFilter, f.Mode, f.Value)
 		}
 	}
 	switch f.Mode {
@@ -148,7 +148,7 @@ func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string) (*bun
 	case ModeIsNotEmpty:
 		return q.Where("(? IS NOT NULL AND ? != '')", col, col), nil
 	default:
-		return nil, fmt.Errorf("unsupported mode %q", f.Mode)
+		return nil, fmt.Errorf("%w: unsupported mode %q", ErrInvalidFilter, f.Mode)
 	}
 }
 
@@ -166,7 +166,7 @@ func coerceDateTimeFilterValue(dataType DataType, value any) (any, error) {
 	case string:
 		t, ok := parse(v)
 		if !ok {
-			return nil, fmt.Errorf("unrecognized %s value %q", dataType, v)
+			return nil, fmt.Errorf("%w: unrecognized %s value %q", ErrInvalidFilter, dataType, v)
 		}
 		return t, nil
 	case []any:
@@ -198,13 +198,13 @@ func extractRangeBounds(value any) (from, to any, err error) {
 		from, okFrom := v["from"]
 		to, okTo := v["to"]
 		if !okFrom || !okTo {
-			return nil, nil, fmt.Errorf("range value missing \"from\"/\"to\": %#v", value)
+			return nil, nil, fmt.Errorf("%w: range value missing \"from\"/\"to\": %#v", ErrInvalidFilter, value)
 		}
 		if from == nil || to == nil {
-			return nil, nil, fmt.Errorf("range value's \"from\"/\"to\" must not be null: %#v", value)
+			return nil, nil, fmt.Errorf("%w: range value's \"from\"/\"to\" must not be null: %#v", ErrInvalidFilter, value)
 		}
 		return from, to, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported range value type %T", value)
+		return nil, nil, fmt.Errorf("%w: unsupported range value type %T", ErrInvalidFilter, value)
 	}
 }

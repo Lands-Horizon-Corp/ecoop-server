@@ -2,13 +2,10 @@ package cqrs
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/uptrace/bun"
 )
-
-var ErrFromRequestNotSet = errors.New("cqrs: FromRequest must be set to use *WithValidation methods")
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) dataFromRequest(
 	ctx context.Context,

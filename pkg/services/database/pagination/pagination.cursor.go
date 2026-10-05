@@ -25,7 +25,7 @@ func (c *PaginationService[TData, TID]) resolveSortFields(
 	} else {
 		for _, sf := range sortFields {
 			if utils.BunColumnFieldIndex[TData](sf.Field) == -1 {
-				return nil, fmt.Errorf("unknown sort field %q", sf.Field)
+				return nil, fmt.Errorf("%w: sort %q", ErrUnknownField, sf.Field)
 			}
 			if sf.Order != SortOrderAsc && sf.Order != SortOrderDesc {
 				sf.Order = SortOrderAsc
@@ -75,12 +75,12 @@ func (c *PaginationService[TData, TID]) decodeCursor(
 	}
 	payload, err = utils.DecodeQueryParam[cursorPayload](*cursor)
 	if err != nil {
-		return cursorPayload{}, false, fmt.Errorf("decoding cursor: %w", err)
+		return cursorPayload{}, false, fmt.Errorf("%w: decoding: %w", ErrInvalidCursor, err)
 	}
 	if len(payload.Values) != len(sortFields) {
 		return cursorPayload{}, false, fmt.Errorf(
-			"cursor does not match the current sort fields: expected %d values, got %d",
-			len(sortFields), len(payload.Values),
+			"%w: does not match the current sort fields: expected %d values, got %d",
+			ErrInvalidCursor, len(sortFields), len(payload.Values),
 		)
 	}
 	if len(payload.Null) < len(payload.Values) {

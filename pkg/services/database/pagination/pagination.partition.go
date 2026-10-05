@@ -15,17 +15,16 @@ func (c *PaginationService[TData, TID]) EnablePartitioning(
 	ctx context.Context, control string, interval string,
 ) error {
 	if c.ReadSQLService == nil {
-		return fmt.Errorf("enabling partitioning requires ReadSQLService to be set")
+		return ErrReadServiceRequired
 	}
 	if utils.BunColumnFieldIndex[TData](control) == -1 {
-		return fmt.Errorf("unknown partition control column %q", control)
+		return fmt.Errorf("%w: partition control column %q", ErrUnknownField, control)
 	}
 	if !bunFieldIsPK[TData](control) {
 		return fmt.Errorf(
-			"partition control column %q must also be tagged as part of TData's "+
-				"primary key (bun:\"%s,pk,...\") — Postgres requires a partitioned "+
-				"table's primary key to include the partitioning column",
-			control, control,
+			"%w: %q must be tagged as part of TData's primary key (bun:\"%s,pk,...\"); "+
+				"Postgres requires a partitioned table's primary key to include the partitioning column",
+			ErrInvalidPartitionKey, control, control,
 		)
 	}
 

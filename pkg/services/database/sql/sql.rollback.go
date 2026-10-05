@@ -47,7 +47,7 @@ func (s *SQLService) Redo(ctx context.Context) error {
 // RollbackSteps reverts the most recent steps migrations, one at a time.
 func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
 	if steps <= 0 {
-		return fmt.Errorf("steps must be greater than zero, got %d", steps)
+		return fmt.Errorf("%w, got %d", ErrInvalidSteps, steps)
 	}
 	migrator, err := s.provider()
 	if err != nil {
@@ -64,7 +64,7 @@ func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
 // UpSteps applies the next steps pending migrations, one at a time.
 func (s *SQLService) UpSteps(ctx context.Context, steps int) error {
 	if steps <= 0 {
-		return fmt.Errorf("steps must be greater than zero, got %d", steps)
+		return fmt.Errorf("%w, got %d", ErrInvalidSteps, steps)
 	}
 	migrator, err := s.provider()
 	if err != nil {
