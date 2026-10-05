@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"time"
 )
 
 type (
@@ -24,10 +23,5 @@ type (
 	MessageBrokerService interface {
 		Publish(ctx context.Context, topic string, key, value []byte) error
 		Subscribe(ctx context.Context, topic string, handler func(key, value []byte) error) error
-	}
-
-	CacheService interface {
-		Get(ctx context.Context, key string) ([]byte, error)
-		Set(ctx context.Context, key string, value any, ttl time.Duration) error
 	}
 )

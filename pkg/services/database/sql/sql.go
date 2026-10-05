@@ -3,6 +3,7 @@ package sql
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/uptrace/bun"
 )
@@ -12,17 +13,20 @@ type SQLService struct {
 	maxIdleConn int
 	maxOpenConn int
 	db          *bun.DB
+	file        *os.File
 }
 
 func NewSQLService(
 	dsn string,
 	maxIdleConn int,
 	maxOpenConn int,
+	file *os.File,
 ) SQLServices {
 	return &SQLService{
 		dsn:         dsn,
 		maxIdleConn: maxIdleConn,
 		maxOpenConn: maxOpenConn,
+		file:        file,
 	}
 }
 
