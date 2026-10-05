@@ -406,9 +406,7 @@ func TestSecurityService_ConcurrentUse(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, workers*3)
 	for i := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			payload := fmt.Sprintf("payload-%d", i)
 			token, err := sec.Encrypt(ctx, payload, time.Minute)
 			if err != nil {
@@ -421,7 +419,7 @@ func TestSecurityService_ConcurrentUse(t *testing.T) {
 			if ok, err := sec.VerifyPassword(ctx, hash, "shared"); err != nil || !ok {
 				errs <- fmt.Errorf("worker %d: Verify = %v, %v", i, ok, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)
