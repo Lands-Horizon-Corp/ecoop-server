@@ -31,6 +31,7 @@ func (c *PaginationService[TData, TID]) checkReady() error {
 	}
 	return nil
 }
+
 func (c *PaginationService[TData, TID]) paginate(
 	ctx context.Context,
 	db bun.IDB,

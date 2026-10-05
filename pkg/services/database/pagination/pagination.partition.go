@@ -65,6 +65,7 @@ func (c *PaginationService[TData, TID]) EnablePartitioning(
 	}
 	return nil
 }
+
 func bunFieldIsPK[T any](column string) bool {
 	t := reflect.TypeFor[T]()
 	if t.Kind() != reflect.Struct {

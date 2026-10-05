@@ -168,10 +168,6 @@ func anyNullableSortField[TData any](sortFields []database.SortField) bool {
 	return false
 }
 
-// reverseSortFields flips every column's direction — used to build the
-// ORDER BY for a backward-direction query, which walks the index from the
-// opposite end (see Pagination) and then reverses the fetched rows back
-// into normal forward display order before returning them.
 func reverseSortFields(sortFields []database.SortField) []database.SortField {
 	reversed := make([]database.SortField, len(sortFields))
 	for i, sf := range sortFields {
