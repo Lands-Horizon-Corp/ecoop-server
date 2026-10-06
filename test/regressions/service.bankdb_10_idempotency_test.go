@@ -2,10 +2,13 @@ package regressions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broker"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"slices"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -128,8 +131,8 @@ func TestBankDBIdempotency_ExecutionOrderDoesNotChangeTheOutcome(t *testing.T) {
 				}
 			}
 			results[name] = outcome{
-				balances: rowsString(t, b, `SELECT id || '=' || balance FROM bank_accounts ORDER BY id`),
-				audit:    rowsString(t, b, `SELECT transfer_id || ':' || account_id || ':' || delta FROM bank_audit ORDER BY 1`),
+				balances: queryLines(t, b.h.writer, `SELECT id || '=' || balance FROM bank_accounts ORDER BY id`),
+				audit:    queryLines(t, b.h.writer, `SELECT transfer_id || ':' || account_id || ':' || delta FROM bank_audit ORDER BY 1`),
 			}
 		})
 	}
@@ -179,7 +182,7 @@ func TestBankDBIdempotency_AuditTrailIsImmutableAndReconciles(t *testing.T) {
 		}
 		must(t, second3(b.Transfer(ctx, transferReq{Key: fmt.Sprintf("k%d", i), From: from, To: to, Amount: int64(10 * (i + 1))})))
 	}
-	before := rowsString(t, b, `SELECT id || ':' || delta || ':' || balance_after FROM bank_audit ORDER BY id`)
+	before := queryLines(t, b.h.writer, `SELECT id || ':' || delta || ':' || balance_after FROM bank_audit ORDER BY id`)
 
 	tampering := map[string]func() error{
 		"cqrs update": func() error {
@@ -198,7 +201,7 @@ func TestBankDBIdempotency_AuditTrailIsImmutableAndReconciles(t *testing.T) {
 	for name, tamper := range tampering {
 		t.Run(name, func(t *testing.T) { requireKind(t, tamper(), database.ErrRejected) })
 	}
-	if after := rowsString(t, b, `SELECT id || ':' || delta || ':' || balance_after FROM bank_audit ORDER BY id`); after != before {
+	if after := queryLines(t, b.h.writer, `SELECT id || ':' || delta || ':' || balance_after FROM bank_audit ORDER BY id`); after != before {
 		t.Fatalf("audit trail changed:\nbefore %s\nafter  %s", before, after)
 	}
 	for id, open := range opening {
@@ -213,17 +216,46 @@ func TestBankDBIdempotency_AuditTrailIsImmutableAndReconciles(t *testing.T) {
 
 func second3[A, B any](_ A, _ B, err error) error { return err }
 
-func rowsString(t testing.TB, b *bdLedger, query string) string {
-	t.Helper()
-	rows, err := b.h.writer.Query(query)
-	must(t, err)
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var s string
-		must(t, rows.Scan(&s))
-		out = append(out, s)
+// Each table streams on its own topic, so a child row can reach the read model before its parent.
+// The foreign key violation is retried (not dead-lettered) until the parent arrives.
+func TestBankDBIdempotency_ChildBeforeParentIsRetriedUntilTheParentArrives(t *testing.T) {
+	bb := newBatchBroker()
+	b := newBDBank(t, bdOpts{broker: bb})
+	b.open("a", 100)
+	b.open("b", 0)
+	must(t, second3(b.Transfer(withDeadline(t, 5*time.Second), transferReq{Key: "k", From: "a", To: "b", Amount: 10})))
+	msg := func(eventID string, v any) broker.Message {
+		raw, err := json.Marshal(map[string]any{"event_id": eventID, "change_type": cqrs.ChangeTypeCreated, "payload": v})
+		must(t, err)
+		return broker.Message{Key: []byte(eventID), Value: raw}
 	}
-	must(t, rows.Err())
-	return strings.Join(out, ",")
+	var audit []bdAudit
+	var transfers []bdTransfer
+	var accounts []bdAccount
+	w := bun.NewDB(b.h.writer, pgdialect.New())
+	must(t, w.NewSelect().Model(&audit).Scan(bg))
+	must(t, w.NewSelect().Model(&transfers).Scan(bg))
+	must(t, w.NewSelect().Model(&accounts).Scan(bg))
+
+	child := make(chan error, 1)
+	go func() { child <- bb.deliver(t, "bank_audit", msg("aud-1", audit[0])) }()
+	select {
+	case err := <-child:
+		t.Fatalf("the orphan child was acknowledged (%v) before its parent existed", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	for _, a := range accounts {
+		must(t, bb.deliver(t, "bank_accounts", msg("acc-"+a.ID, a)))
+	}
+	must(t, bb.deliver(t, "bank_transfers", msg("trf-1", transfers[0])))
+	select {
+	case err := <-child:
+		must(t, err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("the child was never applied after its parent arrived")
+	}
+	if n := len(bb.publishedTo("bank_audit.dlq")); n != 0 {
+		t.Fatalf("%d messages dead-lettered; a missing parent is transient", n)
+	}
+	b.awaitReader(`SELECT count(*) FROM bank_audit WHERE id = '`+audit[0].ID+`'`, 1)
 }

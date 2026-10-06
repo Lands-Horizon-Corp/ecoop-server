@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -85,4 +86,39 @@ func walkFiles(root string, fn func(path string)) error {
 // second drops the first return value so a (value, error) call fits a single-error table.
 func second[T any](_ T, err error) error {
 	return err
+}
+
+// runParallel runs fn n times concurrently under a deadline and returns every error, so a deadlock
+// shows up as a context timeout instead of a hung test.
+func runParallel(t *testing.T, n int, fn func(ctx context.Context, i int) error) []error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(bg, 60*time.Second)
+	defer cancel()
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+	for i := range n {
+		wg.Go(func() {
+			if err := fn(ctx, i); err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	return errs
+}
+
+// noPanic runs fn and fails the test, naming the call, if it panics.
+func noPanic(t *testing.T, name string, fn func()) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("%s panicked: %v", name, r)
+		}
+	}()
+	fn()
 }

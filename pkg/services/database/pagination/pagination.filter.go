@@ -2,6 +2,7 @@ package pagination
 
 import (
 	"fmt"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"reflect"
 	"strings"
 	"time"
@@ -67,6 +68,14 @@ func (c *PaginationService[TData, TID]) applyTerm(q *bun.SelectQuery, f Filter) 
 }
 
 func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string) (*bun.SelectQuery, error) {
+	// bun inlines values into the SQL text: refuse text Postgres cannot take and match how cqrs stores it.
+	if f.Value != nil {
+		clean, err := sql.CleanText(reflect.ValueOf(f.Value), sql.TextPolicy{Normalize: true})
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidFilter, err)
+		}
+		f.Value = clean.Interface()
+	}
 	col := bun.Ident(f.Field)
 	switch f.Mode {
 	case ModeEqual, ModeNotEqual, ModeGT, ModeGTE,

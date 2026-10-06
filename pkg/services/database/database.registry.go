@@ -12,10 +12,11 @@ import (
 )
 
 type registration struct {
-	name    string
-	service any
-	build   func(writer, reader sql.SQLServices)
-	run     func(ctx context.Context) error
+	name     string
+	service  any
+	build    func(writer, reader sql.SQLServices)
+	run      func(ctx context.Context) error
+	shutdown func(ctx context.Context) error
 }
 
 type Registration[TData any, TResponse any, TRequest any, TID comparable] struct {
@@ -23,6 +24,10 @@ type Registration[TData any, TResponse any, TRequest any, TID comparable] struct
 	ColumnDefaultID   string
 	ColumnDefaultSort string
 	ColumnVersion     string // optional; see cqrs.CQRSService.ColumnVersion
+	MaxRetries        int    // optional; see cqrs.CQRSService.MaxRetries
+	DLQTopic          string // optional; see cqrs.CQRSService.DLQTopic
+	HookWorkers       int    // optional; see cqrs.CQRSService.HookWorkers
+	RawText           bool   // optional; see cqrs.CQRSService.RawText
 	Preloads          []string
 
 	ToResource  func(*TData) *TResponse
@@ -42,7 +47,7 @@ func Register[TData any, TResponse any, TRequest any, TID comparable](
 	if db == nil {
 		return ErrNilService
 	}
-	if db.started {
+	if db.started.Load() {
 		return fmt.Errorf("%w: %s", ErrAlreadyStarted, key)
 	}
 	if _, exists := db.registry[key]; exists {
@@ -56,6 +61,10 @@ func Register[TData any, TResponse any, TRequest any, TID comparable](
 			ColumnDefaultID:   re.ColumnDefaultID,
 			ColumnDefaultSort: re.ColumnDefaultSort,
 			ColumnVersion:     re.ColumnVersion,
+			MaxRetries:        re.MaxRetries,
+			DLQTopic:          re.DLQTopic,
+			HookWorkers:       re.HookWorkers,
+			RawText:           re.RawText,
 			Preloads:          re.Preloads,
 
 			ToResource:  re.ToResource,
@@ -91,6 +100,7 @@ func Register[TData any, TResponse any, TRequest any, TID comparable](
 		svc := cqrs.NewCQRS(c)
 		r.service = svc
 		r.run = svc.Run
+		r.shutdown = svc.Shutdown
 	}
 	db.registry[key] = r
 	db.models = append(db.models, (*TData)(nil))
@@ -104,7 +114,7 @@ func Get[TData any, TResponse any, TRequest any, TID comparable](
 	if db == nil {
 		return nil, ErrNilService
 	}
-	if !db.started {
+	if !db.started.Load() {
 		return nil, ErrNotStarted
 	}
 	r, ok := db.registry[key]

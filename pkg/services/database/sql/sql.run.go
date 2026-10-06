@@ -18,11 +18,17 @@ func (s *SQLService) Run(ctx context.Context) error {
 		}
 		sqldb.SetMaxIdleConns(s.maxIdleConn)
 		sqldb.SetMaxOpenConns(s.maxOpenConn)
-		s.sqldb = sqldb
-		s.db = bun.NewDB(sqldb, pgdialect.New())
+		sqldb.SetConnMaxLifetime(s.connMaxLifetime)
+		sqldb.SetConnMaxIdleTime(s.connMaxIdleTime)
+		s.sqldb.Store(sqldb)
+		s.db.Store(bun.NewDB(sqldb, pgdialect.New()))
 		if err := s.Ping(ctx); err != nil {
 			_ = s.Stop(ctx)
 			return fmt.Errorf("failed to ping database: %w", err)
+		}
+		if err := s.applyDatabaseSettings(ctx); err != nil {
+			_ = s.Stop(ctx)
+			return err
 		}
 		if s.autoMigrate && s.migrations != nil {
 			if err := s.Migrate(ctx); err != nil {
@@ -36,9 +42,8 @@ func (s *SQLService) Run(ctx context.Context) error {
 
 func (s *SQLService) Stop(ctx context.Context) error {
 	return s.observe("sql.stop", func() error {
-		db := s.db
-		s.sqldb = nil
-		s.db = nil
+		db := s.db.Swap(nil)
+		s.sqldb.Store(nil)
 		if db != nil {
 			return db.Close()
 		}

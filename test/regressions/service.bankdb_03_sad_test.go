@@ -114,8 +114,8 @@ func TestBankDBSad_FailedTransfersLeaveNoTrace(t *testing.T) {
 		{"insufficient funds", transferReq{"k1", "a", "b", 101}, errBankNoFunds},
 		{"unknown destination", transferReq{"k2", "a", "ghost", 1}, database.ErrNotFound},
 		{"unknown source", transferReq{"k3", "ghost", "b", 1}, database.ErrNotFound},
-		{"zero amount", transferReq{"k4", "a", "b", 0}, database.ErrConstraint},
-		{"negative amount", transferReq{"k5", "a", "b", -50}, database.ErrConstraint},
+		{"zero amount", transferReq{"k4", "a", "b", 0}, errBankBadAmount},
+		{"negative amount", transferReq{"k5", "a", "b", -50}, errBankBadAmount},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

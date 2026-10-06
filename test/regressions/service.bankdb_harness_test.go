@@ -1,6 +1,7 @@
 package regressions
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -8,19 +9,25 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broadcast"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broker"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/cqrs"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"go.uber.org/goleak"
 )
 
@@ -50,6 +57,7 @@ type bdAccount struct {
 	Signature     []byte         `bun:"signature,type:bytea" json:"signature"`
 	ClosedAt      *time.Time     `bun:"closed_at" json:"closed_at"`
 	UpdatedAt     time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+	TenantID      *string        `bun:"tenant_id,nullzero" json:"tenant_id"`
 }
 
 type bdTransfer struct {
@@ -62,6 +70,7 @@ type bdTransfer struct {
 	Kind           string    `bun:"kind,type:bank_txn_kind,nullzero,notnull,default:'transfer'" json:"kind"`
 	RequestHash    string    `bun:"request_hash,notnull" json:"request_hash"`
 	UpdatedAt      time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+	TenantID       *string   `bun:"tenant_id,nullzero" json:"tenant_id"`
 }
 
 type bdAudit struct {
@@ -72,6 +81,7 @@ type bdAudit struct {
 	Delta         int64     `bun:"delta,notnull" json:"delta"`
 	BalanceAfter  int64     `bun:"balance_after,notnull" json:"balance_after"`
 	UpdatedAt     time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+	TenantID      *string   `bun:"tenant_id,nullzero" json:"tenant_id"`
 }
 
 type (
@@ -98,7 +108,8 @@ CREATE TABLE bank_accounts (
 	signature  bytea,
 	closed_at  timestamptz,
 	updated_at timestamptz NOT NULL DEFAULT now(),
-	UNIQUE (owner, currency)
+	tenant_id  text DEFAULT NULLIF(current_setting('app.tenant_id', true), ''),
+	UNIQUE NULLS NOT DISTINCT (tenant_id, owner, currency)
 );
 CREATE TABLE bank_transfers (
 	id              text PRIMARY KEY,
@@ -109,6 +120,7 @@ CREATE TABLE bank_transfers (
 	kind            bank_txn_kind NOT NULL DEFAULT 'transfer',
 	request_hash    text NOT NULL,
 	updated_at      timestamptz NOT NULL DEFAULT now(),
+	tenant_id       text DEFAULT NULLIF(current_setting('app.tenant_id', true), ''),
 	CHECK (from_account <> to_account)
 );
 CREATE TABLE bank_audit (
@@ -117,7 +129,8 @@ CREATE TABLE bank_audit (
 	account_id    text NOT NULL REFERENCES bank_accounts (id),
 	delta         bigint NOT NULL CHECK (delta <> 0),
 	balance_after bigint NOT NULL,
-	updated_at    timestamptz NOT NULL DEFAULT now()
+	updated_at    timestamptz NOT NULL DEFAULT now(),
+	tenant_id     text DEFAULT NULLIF(current_setting('app.tenant_id', true), '')
 );
 -- +goose StatementBegin
 CREATE FUNCTION bank_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -126,25 +139,69 @@ BEGIN
 END $$;
 -- +goose StatementEnd
 CREATE TRIGGER bank_audit_immutable BEFORE UPDATE OR DELETE ON bank_audit
-	FOR EACH ROW EXECUTE FUNCTION bank_audit_append_only();`
+	FOR EACH ROW EXECUTE FUNCTION bank_audit_append_only();
+-- +goose StatementBegin
+CREATE FUNCTION bank_closed_is_frozen() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	IF OLD.closed_at IS NOT NULL AND NEW.balance <> OLD.balance THEN
+		RAISE EXCEPTION 'account % is closed', OLD.id;
+	END IF;
+	RETURN NEW;
+END $$;
+-- +goose StatementEnd
+CREATE TRIGGER bank_closed_frozen BEFORE UPDATE ON bank_accounts
+	FOR EACH ROW EXECUTE FUNCTION bank_closed_is_frozen();
+-- +goose StatementBegin
+CREATE FUNCTION bank_same_currency() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	IF (SELECT count(DISTINCT currency) FROM bank_accounts WHERE id IN (NEW.from_account, NEW.to_account)) > 1 THEN
+		RAISE EXCEPTION 'transfer % crosses currencies', NEW.id;
+	END IF;
+	RETURN NEW;
+END $$;
+-- +goose StatementEnd
+CREATE TRIGGER bank_transfer_currency BEFORE INSERT ON bank_transfers
+	FOR EACH ROW EXECUTE FUNCTION bank_same_currency();`
 
 const bdMigrationDown = `DROP TABLE bank_audit;
 DROP FUNCTION bank_audit_append_only;
+DROP TRIGGER bank_closed_frozen ON bank_accounts;
+DROP FUNCTION bank_closed_is_frozen;
+DROP TRIGGER bank_transfer_currency ON bank_transfers;
+DROP FUNCTION bank_same_currency;
 DROP TABLE bank_transfers;
 DROP TABLE bank_accounts;
 DROP TYPE bank_txn_kind;`
 
 var (
-	errBankNoFunds   = errors.New("bank: insufficient funds")
-	errBankKeyReused = errors.New("bank: idempotency key reused with a different request")
+	errBankAccountClosed = errors.New("bank: account is closed")
+	errBankCurrency      = errors.New("bank: accounts hold different currencies")
+	errBankBadAmount     = errors.New("bank: amount must be positive")
+	errBankOverflow      = errors.New("bank: balance would overflow")
+	errBankNoFunds       = errors.New("bank: insufficient funds")
+	errBankKeyReused     = errors.New("bank: idempotency key reused with a different request")
 )
 
 type bdOpts struct {
-	maxOpen int                     // pool size per database (default 8)
-	app     string                  // application_name prefix (default "bank")
-	route   func(dsn string) string // rewrites both DSNs, e.g. through a fault proxy
-	noRun   bool                    // do not start the outbox runners
+	maxOpen       int                          // pool size per database (default 8)
+	app           string                       // application_name prefix (default "bank")
+	route         func(dsn string) string      // rewrites both DSNs, e.g. through a fault proxy
+	noRun         bool                         // do not start the outbox runners
+	target        string                       // "" for the default server; "pg16" for the CDC profile's Postgres 16 pair
+	broker        broker.MessageBrokerServices // replaces the in-memory dbBroker (e.g. real Kafka)
+	channelPrefix string                       // prepended to each model's channel (Debezium topics: "<prefix>.public.")
+	log           *recordingLog                // receives the cqrs and sql logs
+	noAutoMigrate bool                         // Start does not apply migrations
+	svcOpts       []database.Option            // extra DatabaseService options
+	pgbouncer     bool                         // run through PgBouncer (migrations go direct first)
+	tenancy       bool                         // row-level security on, service connects as the non-superuser ecoop_app
+	logger        logger.LogContextService     // a real logger for every service log (takes precedence over log)
 }
+
+const (
+	defaultCDCWriteDSN = "postgres://ecoop:ecoop-test-pass@localhost:5433/ecoop_test?sslmode=disable"
+	defaultCDCReadDSN  = "postgres://ecoop:ecoop-test-pass@localhost:5434/ecoop_test?sslmode=disable"
+)
 
 // bdLedger is the service under test plus the handles a test needs to inspect it.
 type bdLedger struct {
@@ -155,6 +212,7 @@ type bdLedger struct {
 	transfers bdTransferSvc
 	audit     bdAuditSvc
 	app       string
+	opts      bdOpts
 	events    map[string]func(key, value []byte) error
 }
 
@@ -172,48 +230,174 @@ func newBDBank(t testing.TB, o bdOpts) *bdLedger {
 	if o.route == nil {
 		o.route = func(dsn string) string { return dsn }
 	}
-	h := newDBHarness(t)
+	var h *dbHarness
+	switch {
+	case o.pgbouncer:
+		// The databases must live on the server behind PgBouncer, whatever SQL_TEST_DSN points at.
+		backend := envOr("PGBOUNCER_BACKEND_DSN", defaultPostgresDSN)
+		h = newDBHarnessOn(t, backend, backend)
+	case o.target == "pg16":
+		h = newDBHarnessOn(t, envOr("CDC_WRITE_DSN", defaultCDCWriteDSN), envOr("CDC_READ_DSN", defaultCDCReadDSN))
+	default:
+		h = newDBHarness(t)
+	}
+	writeBankMigration(t)
+	if o.tenancy {
+		ensureAppRole(t)
+		must(t, os.WriteFile(filepath.Join("src", "database", "migrations", "00003_tenancy.sql"),
+			[]byte("-- +goose Up\n"+bdTenancyUp+"\n\n-- +goose Down\n"+bdTenancyDown+"\n"), 0o644))
+		// Migrate as the owner, then run the app as a role that row-level security applies to
+		// (superusers and, without FORCE, table owners bypass it).
+		direct := newBDService(t, h, bdOpts{maxOpen: 2, app: o.app + "-migrate", route: o.route, noRun: true})
+		must(t, direct.Start(bg))
+		must(t, direct.Stop(bg))
+		base := o.route
+		o.route = func(dsn string) string { return asUser(base(dsn), "ecoop_app", "ecoop-app-pass") }
+		o.noAutoMigrate = true
+	}
+	if o.pgbouncer {
+		// Migrations cannot run through a transaction pooler: apply them directly, as a deploy would.
+		direct := newBDService(t, h, bdOpts{maxOpen: 2, app: o.app + "-migrate", route: o.route, noRun: true})
+		must(t, direct.Start(bg))
+		must(t, direct.Stop(bg))
+		requireReachableHint(t, pgbouncerAddr(), "make test-up")
+		o.route = func(dsn string) string { return rehost(dsn, pgbouncerAddr()) }
+		o.noAutoMigrate = true
+		o.svcOpts = append(o.svcOpts, database.WithPgBouncer())
+	}
+	svc := newBDService(t, h, o)
+	if err := svc.Start(bg); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	b := &bdLedger{t: t, h: h, svc: svc, app: o.app, opts: o, events: map[string]func(key, value []byte) error{}}
+	t.Cleanup(func() { _ = svc.Stop(bg) })
+	t.Cleanup(b.assertPoolsDrained) // runs before Stop
+	b.bind()
+	if !o.noRun {
+		svc.Run(bg)
+		if o.broker == nil {
+			for _, ch := range []string{"bank_accounts", "bank_transfers", "bank_audit"} {
+				b.events[ch] = h.broker.await(t, ch)
+			}
+		}
+	}
+	return b
+}
+
+// bdTenancyUp turns on row-level security: each tenant sees and writes only its own rows; the
+// read-model replicator (app.role) mirrors all of them. NULLIF makes an unset tenant fail closed even on
+// a pooled session where the setting once existed (it then reads as ” rather than NULL).
+const bdTenancyUp = `-- +goose StatementBegin
+DO $$
+DECLARE t text;
+BEGIN
+	FOREACH t IN ARRAY ARRAY['bank_accounts', 'bank_transfers', 'bank_audit'] LOOP
+		EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+		EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+		EXECUTE format($p$CREATE POLICY tenant_isolation ON %I
+			USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '') OR current_setting('app.role', true) = 'replicator')
+			WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '') OR current_setting('app.role', true) = 'replicator')$p$, t);
+	END LOOP;
+END $$;
+-- +goose StatementEnd
+GRANT USAGE ON SCHEMA public TO ecoop_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ecoop_app;`
+
+const bdTenancyDown = `REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ecoop_app;
+DROP POLICY tenant_isolation ON bank_audit;
+DROP POLICY tenant_isolation ON bank_transfers;
+DROP POLICY tenant_isolation ON bank_accounts;
+ALTER TABLE bank_audit DISABLE ROW LEVEL SECURITY;
+ALTER TABLE bank_transfers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE bank_accounts DISABLE ROW LEVEL SECURITY;`
+
+// ensureAppRole creates the cluster-wide non-superuser login the tenancy tests run as.
+func ensureAppRole(t testing.TB) {
+	t.Helper()
+	admin := openInspect(t, envOr("SQL_TEST_DSN", defaultPostgresDSN))
+	_, err := admin.Exec(`DO $$ BEGIN
+		CREATE ROLE ecoop_app LOGIN PASSWORD 'ecoop-app-pass';
+	EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
+	END $$`)
+	must(t, err)
+}
+
+func asUser(dsn, user, password string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		panic(err)
+	}
+	u.User = url.UserPassword(user, password)
+	return u.String()
+}
+
+func pgbouncerAddr() string { return envOr("PGBOUNCER_TEST_ADDR", "localhost:6432") }
+
+// rehost points a DSN at another host:port, keeping database, user and parameters.
+func rehost(dsn, addr string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		panic(err)
+	}
+	u.Host = addr
+	return u.String()
+}
+
+// writeBankMigration adds the banking schema to the harness's migrations directory.
+func writeBankMigration(t testing.TB) {
+	t.Helper()
 	body := "-- +goose Up\n" + bdMigrationUp + "\n\n-- +goose Down\n" + bdMigrationDown + "\n"
 	if err := os.WriteFile(filepath.Join("src", "database", "migrations", "00002_bank.sql"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// newBDService builds (but does not start) a DatabaseService over the harness databases with the
+// three banking models registered. Several can share the same databases, like replicas of the app.
+func newBDService(t testing.TB, h *dbHarness, o bdOpts) *database.DatabaseService {
+	t.Helper()
+	var msgBroker broker.MessageBrokerServices = h.broker
+	if o.broker != nil {
+		msgBroker = o.broker
+	}
+	var logs [3]logger.LogContextService
+	switch {
+	case o.logger != nil:
+		logs = [3]logger.LogContextService{o.logger, o.logger, o.logger}
+	case o.log != nil:
+		logs = [3]logger.LogContextService{o.log, o.log, o.log}
+	}
 	svc := database.NewDatabaseService(
 		o.route(h.writerDSN)+"&application_name="+o.app+"-w", o.route(h.readerDSN)+"&application_name="+o.app+"-r",
 		o.maxOpen, o.maxOpen,
-		nil, nil, nil,
-		h.migrations, true, io.Discard, nil,
-		nil, h.broker, nil,
+		logs[0], logs[1], logs[2],
+		h.migrations, !o.noAutoMigrate, io.Discard, nil,
+		nil, msgBroker, nil,
 		100, 10*time.Millisecond,
+		o.svcOpts...,
 	)
 	must(t, database.Register(svc, database.Registration[bdAccount, bdAccountRes, bdNoRequest, string]{
-		Channel:       "bank_accounts",
+		Channel:       broadcast.Channel(o.channelPrefix + "bank_accounts"),
 		ColumnVersion: "version",
 		ToResource: func(a *bdAccount) *bdAccountRes {
 			return &bdAccountRes{ID: a.ID, Owner: a.Owner, Currency: a.Currency, Balance: a.Balance, Closed: a.ClosedAt != nil}
 		},
 	}))
 	must(t, database.Register(svc, database.Registration[bdTransfer, bdTransfer, bdNoRequest, string]{
-		Channel: "bank_transfers", ToResource: func(x *bdTransfer) *bdTransfer { return x },
+		Channel: broadcast.Channel(o.channelPrefix + "bank_transfers"), ToResource: func(x *bdTransfer) *bdTransfer { return x },
 	}))
 	must(t, database.Register(svc, database.Registration[bdAudit, bdAudit, bdNoRequest, string]{
-		Channel: "bank_audit", ToResource: func(x *bdAudit) *bdAudit { return x },
+		Channel: broadcast.Channel(o.channelPrefix + "bank_audit"), ToResource: func(x *bdAudit) *bdAudit { return x },
 	}))
-	if err := svc.Start(bg); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	b := &bdLedger{t: t, h: h, svc: svc, app: o.app, events: map[string]func(key, value []byte) error{}}
-	t.Cleanup(func() { _ = svc.Stop(bg) })
-	t.Cleanup(b.assertPoolsDrained) // runs before Stop
-	b.accounts = mustGet[bdAccount, bdAccountRes](t, svc)
-	b.transfers = mustGet[bdTransfer, bdTransfer](t, svc)
-	b.audit = mustGet[bdAudit, bdAudit](t, svc)
-	if !o.noRun {
-		svc.Run(bg)
-		for _, ch := range []string{"bank_accounts", "bank_transfers", "bank_audit"} {
-			b.events[ch] = h.broker.await(t, ch)
-		}
-	}
-	return b
+	return svc
+}
+
+// bind (re)fetches the typed model services, e.g. after a restart.
+func (b *bdLedger) bind() {
+	b.t.Helper()
+	b.accounts = mustGet[bdAccount, bdAccountRes](b.t, b.svc)
+	b.transfers = mustGet[bdTransfer, bdTransfer](b.t, b.svc)
+	b.audit = mustGet[bdAudit, bdAudit](b.t, b.svc)
 }
 
 func must(t testing.TB, err error) {
@@ -295,11 +479,14 @@ func eqFilter(field string, value any) pagination.StructuredFilter {
 // transfer and whether this call was a replay of an earlier one with the same key. Errors are
 // mapped to database.Err* kinds, or errBankNoFunds / errBankKeyReused.
 func (b *bdLedger) Transfer(ctx context.Context, r transferReq) (*bdTransfer, bool, error) {
+	if r.Amount <= 0 {
+		return nil, false, errBankBadAmount
+	}
 	var (
 		out      *bdTransfer
 		replayed bool
 	)
-	err := b.svc.Writer().Client().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	err := database.RunInTx(ctx, b.svc, nil, func(ctx context.Context, tx bun.Tx) error {
 		existing, err := b.transfers.FindOneWithTx(ctx, &tx, eqFilter("idempotency_key", r.Key))
 		switch {
 		case err == nil:
@@ -311,8 +498,10 @@ func (b *bdLedger) Transfer(ctx context.Context, r transferReq) (*bdTransfer, bo
 		return b.applyTransfer(ctx, tx, r, &out)
 	})
 	if err != nil {
-		if errors.Is(err, errBankNoFunds) {
-			return nil, false, err
+		for _, rule := range []error{errBankNoFunds, errBankAccountClosed, errBankCurrency, errBankOverflow} {
+			if errors.Is(err, rule) {
+				return nil, false, err
+			}
 		}
 		mapped := database.MapError(err)
 		if !errors.Is(mapped, database.ErrDuplicate) {
@@ -346,8 +535,15 @@ func (b *bdLedger) applyTransfer(ctx context.Context, tx bun.Tx, r transferReq, 
 	if from == nil || to == nil {
 		return sql.ErrNoRows
 	}
-	if from.Balance < r.Amount {
+	switch {
+	case from.ClosedAt != nil || to.ClosedAt != nil:
+		return errBankAccountClosed
+	case from.Currency != to.Currency:
+		return errBankCurrency
+	case from.Balance < r.Amount:
 		return errBankNoFunds
+	case to.Balance > math.MaxInt64-r.Amount: // checked before adding: int64 would wrap silently
+		return errBankOverflow
 	}
 	now := time.Now()
 	from.Balance, from.Version, from.UpdatedAt = from.Balance-r.Amount, from.Version+1, now
@@ -374,7 +570,7 @@ func (b *bdLedger) applyTransfer(ctx context.Context, tx bun.Tx, r transferReq, 
 // read-write because pagination's in-transaction reads take row locks.
 func (b *bdLedger) transferByKey(ctx context.Context, key string) (*bdTransfer, error) {
 	var out *bdTransfer
-	err := b.svc.Writer().Client().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	err := database.RunInTx(ctx, b.svc, nil, func(ctx context.Context, tx bun.Tx) error {
 		var err error
 		out, err = b.transfers.FindOneWithTx(ctx, &tx, eqFilter("idempotency_key", key))
 		return err
@@ -391,7 +587,7 @@ func (b *bdLedger) replicate() {
 	var accounts []bdAccount
 	var transfers []bdTransfer
 	var audit []bdAudit
-	w := b.svc.Writer().Client()
+	w := bun.NewDB(b.h.writer, pgdialect.New()) // superuser inspection connection: sees every tenant
 	must(b.t, w.NewSelect().Model(&accounts).Scan(bg))
 	must(b.t, w.NewSelect().Model(&transfers).Scan(bg))
 	must(b.t, w.NewSelect().Model(&audit).Scan(bg))
@@ -457,8 +653,8 @@ func retrySerializable(ctx context.Context, attempts int, fn func() error) error
 }
 
 // verifyNoDBLeaks fails if goroutines started after baseline are still running. Background
-// goroutines of other services exercised elsewhere in this package (the Redis client keeps redialing
-// after its own tests end) are ignored, so the check stays strict for database code without
+// goroutines of other services exercised elsewhere in this package (the Redis client and the
+// OpenTelemetry exporter keep redialing after their own tests end) are ignored, so the check stays strict for database code without
 // flaking on unrelated suites.
 func verifyNoDBLeaks(t testing.TB, baseline goleak.Option) {
 	t.Helper()
@@ -466,7 +662,64 @@ func verifyNoDBLeaks(t testing.TB, baseline goleak.Option) {
 		goleak.IgnoreAnyFunction("github.com/redis/go-redis/v9/internal/pool.(*ConnPool).dialConn"),
 		goleak.IgnoreAnyFunction("github.com/redis/go-redis/v9/internal/pool.(*ConnPool).tryDial"),
 		goleak.IgnoreAnyFunction("github.com/redis/go-redis/v9.(*sentinelFailover).listen"),
+		// The OpenTelemetry exporter of the logger tests keeps redialing its (deliberately absent)
+		// collector over gRPC after a shutdown that timed out.
+		goleak.IgnoreAnyFunction("google.golang.org/grpc.(*addrConn).resetTransportAndUnlock"),
+		goleak.IgnoreAnyFunction("google.golang.org/grpc/internal/grpcsync.(*CallbackSerializer).run"),
+		goleak.IgnoreAnyFunction("google.golang.org/grpc.(*ccBalancerWrapper).watcher"),
 	)
+}
+
+// sleepFilter makes the database spend `seconds` on every row it evaluates.
+func sleepFilter(seconds int) pagination.StructuredFilter {
+	return pagination.StructuredFilter{Filters: []pagination.Filter{{
+		Mode: pagination.ModeCustom,
+		Custom: func(q *bun.SelectQuery, _ any) (*bun.SelectQuery, error) {
+			return q.Where("pg_sleep(?) IS NOT NULL", seconds), nil
+		},
+	}}}
+}
+
+// queryLines runs a query whose rows are one text column and joins them with newlines ("" when the
+// only row is NULL).
+func queryLines(t testing.TB, db *sql.DB, q string) string {
+	t.Helper()
+	rows, err := db.Query(q)
+	must(t, err)
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var line sql.NullString
+		must(t, rows.Scan(&line))
+		out = append(out, line.String)
+	}
+	must(t, rows.Err())
+	return strings.Join(out, "\n")
+}
+
+// queryLog is a bun query hook that counts the statements touching a table and keeps the last one.
+type queryLog struct {
+	table string
+	n     atomic.Int64
+	mu    sync.Mutex
+	last  string
+}
+
+func (q *queryLog) BeforeQuery(ctx context.Context, _ *bun.QueryEvent) context.Context { return ctx }
+func (q *queryLog) AfterQuery(_ context.Context, e *bun.QueryEvent) {
+	if !strings.Contains(e.Query, q.table) {
+		return
+	}
+	q.n.Add(1)
+	q.mu.Lock()
+	q.last = e.Query
+	q.mu.Unlock()
+}
+
+func (q *queryLog) lastQuery() string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.last
 }
 
 // --- fault injection -------------------------------------------------------------------------------
@@ -478,9 +731,13 @@ type faultProxy struct {
 	target  string
 	refuse  atomic.Bool
 	latency atomic.Int64 // nanoseconds per chunk
-	mu      sync.Mutex
-	conns   map[net.Conn]struct{}
-	wg      sync.WaitGroup
+	// commitFault, when armed, hits the next COMMIT on any connection once:
+	// commitCutReply forwards it to the server and resets before the reply reaches the client
+	// (the transaction commits, the client cannot know); commitDrop resets before it is forwarded.
+	commitFault atomic.Int32
+	mu          sync.Mutex
+	conns       map[net.Conn]struct{}
+	wg          sync.WaitGroup
 }
 
 func newFaultProxy(t testing.TB) *faultProxy {
@@ -521,12 +778,24 @@ func (p *faultProxy) accept() {
 			continue
 		}
 		p.track(c, up)
-		p.wg.Go(func() { p.pipe(up, c) })
-		p.wg.Go(func() { p.pipe(c, up) })
+		pair := &proxyPair{client: c, server: up}
+		p.wg.Go(func() { p.pipe(up, c, pair, true) })
+		p.wg.Go(func() { p.pipe(c, up, pair, false) })
 	}
 }
 
-func (p *faultProxy) pipe(dst, src net.Conn) {
+const (
+	commitNone int32 = iota
+	commitCutReply
+	commitDrop
+)
+
+type proxyPair struct {
+	client, server net.Conn
+	cutReply       atomic.Bool
+}
+
+func (p *faultProxy) pipe(dst, src net.Conn, pair *proxyPair, fromClient bool) {
 	defer func() { _ = dst.Close(); _ = src.Close() }()
 	buf := make([]byte, 32<<10)
 	for {
@@ -534,6 +803,21 @@ func (p *faultProxy) pipe(dst, src net.Conn) {
 		if n > 0 {
 			if d := p.latency.Load(); d > 0 {
 				time.Sleep(time.Duration(d))
+			}
+			if fromClient && bytes.Contains(bytes.ToLower(buf[:n]), []byte("commit")) {
+				switch p.commitFault.Swap(commitNone) {
+				case commitDrop:
+					resetConn(pair.client)
+					resetConn(pair.server)
+					return
+				case commitCutReply:
+					pair.cutReply.Store(true) // set before the server can possibly answer
+				}
+			}
+			if !fromClient && pair.cutReply.Load() {
+				resetConn(pair.client)
+				resetConn(pair.server)
+				return
 			}
 			if _, werr := dst.Write(buf[:n]); werr != nil {
 				return
@@ -574,4 +858,77 @@ func resetConn(c net.Conn) {
 		_ = tc.SetLinger(0) // close with RST instead of FIN
 	}
 	_ = c.Close()
+}
+
+// batchBroker is an in-memory broker with batch subscriptions, so the runner takes its
+// at-least-once path: a delivered batch returns only once it is applied or dead-lettered. It records
+// everything published (the dead-letter topic).
+type batchBroker struct {
+	mu        sync.Mutex
+	handlers  map[string]func([]broker.Message) error
+	published []broker.Message
+}
+
+func newBatchBroker() *batchBroker {
+	return &batchBroker{handlers: map[string]func([]broker.Message) error{}}
+}
+
+func (*batchBroker) Run(context.Context) error  { return nil }
+func (*batchBroker) Stop(context.Context) error { return nil }
+func (b *batchBroker) Publish(_ context.Context, topic string, key, value []byte) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.published = append(b.published, broker.Message{Topic: topic, Key: key, Value: value})
+	return nil
+}
+func (b *batchBroker) PublishBatch(ctx context.Context, topic string, msgs []broker.Message) error {
+	for _, m := range msgs {
+		_ = b.Publish(ctx, topic, m.Key, m.Value)
+	}
+	return nil
+}
+func (b *batchBroker) Enqueue(ctx context.Context, topic string, key, value []byte) error {
+	return b.Publish(ctx, topic, key, value)
+}
+func (*batchBroker) Flush(context.Context) error { return nil }
+func (*batchBroker) Subscribe(ctx context.Context, _ string, _ func(key, value []byte) error) error {
+	<-ctx.Done()
+	return nil
+}
+func (b *batchBroker) SubscribeBatch(ctx context.Context, topic string, h func([]broker.Message) error) error {
+	b.mu.Lock()
+	b.handlers[topic] = h
+	b.mu.Unlock()
+	<-ctx.Done()
+	return nil
+}
+
+// deliver hands msgs to topic's runner as one batch and returns when the runner acknowledges it.
+func (b *batchBroker) deliver(t testing.TB, topic string, msgs ...broker.Message) error {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		b.mu.Lock()
+		h := b.handlers[topic]
+		b.mu.Unlock()
+		if h != nil {
+			return h(msgs)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no runner subscribed to %q", topic)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func (b *batchBroker) publishedTo(topic string) []broker.Message {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []broker.Message
+	for _, m := range b.published {
+		if m.Topic == topic {
+			out = append(out, m)
+		}
+	}
+	return out
 }

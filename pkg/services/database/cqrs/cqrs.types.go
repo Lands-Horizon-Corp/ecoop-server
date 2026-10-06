@@ -45,6 +45,8 @@ type (
 
 	CQRSServices[TData any, TResponse any, TRequest any, TID comparable] interface {
 		Run(ctx context.Context) error
+		// Shutdown drains the queued change hooks; call it after the runner stopped.
+		Shutdown(ctx context.Context) error
 
 		StartTx(ctx context.Context) (bun.Tx, error)
 		EndTx(ctx context.Context, tx bun.Tx, err error) error

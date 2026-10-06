@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"math"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
@@ -18,7 +19,9 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) IncrementByID(
 	if err != nil {
 		return nil, err
 	}
-	return incrementByID[TData](ctx, db, c.ColumnDefaultID, id, field, delta)
+	return sqlsvc.Scoped(ctx, db, func(q bun.IDB) (*TData, error) {
+		return incrementByID[TData](ctx, q, c.ColumnDefaultID, id, field, delta)
+	})
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) IncrementByIDWithTx(

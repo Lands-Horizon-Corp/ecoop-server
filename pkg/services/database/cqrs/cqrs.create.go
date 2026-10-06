@@ -3,6 +3,7 @@ package cqrs
 import (
 	"context"
 	"fmt"
+	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 
 	"github.com/uptrace/bun"
 )
@@ -21,7 +22,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Create(
 	if err != nil {
 		return nil, err
 	}
-	return c.insertOne(ctx, db, data, preload)
+	return sqlsvc.Scoped(ctx, db, func(q bun.IDB) (*TData, error) { return c.insertOne(ctx, q, data, preload) })
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateFormat(
@@ -56,7 +57,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateMany(
 	if err != nil {
 		return nil, err
 	}
-	return c.insertMany(ctx, db, data, preload)
+	return sqlsvc.Scoped(ctx, db, func(q bun.IDB) ([]*TData, error) { return c.insertMany(ctx, q, data, preload) })
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateManyFormat(
@@ -126,7 +127,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) insertOne(
 	if err := checkDB(db); err != nil {
 		return nil, err
 	}
-	if err := c.checkText(&data); err != nil {
+	if err := c.prepareText(&data); err != nil {
 		return nil, err
 	}
 	_, err := db.NewInsert().
@@ -151,10 +152,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) insertMany(
 	if err := checkDB(db); err != nil {
 		return nil, err
 	}
-	if err := c.checkTexts(data); err != nil {
+	data, err := c.prepareTexts(data)
+	if err != nil {
 		return nil, err
 	}
-	_, err := db.NewInsert().
+	_, err = db.NewInsert().
 		Model(&data).
 		Returning("*").
 		Exec(ctx)

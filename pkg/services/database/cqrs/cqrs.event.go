@@ -28,8 +28,8 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) handleEvent(
 	if data == nil || c.ToResource == nil {
 		return
 	}
-	asyncCtx := context.WithoutCancel(ctx)
-	go func(ctx context.Context, data *TData) {
+	ctx = context.WithoutCancel(ctx)
+	job := func() {
 		defer func() {
 			if re := recover(); re != nil {
 				c.error(ctx, fmt.Errorf("panic: %v", re), "event handler panicked", "event_type", eventType.String())
@@ -56,5 +56,8 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) handleEvent(
 				c.error(ctx, err, "event broadcast failed", "event_type", eventType.String(), "events", events)
 			}
 		}
-	}(asyncCtx, data)
+	}
+	if !c.hooks.submit(job) {
+		c.warn(ctx, "change hook dropped: service is shutting down", "event_type", eventType.String())
+	}
 }

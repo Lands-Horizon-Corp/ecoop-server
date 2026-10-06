@@ -3,6 +3,7 @@ package pagination
 import (
 	"context"
 	"errors"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"reflect"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ func (c *PaginationService[TData, TID]) warn(_ context.Context, msg string, kv .
 
 func (c *PaginationService[TData, TID]) error(_ context.Context, err error, msg string, kv ...any) {
 	c.emit("pagination.error", func(l logger.LoggerLevel) {
-		l.Error(err, msg, c.fields(kv)...)
+		l.Error(sql.Redact(err), msg, c.fields(kv)...)
 	})
 }
 

@@ -2,6 +2,7 @@ package pagination
 
 import (
 	"fmt"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"reflect"
 	"strings"
 
@@ -77,6 +78,11 @@ func (c *PaginationService[TData, TID]) decodeCursor(
 	if err != nil {
 		return cursorPayload{}, false, fmt.Errorf("%w: decoding: %w", ErrInvalidCursor, err)
 	}
+	clean, err := sql.CleanText(reflect.ValueOf(payload.Values), sql.TextPolicy{Normalize: true})
+	if err != nil {
+		return cursorPayload{}, false, fmt.Errorf("%w: %w", ErrInvalidCursor, err)
+	}
+	payload.Values = clean.Interface().([]string)
 	if len(payload.Values) != len(sortFields) {
 		return cursorPayload{}, false, fmt.Errorf(
 			"%w: does not match the current sort fields: expected %d values, got %d",

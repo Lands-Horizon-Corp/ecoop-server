@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
+	"github.com/uptrace/bun"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -157,4 +159,26 @@ func BenchmarkBankDBTransfer(b *testing.B) {
 	})
 	b.StopTimer()
 	verifyNoDBLeaks(b, baseline)
+}
+
+func TestBankDBLeak_CancelledContextIsRefusedEverywhere(t *testing.T) {
+	b := newBDBank(t, bdOpts{noRun: true})
+	ctx, cancel := context.WithCancel(bg)
+	cancel()
+	for name, call := range map[string]func() error{
+		"cqrs StartTx":    func() error { return second(b.accounts.StartTx(ctx)) },
+		"cqrs Create":     func() error { return second(b.accounts.Create(ctx, bdAccount{ID: "x", Owner: "x"})) },
+		"pagination Find": func() error { return second(b.accounts.Find(ctx, pagination.StructuredFilter{})) },
+		"database.RunInTx": func() error {
+			return database.RunInTx(ctx, b.svc, nil, func(context.Context, bun.Tx) error { return nil })
+		},
+		"sql migration": func() error { return b.svc.Writer().Migrate(ctx) },
+	} {
+		if err := call(); !errors.Is(err, context.Canceled) {
+			t.Errorf("%s with a cancelled context = %v; want context.Canceled", name, err)
+		}
+	}
+	if n := count(t, b.h.writer, `SELECT count(*) FROM bank_accounts`); n != 0 {
+		t.Fatalf("%d rows written with a cancelled context", n)
+	}
 }

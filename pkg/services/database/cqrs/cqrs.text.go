@@ -3,13 +3,13 @@ package cqrs
 import (
 	"fmt"
 	"reflect"
-	"strings"
-	"unicode/utf8"
+
+	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 )
 
-// Postgres text cannot hold NUL bytes or invalid UTF-8, and bun inlines values into the SQL text:
-// a NUL truncates the statement and invalid UTF-8 is silently replaced with U+FFFD. Both are
-// rejected before the write so stored data is always exactly what the caller sent.
+// Text written through the service is checked and cleaned before any SQL runs (sql.CleanText):
+// invalid UTF-8 and NUL bytes are always refused; unless RawText is set, strings are also normalized
+// to NFC and U+FFFD, control and BiDi override characters are refused.
 
 // textFieldIndexes lists the fields of TData that can carry text: strings, *string, []string and
 // maps (JSON documents). It is computed once per service.
@@ -35,66 +35,34 @@ func textFieldIndexes[TData any]() []int {
 	return out
 }
 
-func (c *CQRSService[TData, TResponse, TRequest, TID]) checkText(data *TData) error {
+// prepareText validates and normalizes the text fields of data in place (data is the service's own
+// copy of the record).
+func (c *CQRSService[TData, TResponse, TRequest, TID]) prepareText(data *TData) error {
 	if len(c.textFields) == 0 || data == nil {
 		return nil
 	}
 	v := reflect.ValueOf(data).Elem()
 	for _, i := range c.textFields {
-		if err := checkTextValue(v.Field(i)); err != nil {
-			return fmt.Errorf("%w: field %s: %w", ErrInvalidText, v.Type().Field(i).Name, err)
+		clean, err := sqlsvc.CleanText(v.Field(i), sqlsvc.TextPolicy{Normalize: !c.RawText, RejectUnsafe: !c.RawText})
+		if err != nil {
+			return fmt.Errorf("field %s: %w", v.Type().Field(i).Name, err)
 		}
+		v.Field(i).Set(clean)
 	}
 	return nil
 }
 
-func (c *CQRSService[TData, TResponse, TRequest, TID]) checkTexts(data []TData) error {
-	for i := range data {
-		if err := c.checkText(&data[i]); err != nil {
-			return fmt.Errorf("record %d: %w", i, err)
+// prepareTexts is prepareText for a batch; it returns a copy so the caller's slice is untouched.
+func (c *CQRSService[TData, TResponse, TRequest, TID]) prepareTexts(data []TData) ([]TData, error) {
+	if len(c.textFields) == 0 {
+		return data, nil
+	}
+	out := make([]TData, len(data))
+	copy(out, data)
+	for i := range out {
+		if err := c.prepareText(&out[i]); err != nil {
+			return nil, fmt.Errorf("record %d: %w", i, err)
 		}
 	}
-	return nil
-}
-
-func checkTextValue(v reflect.Value) error {
-	switch v.Kind() {
-	case reflect.String:
-		return checkString(v.String())
-	case reflect.Pointer, reflect.Interface:
-		if v.IsNil() {
-			return nil
-		}
-		return checkTextValue(v.Elem())
-	case reflect.Slice, reflect.Array:
-		if v.Type().Elem().Kind() == reflect.Uint8 {
-			return nil // bytes are stored as bytea
-		}
-		for i := range v.Len() {
-			if err := checkTextValue(v.Index(i)); err != nil {
-				return err
-			}
-		}
-	case reflect.Map:
-		iter := v.MapRange()
-		for iter.Next() {
-			if err := checkTextValue(iter.Key()); err != nil {
-				return err
-			}
-			if err := checkTextValue(iter.Value()); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func checkString(s string) error {
-	if !utf8.ValidString(s) {
-		return fmt.Errorf("invalid UTF-8")
-	}
-	if strings.IndexByte(s, 0) >= 0 {
-		return fmt.Errorf("contains a NUL byte")
-	}
-	return nil
+	return out, nil
 }

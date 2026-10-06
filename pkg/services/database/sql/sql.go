@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync/atomic"
+	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
 	"github.com/pressly/goose/v3"
@@ -19,13 +21,19 @@ type SQLService struct {
 	maxIdleConn int
 	maxOpenConn int
 	autoMigrate bool
-	db          *bun.DB
-	sqldb       *sql.DB
-	migrations  *os.File
-	output      io.Writer
-	models      []any
+	// db and sqldb are swapped by Run/Stop while requests may be reading them (a shutdown during
+	// traffic), so they are atomic; a request sees either the open pool or nil, never a torn value.
+	db         atomic.Pointer[bun.DB]
+	sqldb      atomic.Pointer[sql.DB]
+	migrations *os.File
+	output     io.Writer
+	models     []any
 
 	log logger.LogContextService
+
+	connMaxLifetime time.Duration
+	connMaxIdleTime time.Duration
+	dbSettings      map[string]string
 }
 
 func NewSQLService(
@@ -38,8 +46,9 @@ func NewSQLService(
 	models []any,
 
 	log logger.LogContextService,
+	opts ...Option,
 ) SQLServices {
-	return &SQLService{
+	s := &SQLService{
 		dsn:         dsn,
 		maxIdleConn: maxIdleConn,
 		maxOpenConn: maxOpenConn,
@@ -50,28 +59,39 @@ func NewSQLService(
 
 		log: log,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *SQLService) Client() *bun.DB {
-	return s.db
+	return s.db.Load()
 }
 
 func (s *SQLService) observe(name string, fn func() error, attrs ...attribute.KeyValue) error {
 	if s.log == nil {
 		return fn()
 	}
-	return s.log.Observe(name, fn, attrs...)
+	var orig error
+	_ = s.log.Observe(name, func() error {
+		orig = fn()
+		return Redact(orig) // logged redacted, returned intact
+	}, attrs...)
+	return orig
 }
 
 func (s *SQLService) Ping(ctx context.Context) error {
-	if s.db == nil {
+	db := s.db.Load()
+	if db == nil {
 		return ErrNotInitialized
 	}
-	return s.db.PingContext(ctx)
+	return db.PingContext(ctx)
 }
 
 func (s *SQLService) provider() (*goose.Provider, error) {
-	if s.sqldb == nil {
+	sqldb := s.sqldb.Load()
+	if sqldb == nil {
 		return nil, ErrNotInitialized
 	}
 	dir, err := s.migrationsPath()
@@ -82,7 +102,7 @@ func (s *SQLService) provider() (*goose.Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating migration lock: %w", err)
 	}
-	return goose.NewProvider(goose.DialectPostgres, s.sqldb, os.DirFS(dir), goose.WithSessionLocker(locker))
+	return goose.NewProvider(goose.DialectPostgres, sqldb, os.DirFS(dir), goose.WithSessionLocker(locker))
 }
 
 func (s *SQLService) migrationsPath() (string, error) {

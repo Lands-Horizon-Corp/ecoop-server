@@ -3,6 +3,7 @@ package pagination
 import (
 	"context"
 	"fmt"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"math"
 	"time"
 
@@ -23,25 +24,7 @@ func (c *PaginationService[TData, TID]) Pagination(
 }
 
 // checkDB rejects a nil or zero-value connection or transaction before it is dereferenced.
-func checkDB(db bun.IDB) error {
-	switch v := db.(type) {
-	case nil:
-		return ErrReadDBNotInitialized
-	case *bun.DB:
-		if v == nil {
-			return ErrReadDBNotInitialized
-		}
-	case bun.Tx:
-		if v.Tx == nil {
-			return ErrNilTx
-		}
-	case *bun.Tx:
-		if v == nil || v.Tx == nil {
-			return ErrNilTx
-		}
-	}
-	return nil
-}
+func checkDB(db bun.IDB) error { return sql.CheckDB(db, ErrReadDBNotInitialized) }
 
 func (c *PaginationService[TData, TID]) checkReady() error {
 	if c.ReadSQLService == nil {
@@ -64,8 +47,13 @@ func (c *PaginationService[TData, TID]) paginate(
 	forUpdate bool,
 	preloads ...string,
 ) (*PaginationResult[TData], error) {
+	if forUpdate && sql.RowLocksDisabled(ctx) {
+		forUpdate = false
+	}
 	started := time.Now()
-	result, err := c.paginateQuery(ctx, db, extraFilter, pagination, forUpdate, preloads...)
+	result, err := sql.Scoped(ctx, db, func(q bun.IDB) (*PaginationResult[TData], error) {
+		return c.paginateQuery(ctx, q, extraFilter, pagination, forUpdate, preloads...)
+	})
 	if err != nil {
 		return nil, c.report(ctx, "paginate", started, err,
 			[]any{"page_size", pagination.PageSize, "has_cursor", pagination.Cursor != nil, "for_update", forUpdate},

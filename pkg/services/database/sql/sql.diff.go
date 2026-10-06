@@ -14,7 +14,7 @@ import (
 
 func (s *SQLService) Diff(ctx context.Context, name string) (path string, err error) {
 	err = s.observe("sql.diff", func() (e error) {
-		if s.db == nil {
+		if s.db.Load() == nil {
 			return ErrNotInitialized
 		}
 		if len(s.models) == 0 {
@@ -41,7 +41,7 @@ func (s *SQLService) Diff(ctx context.Context, name string) (path string, err er
 			return fmt.Errorf("creating scratch directory: %w", err)
 		}
 		defer os.RemoveAll(tmp)
-		am, err := migrate.NewAutoMigrator(s.db,
+		am, err := migrate.NewAutoMigrator(s.db.Load(),
 			migrate.WithModel(s.models...),
 			migrate.WithExcludeTable(goose.DefaultTablename),
 			migrate.WithMigrationsDirectoryAuto(tmp),
@@ -96,7 +96,11 @@ func (s *SQLService) requireNoPending(ctx context.Context) error {
 }
 
 func (s *SQLService) validateMigration(ctx context.Context, up, down string) error {
-	tx, err := s.sqldb.BeginTx(ctx, nil)
+	sqldb := s.sqldb.Load()
+	if sqldb == nil {
+		return ErrNotInitialized
+	}
+	tx, err := sqldb.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("validating migration: %w", err)
 	}

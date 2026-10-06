@@ -3,6 +3,7 @@ package pagination
 import (
 	"context"
 	"fmt"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -30,7 +31,7 @@ func (c *PaginationService[TData, TID]) exists(
 	ctx context.Context, db bun.IDB, filter StructuredFilter,
 ) (bool, error) {
 	started := time.Now()
-	ok, err := c.existsQuery(ctx, db, filter)
+	ok, err := sql.Scoped(ctx, db, func(q bun.IDB) (bool, error) { return c.existsQuery(ctx, q, filter) })
 	if err != nil {
 		return false, c.report(ctx, "exists", started, err, nil, filter)
 	}

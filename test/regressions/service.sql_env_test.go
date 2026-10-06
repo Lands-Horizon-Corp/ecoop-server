@@ -36,7 +36,12 @@ type sqlEnv struct {
 // createTestDatabase makes an empty throwaway database and returns its name and DSN.
 func createTestDatabase(t testing.TB) (name, dsn string) {
 	t.Helper()
-	adminDSN := envOr("SQL_TEST_DSN", defaultPostgresDSN)
+	return createDatabaseOn(t, envOr("SQL_TEST_DSN", defaultPostgresDSN))
+}
+
+// createDatabaseOn is createTestDatabase on the server behind adminDSN.
+func createDatabaseOn(t testing.TB, adminDSN string) (name, dsn string) {
+	t.Helper()
 	u, err := url.Parse(adminDSN)
 	if err != nil {
 		t.Fatalf("SQL_TEST_DSN: %v", err)

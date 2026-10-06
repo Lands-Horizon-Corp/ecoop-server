@@ -75,8 +75,15 @@ func dbMemberRegistration() database.Registration[dbMember, dbMemberResource, db
 // DatabaseService over them with dbMember registered. It does not start the service.
 func newDBHarness(t testing.TB) *dbHarness {
 	t.Helper()
-	_, writerDSN := createTestDatabase(t)
-	_, readerDSN := createTestDatabase(t)
+	admin := envOr("SQL_TEST_DSN", defaultPostgresDSN)
+	return newDBHarnessOn(t, admin, admin)
+}
+
+// newDBHarnessOn is newDBHarness with the writer and reader databases on the given servers.
+func newDBHarnessOn(t testing.TB, writerAdmin, readerAdmin string) *dbHarness {
+	t.Helper()
+	_, writerDSN := createDatabaseOn(t, writerAdmin)
+	_, readerDSN := createDatabaseOn(t, readerAdmin)
 
 	t.Chdir(t.TempDir())
 	dir := filepath.Join("src", "database", "migrations")

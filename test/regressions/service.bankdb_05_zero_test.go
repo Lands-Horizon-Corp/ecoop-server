@@ -2,6 +2,8 @@ package regressions
 
 import (
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -120,7 +122,7 @@ func TestBankDBZero_MissingRelationsFailWithStructuredErrors(t *testing.T) {
 			var err error
 			noPanic(t, name, func() { got, err = c.call() })
 			requireKind(t, err, c.kind)
-			if !isNilValue(got) {
+			if v := reflect.ValueOf(got); got != nil && !v.IsNil() {
 				t.Fatalf("returned a non-nil model %+v alongside the error", got)
 			}
 		})
@@ -155,19 +157,45 @@ func TestBankDBZero_EmptyCollectionsAreSafe(t *testing.T) {
 	}
 }
 
-func isNilValue(v any) bool {
-	if v == nil {
-		return true
+func TestBankDBZero_CursorOverANullableSortColumnVisitsEveryRow(t *testing.T) {
+	b := newBDBank(t, bdOpts{noRun: true})
+	for i := range 12 {
+		var closed any // every third account is open (closed_at NULL)
+		if i%3 != 0 {
+			closed = time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC)
+		}
+		_, err := b.h.reader.Exec(`INSERT INTO bank_accounts (id, owner, balance, closed_at) VALUES ($1, $1, 0, $2)`, fmt.Sprintf("n%02d", i), closed)
+		must(t, err)
 	}
-	switch x := v.(type) {
-	case *bdAccount:
-		return x == nil
-	case *bdAccountRes:
-		return x == nil
-	case *bdAudit:
-		return x == nil
-	case *bdTransfer:
-		return x == nil
+	ctx := withDeadline(t, 10*time.Second)
+	page := pagination.Pagination{PageSize: 5, Filter: pagination.StructuredFilter{
+		SortFields: []pagination.SortField{{Field: "closed_at", Order: pagination.SortOrderAsc}}}}
+	seen := map[string]int{}
+	var pages []pagination.PaginationResult[bdAccount]
+	for {
+		res, err := b.accounts.Paginate(ctx, page)
+		must(t, err)
+		pages = append(pages, res)
+		for _, a := range res.Data {
+			seen[a.ID]++
+		}
+		if res.NextCursor == nil {
+			break
+		}
+		page.Cursor = res.NextCursor
 	}
-	return false
+	if len(seen) != 12 {
+		t.Fatalf("visited %d distinct rows; want 12 (rows with NULL lost): %v", len(seen), seen)
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("%s visited %d times", id, n)
+		}
+	}
+	page.Cursor = pages[1].PreviousCursor
+	back, err := b.accounts.Paginate(ctx, page)
+	must(t, err)
+	if fmt.Sprint(accountIDs(back.Data)) != fmt.Sprint(accountIDs(pages[0].Data)) {
+		t.Fatalf("backward page = %v; want %v", accountIDs(back.Data), accountIDs(pages[0].Data))
+	}
 }

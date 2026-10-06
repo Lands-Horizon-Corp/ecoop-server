@@ -1,10 +1,14 @@
 package pagination
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
+)
 
 var (
 	ErrReadServiceRequired    = errors.New("pagination: ReadSQLService must be set")
-	ErrNilTx                  = errors.New("pagination: transaction is nil or was never started")
+	ErrNilTx                  = sql.ErrNilTx
 	ErrReadDBNotInitialized   = errors.New("pagination: read db is not initialized")
 	ErrColumnDefaultIDMissing = errors.New("pagination: ColumnDefaultID must be set")
 	ErrInvalidPartitionKey    = errors.New("pagination: partition column must be part of the primary key")

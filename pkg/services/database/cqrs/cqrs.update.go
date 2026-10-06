@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 
 	"github.com/uptrace/bun"
 )
@@ -23,7 +24,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateByID(
 	if err != nil {
 		return nil, err
 	}
-	return c.updateOne(ctx, db, id, data, preload)
+	return sqlsvc.Scoped(ctx, db, func(q bun.IDB) (*TData, error) { return c.updateOne(ctx, q, id, data, preload) })
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) updateOne(
@@ -36,7 +37,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) updateOne(
 	if err := checkDB(db); err != nil {
 		return nil, err
 	}
-	if err := c.checkText(&data); err != nil {
+	if err := c.prepareText(&data); err != nil {
 		return nil, err
 	}
 	res, err := db.NewUpdate().
@@ -66,10 +67,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) updateMany(
 	if err := checkDB(db); err != nil {
 		return nil, err
 	}
-	if err := c.checkTexts(data); err != nil {
+	data, err := c.prepareTexts(data)
+	if err != nil {
 		return nil, err
 	}
-	_, err := db.NewUpdate().
+	_, err = db.NewUpdate().
 		Model(&data).
 		Bulk().
 		Exec(ctx)
@@ -123,7 +125,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateMany(
 	if err != nil {
 		return nil, err
 	}
-	return c.updateMany(ctx, db, data, preload)
+	return sqlsvc.Scoped(ctx, db, func(q bun.IDB) ([]*TData, error) { return c.updateMany(ctx, q, data, preload) })
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateManyFormat(

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 )
 
 func BunColumnFieldIndex[T any](column string) int {
@@ -73,6 +74,11 @@ func formatFieldValue(f reflect.Value) string {
 		if f.IsNil() {
 			return ""
 		}
+	}
+	// %v prints a time with its zone abbreviation ("+0800 PST" for Manila), which Postgres reads as
+	// a different zone or rejects; RFC 3339 in UTC is unambiguous.
+	if t, ok := f.Interface().(time.Time); ok {
+		return t.UTC().Format(time.RFC3339Nano)
 	}
 	return fmt.Sprintf("%v", f.Interface())
 }

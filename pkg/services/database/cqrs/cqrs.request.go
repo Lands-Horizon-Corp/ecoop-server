@@ -3,6 +3,7 @@ package cqrs
 import (
 	"context"
 	"fmt"
+	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 
 	"github.com/uptrace/bun"
 )
@@ -56,7 +57,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateWithValidation(
 	if err != nil {
 		return nil, err
 	}
-	return c.insertOne(ctx, db, data, preload)
+	return sqlsvc.Scoped(ctx, db, func(q bun.IDB) (*TData, error) { return c.insertOne(ctx, q, data, preload) })
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateWithValidationFormat(
@@ -113,7 +114,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithValidation(
 	if err != nil {
 		return nil, err
 	}
-	return c.insertMany(ctx, db, data, preload)
+	return sqlsvc.Scoped(ctx, db, func(q bun.IDB) ([]*TData, error) { return c.insertMany(ctx, q, data, preload) })
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithValidationFormat(
@@ -171,7 +172,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateByIDWithValidation(
 	if err != nil {
 		return nil, err
 	}
-	return c.updateOne(ctx, db, id, data, preload)
+	return sqlsvc.Scoped(ctx, db, func(q bun.IDB) (*TData, error) { return c.updateOne(ctx, q, id, data, preload) })
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateByIDWithValidationFormat(
@@ -231,7 +232,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateManyWithValidation(
 	if err != nil {
 		return nil, err
 	}
-	return c.updateMany(ctx, db, data, preload)
+	return sqlsvc.Scoped(ctx, db, func(q bun.IDB) ([]*TData, error) { return c.updateMany(ctx, q, data, preload) })
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateManyWithValidationFormat(

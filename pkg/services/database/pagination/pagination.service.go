@@ -63,7 +63,12 @@ func (c *PaginationService[TData, TID]) PaginateWithHertz(
 	if err := pagination.Parse(reqCtx); err != nil {
 		return PaginationResult[TData]{}, err
 	}
-	result, err := c.paginate(ctx, tx, filter, pagination, false)
+	// Without a transaction an HTTP listing reads the read model, like Paginate.
+	var db bun.IDB = c.ReadSQLService.Client()
+	if tx != nil {
+		db = tx
+	}
+	result, err := c.paginate(ctx, db, filter, pagination, false)
 	if err != nil {
 		return PaginationResult[TData]{}, err
 	}

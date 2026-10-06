@@ -79,6 +79,117 @@ services:
             retries: 20
             start_period: 15s
 
+    # PgBouncer in transaction pooling mode in front of `postgres` (PGBOUNCER_TEST_DSN), matching
+    # production. No DB_NAME, so it serves every database (the tests create throwaway ones).
+    pgbouncer:
+        image: edoburu/pgbouncer:latest
+        environment:
+            DB_HOST: postgres
+            DB_USER: ecoop
+            DB_PASSWORD: ecoop-test-pass
+            AUTH_TYPE: scram-sha-256
+            POOL_MODE: transaction
+            MAX_PREPARED_STATEMENTS: '200'
+            DEFAULT_POOL_SIZE: '20'
+            MAX_CLIENT_CONN: '500'
+        ports: ['6432:5432']
+        depends_on:
+            postgres:
+                condition: service_healthy
+        healthcheck:
+            test: ['CMD-SHELL', 'nc -z 127.0.0.1 5432']
+            interval: 2s
+            timeout: 2s
+            retries: 15
+
+    # --- `cdc` profile: production parity for the CDC, extension and PG16 suites -------------------
+    # `make test-up-cdc`. Postgres 16 like production: a logical-replication writer for Debezium and a
+    # read side with pg_search (BM25) and pg_partman. Kafka and Debezium Connect are separate from the
+    # plain `kafka` above because Connect needs a listener it can reach inside the network.
+    pg16-write:
+        profiles: [cdc]
+        image: pgvector/pgvector:pg16
+        environment:
+            POSTGRES_USER: ecoop
+            POSTGRES_PASSWORD: ecoop-test-pass
+            POSTGRES_DB: ecoop_test
+        command: [postgres, -c, wal_level=logical, -c, max_wal_senders=40, -c, max_replication_slots=40]
+        ports: ['5433:5432']
+        networks: [default, cdc]
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U ecoop -d ecoop_test']
+            interval: 2s
+            timeout: 2s
+            retries: 30
+
+    pg16-read:
+        profiles: [cdc]
+        build: ./.docker/postgres-read
+        image: ecoop-server-pg16-read:latest
+        environment:
+            POSTGRES_USER: ecoop
+            POSTGRES_PASSWORD: ecoop-test-pass
+            POSTGRES_DB: ecoop_test
+        # pg_search, pg_duckdb and timescaledb only activate when preloaded.
+        command: [postgres, -c, 'shared_preload_libraries=pg_duckdb,timescaledb,pg_search']
+        ports: ['5434:5432']
+        networks: [default, cdc]
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U ecoop -d ecoop_test']
+            interval: 2s
+            timeout: 2s
+            retries: 30
+
+    cdc-kafka:
+        profiles: [cdc]
+        image: apache/kafka:3.9.0
+        # INTERNAL is what Debezium Connect uses inside the network; EXTERNAL is for the tests on the
+        # host (CDC_KAFKA_BROKERS=localhost:9094).
+        environment:
+            KAFKA_NODE_ID: 1
+            KAFKA_PROCESS_ROLES: broker,controller
+            KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9094,CONTROLLER://:9093
+            KAFKA_ADVERTISED_LISTENERS: INTERNAL://cdc-kafka:29092,EXTERNAL://localhost:9094
+            KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+            KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+            KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+            KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+            KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+            KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+            KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+            KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+            KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+        ports: ['9094:9094']
+        networks: [cdc]
+        healthcheck:
+            test: ['CMD-SHELL', '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 > /dev/null 2>&1']
+            interval: 5s
+            timeout: 10s
+            retries: 20
+            start_period: 15s
+
+    debezium-connect:
+        profiles: [cdc]
+        image: debezium/connect:2.7.3.Final
+        environment:
+            BOOTSTRAP_SERVERS: cdc-kafka:29092
+            GROUP_ID: ecoop-connect
+            CONFIG_STORAGE_TOPIC: ecoop_connect_configs
+            OFFSET_STORAGE_TOPIC: ecoop_connect_offsets
+            STATUS_STORAGE_TOPIC: ecoop_connect_status
+        ports: ['8083:8083']
+        networks: [cdc]
+        depends_on:
+            cdc-kafka:
+                condition: service_healthy
+            pg16-write:
+                condition: service_healthy
+        healthcheck:
+            test: ['CMD-SHELL', 'curl -sf http://localhost:8083/connectors > /dev/null']
+            interval: 5s
+            timeout: 5s
+            retries: 40
+
     loki:
         image: grafana/loki:latest
         command: -config.file=/etc/loki/loki-config.yaml
@@ -126,3 +237,4 @@ volumes:
 
 networks:
     obs:
+    cdc:

@@ -1,7 +1,12 @@
-.PHONY: test test-up test-down test-default test-race test-all test-v vet migrate-up migrate-down migrate-status migrate-create migrate-diff migrate-watch atlas-diff
+.PHONY: test test-up test-down test-default test-race test-all test-v vet test-up-cdc test-down-cdc test-cdc test-pg16 test-pgbouncer test-chaos test-soak fuzz migrate-up migrate-down migrate-status migrate-create migrate-diff migrate-watch atlas-diff
 
 # Services the tests need: Redis, Redis Sentinel, Postgres and Kafka (see docker-compose.yml).
-TEST_SERVICES := redis redis-master redis-sentinel postgres kafka
+TEST_SERVICES := redis redis-master redis-sentinel postgres kafka pgbouncer
+# Production-parity services for the CDC, extension and Postgres 16 suites (the `cdc` compose profile).
+CDC_SERVICES := pg16-write pg16-read cdc-kafka debezium-connect
+PG16_DSN := postgres://ecoop:ecoop-test-pass@localhost:5433/ecoop_test?sslmode=disable
+FUZZTIME ?= 30s
+SOAK_DURATION ?= 10m
 TESTFLAGS ?= -count=1 -timeout 10m
 
 # `make test-all` runs the suite under every build-tag variant: the default build (!race) and the
@@ -24,6 +29,37 @@ test-race: test-up
 
 vet:
 	go vet ./...
+
+test-up-cdc:
+	docker compose --profile cdc up -d --wait $(CDC_SERVICES)
+
+test-down-cdc:
+	docker compose --profile cdc stop $(CDC_SERVICES)
+
+# Real Postgres -> Debezium -> Kafka -> runner chain, pg_search / pg_partman pagination.
+test-cdc: test-up test-up-cdc
+	go test -race $(TESTFLAGS) ./test/regressions/ -run 'TestCDC|TestBankDBPaginationExt'
+
+# The whole banking suite against Postgres 16, the production major version.
+test-pg16: test-up test-up-cdc
+	SQL_TEST_DSN='$(PG16_DSN)' go test -race $(TESTFLAGS) ./test/regressions/ -run 'TestBankDB'
+
+test-pgbouncer: test-up
+	go test -race $(TESTFLAGS) ./test/regressions/ -run 'TestBankDBPgBouncer'
+
+# Restarts the Postgres container and runs pg_dump/pg_restore through docker; opt-in.
+test-chaos: test-up
+	DOCKER_CHAOS=1 go test -race $(TESTFLAGS) ./test/regressions/ -run 'TestBankDBFailover|TestBankDBBackup'
+
+test-soak: test-up
+	SOAK_DURATION=$(SOAK_DURATION) go test -timeout 0 -count=1 ./test/regressions/ -run 'TestBankDBSoak' -v
+
+# Each fuzz target runs for FUZZTIME (go test allows one -fuzz target per run). Four workers: each one
+# builds its own databases, and more would exhaust Postgres's 100 connections.
+fuzz: test-up
+	@for f in FuzzDebeziumDecode FuzzRunnerPayload FuzzFilterValue FuzzCursorDecode FuzzCheckText; do \
+		echo "== $$f =="; go test ./test/regressions/ -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZTIME) -parallel 4 || exit 1; \
+	done
 
 # Like test-all, but lists every test's result and a passed/failed/skipped count per build variant.
 test-v: vet test-up

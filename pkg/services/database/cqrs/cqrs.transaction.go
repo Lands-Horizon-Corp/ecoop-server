@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 
 	"github.com/uptrace/bun"
 )
@@ -22,25 +23,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) writeDB() (*bun.DB, error
 }
 
 // checkDB rejects a nil or zero-value connection or transaction before it is dereferenced.
-func checkDB(db bun.IDB) error {
-	switch v := db.(type) {
-	case nil:
-		return ErrWriteDBNotInitialized
-	case *bun.DB:
-		if v == nil {
-			return ErrWriteDBNotInitialized
-		}
-	case bun.Tx:
-		if v.Tx == nil {
-			return ErrNilTx
-		}
-	case *bun.Tx:
-		if v == nil || v.Tx == nil {
-			return ErrNilTx
-		}
-	}
-	return nil
-}
+func checkDB(db bun.IDB) error { return sqlsvc.CheckDB(db, ErrWriteDBNotInitialized) }
 
 // Transactions
 func (c *CQRSService[TData, TResponse, TRequest, TID]) StartTx(ctx context.Context) (bun.Tx, error) {
@@ -51,6 +34,10 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) StartTx(ctx context.Conte
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return bun.Tx{}, fmt.Errorf("starting transaction: %w", err)
+	}
+	if err := sqlsvc.SetTenant(ctx, tx); err != nil {
+		_ = tx.Rollback()
+		return bun.Tx{}, fmt.Errorf("scoping transaction to tenant: %w", err)
 	}
 	return tx, nil
 }

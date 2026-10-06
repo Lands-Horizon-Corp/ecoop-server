@@ -3,6 +3,7 @@ package cqrs
 import (
 	"context"
 	"errors"
+	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
 )
@@ -32,7 +33,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) error(_ context.Context, 
 		err = errors.New(msg)
 	}
 	c.emit("cqrs.error", func(l logger.LoggerLevel) {
-		l.Error(err, msg, c.fields(kv)...)
+		l.Error(sqlsvc.Redact(err), msg, c.fields(kv)...)
 	})
 }
 

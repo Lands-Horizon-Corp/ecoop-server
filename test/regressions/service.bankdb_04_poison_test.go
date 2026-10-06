@@ -12,6 +12,7 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/cqrs"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
+	"golang.org/x/text/unicode/norm"
 )
 
 // 04 Poison pills and boundaries: hostile or malformed input (broken CDC messages, integer edges,
@@ -103,8 +104,8 @@ func TestBankDBPoison_IntegerBoundaries(t *testing.T) {
 	t.Run("amount that overflows the destination is rejected", func(t *testing.T) {
 		b.open("src", 100)
 		_, _, err := b.Transfer(ctx, transferReq{Key: "ovf", From: "src", To: "max", Amount: 10})
-		if !errors.Is(err, database.ErrConstraint) && !errors.Is(err, database.ErrOutOfRange) {
-			t.Fatalf("Transfer into an account at MaxInt64 = %v; want a constraint or range error", err)
+		if !errors.Is(err, errBankOverflow) {
+			t.Fatalf("Transfer into an account at MaxInt64 = %v; want errBankOverflow (checked before int64 wraps)", err)
 		}
 		if b.writerBalance("src") != 100 || b.writerBalance("max") != math.MaxInt64 {
 			t.Fatal("money moved on an overflowing transfer")
@@ -144,8 +145,8 @@ func TestBankDBPoison_InjectionAndSpecialCharactersAreInert(t *testing.T) {
 
 	for i, o := range owners {
 		got, err := b.accounts.Find(ctx, eqFilter("owner", o))
-		if err != nil || len(got) != 1 || got[0].ID != fmt.Sprintf("a%d", i) || got[0].Owner != o {
-			t.Errorf("exact lookup of %.40q = %v, %v; want the one account storing it verbatim", o, got, err)
+		if err != nil || len(got) != 1 || got[0].ID != fmt.Sprintf("a%d", i) || got[0].Owner != norm.NFC.String(o) {
+			t.Errorf("exact lookup of %.40q = %v, %v; want the one account storing it (NFC-normalized)", o, got, err)
 		}
 	}
 	contains := func(v string) int64 {
@@ -189,7 +190,7 @@ func TestBankDBPoison_InvalidUTF8AndNULBytesAreRejected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			noPanic(t, name, func() {
 				_, err := b.accounts.Create(ctx, bdAccount{ID: name, Owner: owner, Balance: 1})
-				requireKind(t, err, database.ErrInvalidInput)
+				requireKind(t, err, database.ErrInvalidEncoding)
 			})
 		})
 	}
