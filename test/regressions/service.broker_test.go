@@ -25,13 +25,18 @@ func kafkaBrokers(t *testing.T) []string {
 
 func uniqueName(prefix string) string { return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()) }
 
-func newBroker(t *testing.T, group string, log *recordingLog) broker.MessageBrokerServices {
+func newBroker(t *testing.T, group string, log *recordingLog) broker.BatchBrokerServices {
 	t.Helper()
-	var b broker.MessageBrokerServices
+	return newBrokerWith(t, group, broker.Options{}, log)
+}
+
+func newBrokerWith(t *testing.T, group string, opts broker.Options, log *recordingLog) broker.BatchBrokerServices {
+	t.Helper()
+	var b broker.BatchBrokerServices
 	if log != nil {
-		b = broker.NewBrokerService(kafkaBrokers(t), group, log)
+		b = broker.NewBrokerService(kafkaBrokers(t), group, opts, log)
 	} else {
-		b = broker.NewBrokerService(kafkaBrokers(t), group, nil)
+		b = broker.NewBrokerService(kafkaBrokers(t), group, opts, nil)
 	}
 	if err := b.Run(bg); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -168,7 +173,7 @@ func TestBroker_AFailedMessageIsRedeliveredToTheNextSubscriber(t *testing.T) {
 }
 
 func TestBroker_WithoutRunPublishFailsAndStopIsSafe(t *testing.T) {
-	b := broker.NewBrokerService(kafkaBrokers(t), "g", nil)
+	b := broker.NewBrokerService(kafkaBrokers(t), "g", broker.Options{}, nil)
 	if err := b.Publish(bg, "t", nil, []byte("x")); !errors.Is(err, broker.ErrNotRunning) {
 		t.Fatalf("Publish before Run = %v; want ErrNotRunning", err)
 	}
@@ -194,10 +199,10 @@ func TestBroker_WithoutRunPublishFailsAndStopIsSafe(t *testing.T) {
 }
 
 func TestBroker_ConfigurationErrorsAreExplicit(t *testing.T) {
-	if err := broker.NewBrokerService(nil, "g", nil).Run(bg); !errors.Is(err, broker.ErrNoBrokers) {
+	if err := broker.NewBrokerService(nil, "g", broker.Options{}, nil).Run(bg); !errors.Is(err, broker.ErrNoBrokers) {
 		t.Fatalf("Run without brokers = %v; want ErrNoBrokers", err)
 	}
-	b := broker.NewBrokerService(kafkaBrokers(t), "", nil)
+	b := broker.NewBrokerService(kafkaBrokers(t), "", broker.Options{}, nil)
 	if err := b.Subscribe(bg, "t", func(_, _ []byte) error { return nil }); !errors.Is(err, broker.ErrNoGroup) {
 		t.Fatalf("Subscribe without a group = %v; want ErrNoGroup", err)
 	}
@@ -205,7 +210,7 @@ func TestBroker_ConfigurationErrorsAreExplicit(t *testing.T) {
 
 func TestBroker_RunFailsFastWhenKafkaIsUnreachable(t *testing.T) {
 	log := &recordingLog{Context: bg}
-	b := broker.NewBrokerService([]string{closedAddr(t)}, "g", log)
+	b := broker.NewBrokerService([]string{closedAddr(t)}, "g", broker.Options{}, log)
 
 	ctx, cancel := context.WithTimeout(bg, 5*time.Second)
 	defer cancel()

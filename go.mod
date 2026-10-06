@@ -14,6 +14,7 @@ require (
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/pusher/pusher-http-go/v5 v5.1.1
 	github.com/redis/go-redis/v9 v9.22.0
+	github.com/twmb/franz-go v1.22.1
 	github.com/uptrace/bun v1.3.0
 	github.com/uptrace/bun/dialect/pgdialect v1.3.0
 	go.opentelemetry.io/contrib/bridges/otelzap v0.20.1
@@ -26,6 +27,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.46.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.57.0
+	golang.org/x/time v0.16.0
 )
 
 require (
@@ -58,7 +60,6 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
-	github.com/twmb/franz-go v1.22.1 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.14.0 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect

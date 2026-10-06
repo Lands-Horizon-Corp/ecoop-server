@@ -12,13 +12,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-const (
-	healthChannel = "system-health"
-	runnerChannel = "test"
-	runnerEvent   = "client-test"
-	runnerTick    = 100 * time.Microsecond
-)
-
 type BroadcasterService struct {
 	client pusher.Client
 	log    logger.LogContextService
