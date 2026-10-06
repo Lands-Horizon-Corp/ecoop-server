@@ -31,7 +31,7 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	WriteSQLService      sql.SQLServices
 	Log                  logger.LogContextService
 	BroadcastService     broadcast.BroadcasterServices
-	MessageBrokerService broker.MessageBrokerService
+	MessageBrokerService broker.MessageBrokerServices
 
 	PaginationService pagination.PaginationServices[TData, TID]
 	Validator         *validator.Validate

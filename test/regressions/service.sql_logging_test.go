@@ -33,6 +33,8 @@ func (r *recordingLog) Trace(name string, _ ...attribute.KeyValue) (logger.LogCo
 	return r, &recordingLevel{r: r, span: name}
 }
 
+func (r *recordingLog) With(attribute.KeyValue) logger.LogContextService { return r }
+
 func (r *recordingLog) Observe(name string, fn func() error, _ ...attribute.KeyValue) error {
 	lvl := &recordingLevel{r: r, span: name}
 	if err := fn(); err != nil {

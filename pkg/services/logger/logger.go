@@ -134,11 +134,27 @@ func (l *logContextService) Stop(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// With returns a view of the same logger for one service: it shares the started pipeline (exporters, buffer,
+// tracer) and tags every span with attr, so spans and logs can be told apart per service.
+func (l *logContextService) With(attr attribute.KeyValue) LogContextService {
+	return &logContextService{
+		Context:   l.Context,
+		state:     l.state,
+		logFormat: l.logFormat,
+		logLevel:  l.logLevel,
+		attr:      attr,
+	}
+}
+
 func (l *logContextService) Trace(name string, attrs ...attribute.KeyValue) (LogContextService, LoggerLevel) {
+	if l.attr.Key != "" {
+		attrs = append([]attribute.KeyValue{l.attr}, attrs...)
+	}
 	ctx, span := l.state.tracer.Start(l.Context, name, trace.WithAttributes(attrs...))
 	childCtx := &logContextService{
 		Context: ctx,
 		state:   l.state,
+		attr:    l.attr,
 	}
 	logImpl := &loggerLevelImpl{
 		ctx:  ctx,
@@ -150,7 +166,7 @@ func (l *logContextService) Trace(name string, attrs ...attribute.KeyValue) (Log
 }
 
 func (l *logContextService) Observe(name string, fn func() error, attrs ...attribute.KeyValue) error {
-	_, lvl := l.Trace(name, append([]attribute.KeyValue{l.attr}, attrs...)...)
+	_, lvl := l.Trace(name, attrs...)
 	defer lvl.Span().End()
 	if err := fn(); err != nil {
 		lvl.Error(err, name+" failed")

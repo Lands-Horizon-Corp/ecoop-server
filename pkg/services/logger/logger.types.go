@@ -23,6 +23,8 @@ type LoggerLevel interface {
 type LogContextService interface {
 	context.Context
 	Trace(name string, attrs ...attribute.KeyValue) (LogContextService, LoggerLevel)
+	// With returns a view that shares this logger's pipeline and tags its spans with attr.
+	With(attr attribute.KeyValue) LogContextService
 	Observe(name string, fn func() error, attrs ...attribute.KeyValue) error
 	Emit(name string, write func(LoggerLevel))
 	Start(ctx context.Context) error

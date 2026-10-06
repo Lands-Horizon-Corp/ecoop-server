@@ -41,6 +41,8 @@ type cqBroker struct {
 	handler chan func(key, value []byte) error
 }
 
+func (*cqBroker) Run(context.Context) error                             { return nil }
+func (*cqBroker) Stop(context.Context) error                            { return nil }
 func (*cqBroker) Publish(context.Context, string, []byte, []byte) error { return nil }
 func (b *cqBroker) Subscribe(ctx context.Context, _ string, h func(key, value []byte) error) error {
 	b.handler <- h

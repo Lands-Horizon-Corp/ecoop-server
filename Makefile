@@ -1,7 +1,7 @@
 .PHONY: test test-up test-down test-default test-race test-all test-v vet migrate-up migrate-down migrate-status migrate-create migrate-diff migrate-watch atlas-diff
 
-# Services the tests need: Redis, Redis Sentinel and Postgres (see docker-compose.yml).
-TEST_SERVICES := redis redis-master redis-sentinel postgres
+# Services the tests need: Redis, Redis Sentinel, Postgres and Kafka (see docker-compose.yml).
+TEST_SERVICES := redis redis-master redis-sentinel postgres kafka
 TESTFLAGS ?= -count=1 -timeout 10m
 
 # `make test-all` runs the suite under every build-tag variant: the default build (!race) and the
