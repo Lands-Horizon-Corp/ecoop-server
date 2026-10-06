@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broadcast"
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broker"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
@@ -31,7 +31,7 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	WriteSQLService      sql.SQLServices
 	Log                  logger.LogContextService
 	BroadcastService     broadcast.BroadcastService
-	MessageBrokerService database.MessageBrokerService
+	MessageBrokerService broker.MessageBrokerService
 
 	PaginationService pagination.PaginationServices[TData, TID]
 	Validator         *validator.Validate
@@ -44,7 +44,7 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	processedEventsPool *utils.BufferPool[ProcessedEvent]
 
 	idFieldIndex int
-	entity       string // the Go type, attached to every log line so a channel's logs can be told apart
+	entity       string
 }
 
 func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
