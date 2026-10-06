@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broadcast"
@@ -27,6 +28,11 @@ var (
 type DatabaseService struct {
 	started  bool
 	registry map[reflect.Type]*registration
+
+	// cancelRunners and runners let Stop end the model runners before it
+	// closes the connections they use.
+	cancelRunners context.CancelFunc
+	runners       sync.WaitGroup
 
 	readerSQL sql.SQLServices
 	writerSQL sql.SQLServices
@@ -135,18 +141,24 @@ func (db *DatabaseService) Start(ctx context.Context) error {
 }
 
 func (db *DatabaseService) Run(ctx context.Context) {
+	ctx, db.cancelRunners = context.WithCancel(ctx)
 	for _, r := range db.registry {
-		go func(r *registration) {
+		db.runners.Go(func() {
 			if err := r.run(ctx); err != nil && ctx.Err() == nil && db.writerLogger != nil {
 				db.writerLogger.Emit("database.run", func(l logger.LoggerLevel) {
 					l.Error(err, "model runner stopped", "model", r.name)
 				})
 			}
-		}(r)
+		})
 	}
 }
 
 func (db *DatabaseService) Stop(ctx context.Context) {
+	if db.cancelRunners != nil {
+		db.cancelRunners()
+		db.runners.Wait()
+		db.cancelRunners = nil
+	}
 	if db.writerSQL != nil {
 		_ = db.writerSQL.Stop(ctx)
 	}

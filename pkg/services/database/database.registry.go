@@ -67,7 +67,7 @@ func Register[TData any, TResponse any, TRequest any, TID comparable](
 			BroadcastService:     db.broadcast,
 			MessageBrokerService: db.messageBroker,
 
-			PaginationService: pagination.NewPaginationService[TData, TID](pagination.PaginationService[TData, TID]{
+			PaginationService: pagination.NewPaginationService(pagination.PaginationService[TData, TID]{
 				ReadSQLService:    reader,
 				WriteSQLService:   writer,
 				Log:               db.cqrsLogger,
