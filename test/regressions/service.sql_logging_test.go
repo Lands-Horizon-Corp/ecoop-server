@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
@@ -13,10 +14,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// logEvent is what the SQL service reported through its injected logger.
+// logEvent is one line reported through an injected logger: the span it was written in, its level,
+// the message, the error and the structured fields.
 type logEvent struct {
-	span, level string
-	err         error
+	span, level, msg string
+	err              error
+	fields           map[string]any
 }
 
 // recordingLog is a LogContextService that records instead of exporting, so no collector is needed.
@@ -39,6 +42,10 @@ func (r *recordingLog) Observe(name string, fn func() error, _ ...attribute.KeyV
 	lvl.Info(name + " done")
 	return nil
 }
+func (r *recordingLog) Emit(name string, write func(logger.LoggerLevel)) {
+	write(&recordingLevel{r: r, span: name})
+}
+
 func (r *recordingLog) Start(context.Context) error { return nil }
 func (r *recordingLog) Stop(context.Context) error  { return nil }
 
@@ -47,18 +54,58 @@ type recordingLevel struct {
 	span string
 }
 
-func (l *recordingLevel) add(level string, err error) {
+func (l *recordingLevel) add(level, msg string, err error, kv []any) {
+	fields := map[string]any{}
+	for i := 0; i+1 < len(kv); i += 2 {
+		if k, ok := kv[i].(string); ok {
+			fields[k] = kv[i+1]
+		}
+	}
 	l.r.mu.Lock()
 	defer l.r.mu.Unlock()
-	l.r.events = append(l.r.events, logEvent{span: l.span, level: level, err: err})
+	l.r.events = append(l.r.events, logEvent{span: l.span, level: level, msg: msg, err: err, fields: fields})
 }
 
-func (l *recordingLevel) Span() trace.Span                    { return trace.SpanFromContext(context.Background()) }
-func (l *recordingLevel) Debug(string, ...any)                { l.add("debug", nil) }
-func (l *recordingLevel) Info(string, ...any)                 { l.add("info", nil) }
-func (l *recordingLevel) Warn(string, ...any)                 { l.add("warn", nil) }
-func (l *recordingLevel) Error(err error, _ string, _ ...any) { l.add("error", err) }
-func (l *recordingLevel) Fatal(err error, _ string, _ ...any) { l.add("fatal", err) }
+func (l *recordingLevel) Span() trace.Span            { return trace.SpanFromContext(context.Background()) }
+func (l *recordingLevel) Debug(msg string, kv ...any) { l.add("debug", msg, nil, kv) }
+func (l *recordingLevel) Info(msg string, kv ...any)  { l.add("info", msg, nil, kv) }
+func (l *recordingLevel) Warn(msg string, kv ...any)  { l.add("warn", msg, nil, kv) }
+func (l *recordingLevel) Error(err error, msg string, kv ...any) {
+	l.add("error", msg, err, kv)
+}
+func (l *recordingLevel) Fatal(err error, msg string, kv ...any) {
+	l.add("fatal", msg, err, kv)
+}
+
+// await waits for a line matching match and returns it; logs from background goroutines arrive late.
+func (r *recordingLog) await(t *testing.T, what string, match func(logEvent) bool) logEvent {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		r.mu.Lock()
+		for _, e := range r.events {
+			if match(e) {
+				r.mu.Unlock()
+				return e
+			}
+		}
+		r.mu.Unlock()
+		select {
+		case <-deadline:
+			t.Fatalf("no log line for %s; got %+v", what, r.snapshot())
+			return logEvent{}
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func (r *recordingLog) snapshot() []logEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]logEvent(nil), r.events...)
+}
+
+func withMsg(msg string) func(logEvent) bool { return func(e logEvent) bool { return e.msg == msg } }
 
 // Every Run, Stop and migration call reaches the injected logger, failures included, and the service
 // still behaves exactly as it does without one.

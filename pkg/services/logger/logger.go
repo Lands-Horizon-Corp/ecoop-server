@@ -159,3 +159,9 @@ func (l *logContextService) Observe(name string, fn func() error, attrs ...attri
 	lvl.Info(name + " done")
 	return nil
 }
+
+func (l *logContextService) Emit(name string, write func(LoggerLevel)) {
+	_, lvl := l.Trace(name)
+	defer lvl.Span().End()
+	write(lvl)
+}

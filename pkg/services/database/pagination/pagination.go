@@ -1,14 +1,14 @@
 package pagination
 
 import (
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
 )
 
 type PaginationService[TData any, TID comparable] struct {
 	ReadSQLService    sql.SQLServices
 	WriteSQLService   sql.SQLServices
-	LogService        database.LogService
+	Log               logger.LogContextService
 	ColumnDefaultID   string
 	ColumnDefaultSort string
 	Preloads          []string
@@ -32,7 +32,7 @@ func NewPaginationService[TData any, TID comparable](
 	return &PaginationService[TData, TID]{
 		ReadSQLService:    p.ReadSQLService,
 		WriteSQLService:   p.WriteSQLService,
-		LogService:        p.LogService,
+		Log:               p.Log,
 		ColumnDefaultID:   p.ColumnDefaultID,
 		ColumnDefaultSort: p.ColumnDefaultSort,
 		Preloads:          p.Preloads,

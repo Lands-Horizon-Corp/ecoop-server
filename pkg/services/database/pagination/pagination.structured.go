@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 	"github.com/uptrace/bun"
@@ -32,6 +33,24 @@ func (c *PaginationService[TData, TID]) checkReady() error {
 }
 
 func (c *PaginationService[TData, TID]) paginate(
+	ctx context.Context,
+	db bun.IDB,
+	extraFilter StructuredFilter,
+	pagination Pagination,
+	forUpdate bool,
+	preloads ...string,
+) (*PaginationResult[TData], error) {
+	started := time.Now()
+	result, err := c.paginateQuery(ctx, db, extraFilter, pagination, forUpdate, preloads...)
+	if err != nil {
+		return nil, c.report(ctx, "paginate", started, err,
+			[]any{"page_size", pagination.PageSize, "has_cursor", pagination.Cursor != nil, "for_update", forUpdate},
+			extraFilter, pagination.Filter)
+	}
+	return result, nil
+}
+
+func (c *PaginationService[TData, TID]) paginateQuery(
 	ctx context.Context,
 	db bun.IDB,
 	extraFilter StructuredFilter,
@@ -113,7 +132,7 @@ func (c *PaginationService[TData, TID]) paginate(
 
 	droppedPreloads, err := utils.ApplyPreloadsMany(ctx, db, &data, c.Preloads, preloads...)
 	for _, d := range droppedPreloads {
-		c.warn(ctx, fmt.Sprintf("pagination: dropping unknown preload relation %q", d))
+		c.warn(ctx, "preload dropped: unknown relation", "relation", d)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("loading preloads: %w", err)

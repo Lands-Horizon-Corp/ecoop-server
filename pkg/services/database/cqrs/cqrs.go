@@ -1,12 +1,14 @@
 package cqrs
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broadcast"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 	"github.com/go-playground/validator/v10"
 )
@@ -27,7 +29,7 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 
 	ReadSQLService       sql.SQLServices
 	WriteSQLService      sql.SQLServices
-	LogService           database.LogService
+	Log                  logger.LogContextService
 	BroadcastService     broadcast.BroadcastService
 	MessageBrokerService database.MessageBrokerService
 
@@ -42,6 +44,7 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	processedEventsPool *utils.BufferPool[ProcessedEvent]
 
 	idFieldIndex int
+	entity       string // the Go type, attached to every log line so a channel's logs can be told apart
 }
 
 func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
@@ -85,7 +88,7 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		Dispatch:             c.Dispatch,
 		ReadSQLService:       c.ReadSQLService,
 		WriteSQLService:      c.WriteSQLService,
-		LogService:           c.LogService,
+		Log:                  c.Log,
 		BroadcastService:     c.BroadcastService,
 		MessageBrokerService: c.MessageBrokerService,
 		Validator:            c.Validator,
@@ -95,6 +98,7 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		BatchSize:            c.BatchSize,
 		FlushInterval:        c.FlushInterval,
 		idFieldIndex:         utils.BunColumnFieldIndex[TData](c.ColumnDefaultID),
+		entity:               reflect.TypeFor[TData]().String(),
 		PaginationService:    c.PaginationService,
 	}
 }

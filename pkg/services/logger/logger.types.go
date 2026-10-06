@@ -24,6 +24,7 @@ type LogContextService interface {
 	context.Context
 	Trace(name string, attrs ...attribute.KeyValue) (LogContextService, LoggerLevel)
 	Observe(name string, fn func() error, attrs ...attribute.KeyValue) error
+	Emit(name string, write func(LoggerLevel))
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 }

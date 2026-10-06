@@ -17,6 +17,18 @@ const (
 	ChangeTypeDeleted
 )
 
+func (t ChangeType) String() string {
+	switch t {
+	case ChangeTypeCreated:
+		return "created"
+	case ChangeTypeUpdated:
+		return "updated"
+	case ChangeTypeDeleted:
+		return "deleted"
+	}
+	return "unknown"
+}
+
 type (
 	CQRSQueuePayload[TData any] struct {
 		EventID    string     `json:"event_id"`

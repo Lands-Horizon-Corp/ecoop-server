@@ -64,13 +64,14 @@ func (s *SQLService) Diff(ctx context.Context, name string) (path string, err er
 		}
 
 		content := gooseFile(upSQL, downSQL)
-		path, err := nextMigrationPath(dir, slug)
+		next, err := nextMigrationPath(dir, slug)
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			return fmt.Errorf("writing migration %q: %w", path, err)
+		if err := os.WriteFile(next, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("writing migration %q: %w", next, err)
 		}
+		path = next
 		return nil
 	}, attribute.String("db.migration.name", name))
 	return path, err

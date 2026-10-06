@@ -32,7 +32,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) handleEvent(
 	go func(ctx context.Context, data *TData) {
 		defer func() {
 			if re := recover(); re != nil {
-				c.error(ctx, fmt.Sprintf("%d panic on channel %s: %v", eventType, c.Channel, re))
+				c.error(ctx, fmt.Errorf("panic: %v", re), "event handler panicked", "event_type", eventType.String())
 			}
 		}()
 		payload := c.ToResource(data)
@@ -48,12 +48,12 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) handleEvent(
 		}
 		if c.Dispatch != nil {
 			if err := c.Dispatch(c.Channel, events, payload); err != nil {
-				c.error(ctx, fmt.Sprintf("%d dispatch failed [channel: %s]: %v (type: %T)", eventType, c.Channel, err, data))
+				c.error(ctx, err, "event dispatch failed", "event_type", eventType.String(), "events", events)
 			}
 		}
 		if c.BroadcastService != nil {
 			if err := c.BroadcastService.Broadcast([]broadcast.Channel{c.Channel}, events, payload); err != nil {
-				c.error(ctx, fmt.Sprintf("%d broadcast failed [channel: %s]: %v (type: %T)", eventType, c.Channel, err, data))
+				c.error(ctx, err, "event broadcast failed", "event_type", eventType.String(), "events", events)
 			}
 		}
 	}(asyncCtx, data)

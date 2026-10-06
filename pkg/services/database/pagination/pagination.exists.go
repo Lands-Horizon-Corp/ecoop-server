@@ -3,6 +3,7 @@ package pagination
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/uptrace/bun"
 )
@@ -26,6 +27,17 @@ func (c *PaginationService[TData, TID]) ExistsWithTx(
 }
 
 func (c *PaginationService[TData, TID]) exists(
+	ctx context.Context, db bun.IDB, filter StructuredFilter,
+) (bool, error) {
+	started := time.Now()
+	ok, err := c.existsQuery(ctx, db, filter)
+	if err != nil {
+		return false, c.report(ctx, "exists", started, err, nil, filter)
+	}
+	return ok, nil
+}
+
+func (c *PaginationService[TData, TID]) existsQuery(
 	ctx context.Context, db bun.IDB, filter StructuredFilter,
 ) (bool, error) {
 	var data []TData

@@ -56,7 +56,6 @@ func (s *SQLService) Client() *bun.DB {
 	return s.db
 }
 
-// observe traces and logs fn through the injected logger; without one it just runs fn.
 func (s *SQLService) observe(name string, fn func() error, attrs ...attribute.KeyValue) error {
 	if s.log == nil {
 		return fn()

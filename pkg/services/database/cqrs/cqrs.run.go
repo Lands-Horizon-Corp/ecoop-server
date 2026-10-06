@@ -23,7 +23,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) 
 	if c.MessageBrokerService == nil {
 		return ErrMessageBrokerNotInitialized
 	}
-	c.info(ctx, fmt.Sprintf("starting outbox batch runner for channel: %s", c.Channel))
+	c.info(ctx, "outbox runner started", "batch_size", c.BatchSize, "flush_interval", c.FlushInterval.String())
 	batcher := utils.NewBatcher(utils.BatcherConfig[CQRSQueuePayload[TData]]{
 		BatchSize:     c.BatchSize,
 		FlushInterval: c.FlushInterval,
@@ -31,7 +31,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) 
 			return c.processBatch(batchCtx, batch)
 		},
 		OnError: func(err error, batch []CQRSQueuePayload[TData]) {
-			c.error(ctx, fmt.Sprintf("processing outbox batch for channel %s failed: %v", c.Channel, err))
+			c.error(ctx, err, "outbox batch failed", "batch_size", len(batch))
 		},
 	})
 	batcher.Start(ctx)
@@ -40,7 +40,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) 
 	return c.MessageBrokerService.Subscribe(ctx, string(c.Channel), func(key, value []byte) error {
 		var env CQRSQueuePayload[TData]
 		if err := sonic.Unmarshal(value, &env); err != nil {
-			c.error(ctx, fmt.Sprintf("unmarshaling message payload for channel %s: %v", c.Channel, err))
+			c.error(ctx, err, "outbox payload unmarshal failed", "key", string(key), "bytes", len(value))
 			return nil
 		}
 		if env.EventID == "" {
@@ -48,7 +48,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) 
 				env.EventID = string(key)
 			} else {
 				env.EventID = fmt.Sprintf("%s-%d", c.Channel, time.Now().UnixNano())
-				c.warn(ctx, fmt.Sprintf("message on channel %s arrived with no event_id and no key; synthesized %s — check the producer", c.Channel, env.EventID))
+				c.warn(ctx, "outbox message has no event id and no key; synthesized one, check the producer", "synthesized_event_id", env.EventID)
 			}
 		}
 		return batcher.Push(ctx, env)
@@ -62,12 +62,14 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) processBatch(
 	if len(batch) == 0 {
 		return nil
 	}
+	started := time.Now()
 	appliedMessages, err := c.syncBatchToReadDB(ctx, batch)
 	if err != nil {
 		return fmt.Errorf("synchronizing batch to read db: %w", err)
 	}
 	if len(appliedMessages) > 0 {
-		c.success(ctx, fmt.Sprintf("synchronized %d change(s) to the read db for channel %s", len(appliedMessages), c.Channel))
+		c.success(ctx, "read db synchronized",
+			"received", len(batch), "applied", len(appliedMessages), "duration_ms", time.Since(started).Milliseconds())
 	}
 	for i := range appliedMessages {
 		msg := &appliedMessages[i]

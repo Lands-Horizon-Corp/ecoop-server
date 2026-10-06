@@ -3,6 +3,7 @@ package pagination
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/uptrace/bun"
 )
@@ -26,6 +27,17 @@ func (c *PaginationService[TData, TID]) CountWithTx(
 }
 
 func (c *PaginationService[TData, TID]) count(
+	ctx context.Context, db bun.IDB, filter StructuredFilter,
+) (int64, error) {
+	started := time.Now()
+	total, err := c.countQuery(ctx, db, filter)
+	if err != nil {
+		return 0, c.report(ctx, "count", started, err, nil, filter)
+	}
+	return total, nil
+}
+
+func (c *PaginationService[TData, TID]) countQuery(
 	ctx context.Context, db bun.IDB, filter StructuredFilter,
 ) (int64, error) {
 	var data []TData

@@ -2,7 +2,6 @@ package pagination
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 )
@@ -21,7 +20,7 @@ func (c *PaginationService[TData, TID]) normalizeFilters(
 		}
 		if f.Mode == ModeCustom {
 			if f.Custom == nil {
-				c.warn(ctx, fmt.Sprintf("pagination: dropping custom filter %q without a function", f.Field))
+				c.warn(ctx, "filter dropped: custom filter has no function", "field", f.Field)
 				continue
 			}
 			normalized = append(normalized, f)
@@ -29,7 +28,7 @@ func (c *PaginationService[TData, TID]) normalizeFilters(
 		}
 		f.Field = utils.NormalizeColumnName(f.Field)
 		if utils.BunColumnFieldIndex[TData](f.Field) == -1 {
-			c.warn(ctx, fmt.Sprintf("pagination: dropping filter for unknown field %q", f.Field))
+			c.warn(ctx, "filter dropped: field is not a column of the entity", "field", f.Field, "mode", string(f.Mode))
 			continue
 		}
 		normalized = append(normalized, f)
