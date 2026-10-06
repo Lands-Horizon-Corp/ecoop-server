@@ -3,6 +3,7 @@ package cqrs
 import (
 	"time"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broadcast"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
@@ -11,7 +12,7 @@ import (
 )
 
 type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct {
-	Channel           database.Channel
+	Channel           broadcast.Channel
 	ColumnDefaultID   string
 	ColumnDefaultSort string
 	Preloads          []string
@@ -19,15 +20,15 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	ToResource  func(*TData) *TResponse
 	TocCSV      func(*TData) *map[string]any
 	FromRequest func(*TRequest) *TData
-	Created     func(*TData) database.Events
-	Updated     func(*TData) database.Events
-	Deleted     func(*TData) database.Events
-	Dispatch    func(channel database.Channel, events database.Events, payload *TResponse) error
+	Created     func(*TData) broadcast.Events
+	Updated     func(*TData) broadcast.Events
+	Deleted     func(*TData) broadcast.Events
+	Dispatch    func(channel broadcast.Channel, events broadcast.Events, payload *TResponse) error
 
 	ReadSQLService       sql.SQLServices
 	WriteSQLService      sql.SQLServices
 	LogService           database.LogService
-	BroadcastService     database.BroadcastService
+	BroadcastService     broadcast.BroadcastService
 	MessageBrokerService database.MessageBrokerService
 
 	PaginationService pagination.PaginationServices[TData, TID]

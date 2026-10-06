@@ -7,9 +7,14 @@ import (
 	"os"
 
 	"github.com/pressly/goose/v3"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func (s *SQLService) Migrate(ctx context.Context) error {
+	return s.observe("sql.migrate", func() error { return s.migrate(ctx) })
+}
+
+func (s *SQLService) migrate(ctx context.Context) error {
 	migrator, err := s.provider()
 	if errors.Is(err, goose.ErrNoMigrations) {
 		return nil
@@ -24,6 +29,10 @@ func (s *SQLService) Migrate(ctx context.Context) error {
 }
 
 func (s *SQLService) Fresh(ctx context.Context) error {
+	return s.observe("sql.fresh", func() error { return s.fresh(ctx) })
+}
+
+func (s *SQLService) fresh(ctx context.Context) error {
 	migrator, err := s.provider()
 	if errors.Is(err, goose.ErrNoMigrations) {
 		return nil
@@ -41,6 +50,10 @@ func (s *SQLService) Fresh(ctx context.Context) error {
 }
 
 func (s *SQLService) Create(ctx context.Context, name string) error {
+	return s.observe("sql.create", func() error { return s.create(name) }, attribute.String("db.migration.name", name))
+}
+
+func (s *SQLService) create(name string) error {
 	dir, err := s.migrationsPath()
 	if err != nil {
 		return err

@@ -73,14 +73,14 @@ func run(args []string) int {
 		if len(rest) != 1 {
 			return fail("create needs a name")
 		}
-		return report(sql.NewSQLService("", 1, 1, dir, false, os.Stdout, nil).Create(ctx, rest[0]))
+		return report(sql.NewSQLService("", 1, 1, dir, false, os.Stdout, nil, nil).Create(ctx, rest[0]))
 	}
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		return fail("DATABASE_URL is not set")
 	}
-	svc := sql.NewSQLService(dsn, 2, 5, dir, false, os.Stdout, models.All())
+	svc := sql.NewSQLService(dsn, 2, 5, dir, false, os.Stdout, models.All(), nil)
 	if err := svc.Run(ctx); err != nil {
 		return fail("connect: %v", err)
 	}

@@ -5,19 +5,12 @@ import (
 )
 
 type (
-	Channel string
-	Events  []string
-
 	LogService interface {
 		Log(ctx context.Context, message string)
 		Error(ctx context.Context, message string)
 		Warn(ctx context.Context, message string)
 		Fatal(ctx context.Context, message string)
 		Success(ctx context.Context, message string)
-	}
-
-	BroadcastService interface {
-		Broadcast(channels []Channel, events Events, payload any) error
 	}
 
 	MessageBrokerService interface {

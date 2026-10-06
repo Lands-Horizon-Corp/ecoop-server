@@ -9,9 +9,18 @@ import (
 
 	"github.com/pressly/goose/v3"
 	"github.com/uptrace/bun/migrate"
+	"go.opentelemetry.io/otel/attribute"
 )
 
-func (s *SQLService) Diff(ctx context.Context, name string) (string, error) {
+func (s *SQLService) Diff(ctx context.Context, name string) (path string, err error) {
+	err = s.observe("sql.diff", func() (e error) {
+		path, e = s.diff(ctx, name)
+		return e
+	}, attribute.String("db.migration.name", name))
+	return path, err
+}
+
+func (s *SQLService) diff(ctx context.Context, name string) (string, error) {
 	if s.db == nil {
 		return "", ErrNotInitialized
 	}

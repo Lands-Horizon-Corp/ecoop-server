@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
 	"github.com/uptrace/bun"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type SQLService struct {
@@ -22,6 +24,8 @@ type SQLService struct {
 	migrations  *os.File
 	output      io.Writer
 	models      []any
+
+	log logger.LogContextService
 }
 
 func NewSQLService(
@@ -32,6 +36,8 @@ func NewSQLService(
 	autoMigrate bool,
 	output io.Writer,
 	models []any,
+
+	log logger.LogContextService,
 ) SQLServices {
 	return &SQLService{
 		dsn:         dsn,
@@ -41,11 +47,21 @@ func NewSQLService(
 		migrations:  migrations,
 		output:      output,
 		models:      models,
+
+		log: log,
 	}
 }
 
 func (s *SQLService) Client() *bun.DB {
 	return s.db
+}
+
+// observe traces and logs fn through the injected logger; without one it just runs fn.
+func (s *SQLService) observe(name string, fn func() error, attrs ...attribute.KeyValue) error {
+	if s.log == nil {
+		return fn()
+	}
+	return s.log.Observe(name, fn, attrs...)
 }
 
 func (s *SQLService) Ping(ctx context.Context) error {

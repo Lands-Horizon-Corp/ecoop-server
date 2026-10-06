@@ -11,6 +11,10 @@ import (
 )
 
 func (s *SQLService) Run(ctx context.Context) error {
+	return s.observe("sql.run", func() error { return s.run(ctx) })
+}
+
+func (s *SQLService) run(ctx context.Context) error {
 	sqldb, err := sql.Open("pgx", s.dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open sql connection: %w", err)
@@ -20,12 +24,12 @@ func (s *SQLService) Run(ctx context.Context) error {
 	s.sqldb = sqldb
 	s.db = bun.NewDB(sqldb, pgdialect.New())
 	if err := s.Ping(ctx); err != nil {
-		_ = s.Stop(ctx)
+		_ = s.stop()
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 	if s.autoMigrate && s.migrations != nil {
-		if err := s.Migrate(ctx); err != nil {
-			_ = s.Stop(ctx)
+		if err := s.migrate(ctx); err != nil {
+			_ = s.stop()
 			return fmt.Errorf("failed to run goose migrations: %w", err)
 		}
 	}
@@ -33,6 +37,10 @@ func (s *SQLService) Run(ctx context.Context) error {
 }
 
 func (s *SQLService) Stop(ctx context.Context) error {
+	return s.observe("sql.stop", s.stop)
+}
+
+func (s *SQLService) stop() error {
 	db := s.db
 	s.sqldb = nil
 	s.db = nil

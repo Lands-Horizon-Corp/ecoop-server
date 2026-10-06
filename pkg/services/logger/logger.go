@@ -22,7 +22,8 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-func NewLogContextService(name string, logFormat string, logLevel string) LogContextService {
+func NewLogContextService(
+	name string, logFormat string, logLevel string, attr attribute.KeyValue) LogContextService {
 	if logFormat == "" {
 		logFormat = "json"
 	}
@@ -34,6 +35,7 @@ func NewLogContextService(name string, logFormat string, logLevel string) LogCon
 		state: &sharedState{
 			name: name,
 		},
+		attr:      attr,
 		logFormat: logFormat,
 		logLevel:  logLevel,
 	}
@@ -145,4 +147,15 @@ func (l *logContextService) Trace(name string, attrs ...attribute.KeyValue) (Log
 	}
 
 	return childCtx, logImpl
+}
+
+func (l *logContextService) Observe(name string, fn func() error, attrs ...attribute.KeyValue) error {
+	_, lvl := l.Trace(name, append([]attribute.KeyValue{l.attr}, attrs...)...)
+	defer lvl.Span().End()
+	if err := fn(); err != nil {
+		lvl.Error(err, name+" failed")
+		return err
+	}
+	lvl.Info(name + " done")
+	return nil
 }

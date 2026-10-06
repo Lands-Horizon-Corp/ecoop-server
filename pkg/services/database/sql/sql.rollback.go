@@ -5,9 +5,14 @@ import (
 	"fmt"
 
 	"github.com/pressly/goose/v3"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func (s *SQLService) Rollback(ctx context.Context) error {
+	return s.observe("sql.rollback", func() error { return s.rollback(ctx) })
+}
+
+func (s *SQLService) rollback(ctx context.Context) error {
 	migrator, err := s.provider()
 	if err != nil {
 		return err
@@ -19,6 +24,10 @@ func (s *SQLService) Rollback(ctx context.Context) error {
 }
 
 func (s *SQLService) RollbackTo(ctx context.Context, version int64) error {
+	return s.observe("sql.rollback_to", func() error { return s.rollbackTo(ctx, version) }, attribute.Int64("db.migration.version", version))
+}
+
+func (s *SQLService) rollbackTo(ctx context.Context, version int64) error {
 	migrator, err := s.provider()
 	if err != nil {
 		return err
@@ -30,6 +39,10 @@ func (s *SQLService) RollbackTo(ctx context.Context, version int64) error {
 }
 
 func (s *SQLService) Redo(ctx context.Context) error {
+	return s.observe("sql.redo", func() error { return s.redo(ctx) })
+}
+
+func (s *SQLService) redo(ctx context.Context) error {
 	migrator, err := s.provider()
 	if err != nil {
 		return err
@@ -44,6 +57,10 @@ func (s *SQLService) Redo(ctx context.Context) error {
 }
 
 func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
+	return s.observe("sql.rollback_steps", func() error { return s.rollbackSteps(ctx, steps) }, attribute.Int("db.migration.steps", steps))
+}
+
+func (s *SQLService) rollbackSteps(ctx context.Context, steps int) error {
 	if steps <= 0 {
 		return fmt.Errorf("%w, got %d", ErrInvalidSteps, steps)
 	}
@@ -63,6 +80,12 @@ func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
 }
 
 func (s *SQLService) UpSteps(ctx context.Context, steps int) error {
+	return s.observe("sql.up_steps", func() error {
+		return s.upSteps(ctx, steps)
+	}, attribute.Int("db.migration.steps", steps))
+}
+
+func (s *SQLService) upSteps(ctx context.Context, steps int) error {
 	if steps <= 0 {
 		return fmt.Errorf("%w, got %d", ErrInvalidSteps, steps)
 	}

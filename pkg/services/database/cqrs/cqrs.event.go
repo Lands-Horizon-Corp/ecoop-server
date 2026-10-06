@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broadcast"
 )
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) OnCreated(ctx context.Context, data *TData) {
@@ -23,7 +23,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) handleEvent(
 	ctx context.Context,
 	eventType ChangeType,
 	data *TData,
-	getEvents func(*TData) database.Events,
+	getEvents func(*TData) broadcast.Events,
 ) {
 	if data == nil || c.ToResource == nil {
 		return
@@ -39,7 +39,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) handleEvent(
 		if payload == nil {
 			return
 		}
-		var events database.Events
+		var events broadcast.Events
 		if getEvents != nil {
 			events = getEvents(data)
 		}
@@ -52,7 +52,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) handleEvent(
 			}
 		}
 		if c.BroadcastService != nil {
-			if err := c.BroadcastService.Broadcast([]database.Channel{c.Channel}, events, payload); err != nil {
+			if err := c.BroadcastService.Broadcast([]broadcast.Channel{c.Channel}, events, payload); err != nil {
 				c.error(ctx, fmt.Sprintf("%d broadcast failed [channel: %s]: %v (type: %T)", eventType, c.Channel, err, data))
 			}
 		}

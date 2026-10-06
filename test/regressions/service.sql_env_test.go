@@ -166,7 +166,7 @@ func (e *sqlEnv) newServiceWith(autoMigrate bool, models ...any) sqlsvc.SQLServi
 		e.t.Fatalf("open migrations directory: %v", err)
 	}
 	e.t.Cleanup(func() { _ = dir.Close() })
-	return sqlsvc.NewSQLService(e.dsn, 2, 8, dir, autoMigrate, e.status, models)
+	return sqlsvc.NewSQLService(e.dsn, 2, 8, dir, autoMigrate, e.status, models, nil)
 }
 
 // running returns a started service that is stopped when the test ends.

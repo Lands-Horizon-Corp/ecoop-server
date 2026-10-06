@@ -11,6 +11,10 @@ import (
 )
 
 func (s *SQLService) Status(ctx context.Context) error {
+	return s.observe("sql.status", func() error { return s.status(ctx) })
+}
+
+func (s *SQLService) status(ctx context.Context) error {
 	migrator, err := s.provider()
 	if errors.Is(err, goose.ErrNoMigrations) {
 		_, err = fmt.Fprintln(s.out(), "no migrations found")
@@ -38,6 +42,10 @@ func (s *SQLService) Status(ctx context.Context) error {
 }
 
 func (s *SQLService) Version(ctx context.Context) error {
+	return s.observe("sql.version", func() error { return s.version(ctx) })
+}
+
+func (s *SQLService) version(ctx context.Context) error {
 	migrator, err := s.provider()
 	if errors.Is(err, goose.ErrNoMigrations) {
 		_, err = fmt.Fprintln(s.out(), "database version: 0")
