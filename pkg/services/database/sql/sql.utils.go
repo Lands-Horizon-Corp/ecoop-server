@@ -32,9 +32,6 @@ func gooseFile(up, down string) string {
 	return "-- +goose Up\n" + strings.TrimSpace(up) + "\n\n-- +goose Down\n" + strings.TrimSpace(down) + "\n"
 }
 
-// orderStatements puts the statements bun generated into dependency order. bun walks its change set in
-// map order, so it can emit a foreign key before the column it uses or drop a column before its constraint.
-// Statements of the same kind keep bun's relative order.
 func orderStatements(sql string) string {
 	var stmts, cur []string
 	inComment := false

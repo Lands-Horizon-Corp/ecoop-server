@@ -11,58 +11,52 @@ import (
 )
 
 func (s *SQLService) Migrate(ctx context.Context) error {
-	return s.observe("sql.migrate", func() error { return s.migrate(ctx) })
-}
-
-func (s *SQLService) migrate(ctx context.Context) error {
-	migrator, err := s.provider()
-	if errors.Is(err, goose.ErrNoMigrations) {
+	return s.observe("sql.migrate", func() error {
+		migrator, err := s.provider()
+		if errors.Is(err, goose.ErrNoMigrations) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := migrator.Up(ctx); err != nil {
+			return fmt.Errorf("failed to migrate up: %w", err)
+		}
 		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if _, err := migrator.Up(ctx); err != nil {
-		return fmt.Errorf("failed to migrate up: %w", err)
-	}
-	return nil
+	})
 }
 
 func (s *SQLService) Fresh(ctx context.Context) error {
-	return s.observe("sql.fresh", func() error { return s.fresh(ctx) })
-}
-
-func (s *SQLService) fresh(ctx context.Context) error {
-	migrator, err := s.provider()
-	if errors.Is(err, goose.ErrNoMigrations) {
+	return s.observe("sql.fresh", func() error {
+		migrator, err := s.provider()
+		if errors.Is(err, goose.ErrNoMigrations) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := migrator.DownTo(ctx, 0); err != nil {
+			return fmt.Errorf("failed to roll back all migrations: %w", err)
+		}
+		if _, err := migrator.Up(ctx); err != nil {
+			return fmt.Errorf("failed to re-apply migrations: %w", err)
+		}
 		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if _, err := migrator.DownTo(ctx, 0); err != nil {
-		return fmt.Errorf("failed to roll back all migrations: %w", err)
-	}
-	if _, err := migrator.Up(ctx); err != nil {
-		return fmt.Errorf("failed to re-apply migrations: %w", err)
-	}
-	return nil
+	})
 }
 
 func (s *SQLService) Create(ctx context.Context, name string) error {
-	return s.observe("sql.create", func() error { return s.create(name) }, attribute.String("db.migration.name", name))
-}
-
-func (s *SQLService) create(name string) error {
-	dir, err := s.migrationsPath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("failed to create migrations directory: %w", err)
-	}
-	if err := goose.Create(nil, dir, name, "sql"); err != nil {
-		return fmt.Errorf("failed to create migration %q: %w", name, err)
-	}
-	return nil
+	return s.observe("sql.create", func() error {
+		dir, err := s.migrationsPath()
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("failed to create migrations directory: %w", err)
+		}
+		if err := goose.Create(nil, dir, name, "sql"); err != nil {
+			return fmt.Errorf("failed to create migration %q: %w", name, err)
+		}
+		return nil
+	}, attribute.String("db.migration.name", name))
 }

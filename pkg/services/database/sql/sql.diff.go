@@ -14,71 +14,66 @@ import (
 
 func (s *SQLService) Diff(ctx context.Context, name string) (path string, err error) {
 	err = s.observe("sql.diff", func() (e error) {
-		path, e = s.diff(ctx, name)
-		return e
+		if s.db == nil {
+			return ErrNotInitialized
+		}
+		if len(s.models) == 0 {
+			return ErrNoModels
+		}
+		slug := strings.Trim(nonNameChars.ReplaceAllString(strings.ToLower(name), "_"), "_")
+		if slug == "" {
+			return ErrInvalidName
+		}
+		dir, err := s.migrationsPath()
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("creating migrations directory: %w", err)
+		}
+
+		if err := s.requireNoPending(ctx); err != nil {
+			return err
+		}
+
+		tmp, err := os.MkdirTemp("", "goose-diff-*")
+		if err != nil {
+			return fmt.Errorf("creating scratch directory: %w", err)
+		}
+		defer os.RemoveAll(tmp)
+		am, err := migrate.NewAutoMigrator(s.db,
+			migrate.WithModel(s.models...),
+			migrate.WithExcludeTable(goose.DefaultTablename),
+			migrate.WithMigrationsDirectoryAuto(tmp),
+		)
+		if err != nil {
+			return fmt.Errorf("creating schema diff: %w", err)
+		}
+		files, err := am.CreateSQLMigrations(ctx)
+		if err != nil {
+			return fmt.Errorf("computing schema diff: %w", err)
+		}
+		if len(files) != 2 {
+			return nil
+		}
+
+		upSQL := orderStatements(files[0].Content)
+		downSQL := orderStatements(nameDroppedConstraints(files[0].Content, files[1].Content))
+		if err := s.validateMigration(ctx, upSQL, downSQL); err != nil {
+			return err
+		}
+
+		content := gooseFile(upSQL, downSQL)
+		path, err := nextMigrationPath(dir, slug)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("writing migration %q: %w", path, err)
+		}
+		return nil
 	}, attribute.String("db.migration.name", name))
 	return path, err
-}
-
-func (s *SQLService) diff(ctx context.Context, name string) (string, error) {
-	if s.db == nil {
-		return "", ErrNotInitialized
-	}
-	if len(s.models) == 0 {
-		return "", ErrNoModels
-	}
-	slug := strings.Trim(nonNameChars.ReplaceAllString(strings.ToLower(name), "_"), "_")
-	if slug == "" {
-		return "", ErrInvalidName
-	}
-	dir, err := s.migrationsPath()
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("creating migrations directory: %w", err)
-	}
-
-	if err := s.requireNoPending(ctx); err != nil {
-		return "", err
-	}
-
-	tmp, err := os.MkdirTemp("", "goose-diff-*")
-	if err != nil {
-		return "", fmt.Errorf("creating scratch directory: %w", err)
-	}
-	defer os.RemoveAll(tmp)
-	am, err := migrate.NewAutoMigrator(s.db,
-		migrate.WithModel(s.models...),
-		migrate.WithExcludeTable(goose.DefaultTablename),
-		migrate.WithMigrationsDirectoryAuto(tmp),
-	)
-	if err != nil {
-		return "", fmt.Errorf("creating schema diff: %w", err)
-	}
-	files, err := am.CreateSQLMigrations(ctx)
-	if err != nil {
-		return "", fmt.Errorf("computing schema diff: %w", err)
-	}
-	if len(files) != 2 {
-		return "", nil
-	}
-
-	upSQL := orderStatements(files[0].Content)
-	downSQL := orderStatements(nameDroppedConstraints(files[0].Content, files[1].Content))
-	if err := s.validateMigration(ctx, upSQL, downSQL); err != nil {
-		return "", err
-	}
-
-	content := gooseFile(upSQL, downSQL)
-	path, err := nextMigrationPath(dir, slug)
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("writing migration %q: %w", path, err)
-	}
-	return path, nil
 }
 
 func (s *SQLService) requireNoPending(ctx context.Context) error {
