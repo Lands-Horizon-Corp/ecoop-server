@@ -212,14 +212,20 @@ func (v *evolution) applyHand(name string) {
 	v.record()
 }
 
-// fingerprint covers what Diff does not show: columns, indexes and constraints, but never row data.
+// fingerprint covers what Diff does not show: columns, indexes, constraints, views, triggers and
+// functions, but never row data.
 func fingerprint(e *sqlEnv) string {
 	e.t.Helper()
 	return e.schema() +
 		"\n--- indexes\n" + listing(e, `SELECT indexname || ' ' || indexdef FROM pg_indexes
 			WHERE schemaname = 'public' AND tablename <> 'goose_db_version' ORDER BY 1`) +
 		"\n--- constraints\n" + listing(e, `SELECT conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid)
-			FROM pg_constraint WHERE connamespace = 'public'::regnamespace AND conrelid::regclass::text <> 'goose_db_version' ORDER BY 1`)
+			FROM pg_constraint WHERE connamespace = 'public'::regnamespace AND conrelid::regclass::text <> 'goose_db_version' ORDER BY 1`) +
+		"\n--- views\n" + listing(e, `SELECT viewname || ' ' || definition FROM pg_views WHERE schemaname = 'public' ORDER BY 1`) +
+		"\n--- materialized views\n" + listing(e, `SELECT matviewname || ' ' || definition FROM pg_matviews WHERE schemaname = 'public' ORDER BY 1`) +
+		"\n--- triggers\n" + listing(e, `SELECT tgrelid::regclass::text || ' ' || tgname || ' ' || pg_get_triggerdef(oid)
+			FROM pg_trigger WHERE NOT tgisinternal AND tgrelid::regclass::text <> 'goose_db_version' ORDER BY 1`) +
+		"\n--- functions\n" + listing(e, `SELECT proname || ' ' || pg_get_functiondef(oid) FROM pg_proc WHERE pronamespace = 'public'::regnamespace ORDER BY 1`)
 }
 
 func listing(e *sqlEnv, query string) string {
