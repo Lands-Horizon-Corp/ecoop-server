@@ -2,22 +2,38 @@ package database
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
+	"reflect"
+	"time"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/cqrs"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broadcast"
+	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/broker"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
+	"github.com/go-playground/validator/v10"
+)
+
+var (
+	ErrAlreadyStarted    = errors.New("database: models must be registered before Start")
+	ErrNotStarted        = errors.New("database: service has not been started")
+	ErrAlreadyRegistered = errors.New("database: model is already registered")
+	ErrNotRegistered     = errors.New("database: model is not registered")
+	ErrTypeMismatch      = errors.New("database: registered model has different type parameters")
 )
 
 type DatabaseService struct {
-	registry map[any]cqrs.CQRSServices[any, any, any, any]
+	started  bool
+	registry map[reflect.Type]*registration
 
 	readerSQL sql.SQLServices
 	writerSQL sql.SQLServices
 
 	readerLogger logger.LogContextService
 	writerLogger logger.LogContextService
+	cqrsLogger   logger.LogContextService
 
 	writerDsn string
 	readerDsn string
@@ -29,6 +45,13 @@ type DatabaseService struct {
 	autoMigrate bool
 	output      io.Writer
 	models      []any
+
+	broadcast     broadcast.BroadcasterServices
+	messageBroker broker.MessageBrokerServices
+	Validator     *validator.Validate
+
+	BatchSize     int
+	FlushInterval time.Duration
 }
 
 func NewDatabaseService(
@@ -40,34 +63,43 @@ func NewDatabaseService(
 
 	readerLogger logger.LogContextService,
 	writerLogger logger.LogContextService,
+	cqrsLogger logger.LogContextService,
 
 	migrations *os.File,
 	autoMigrate bool,
 	output io.Writer,
 	models []any,
+
+	broadcast broadcast.BroadcasterServices,
+	messageBroker broker.MessageBrokerServices,
+	validator *validator.Validate,
+
+	batchSize int,
+	flushInterval time.Duration,
 ) *DatabaseService {
 	return &DatabaseService{
-		registry:     make(map[any]cqrs.CQRSServices[any, any, any, any]),
-		writerDsn:    writerDsn,
-		readerDsn:    readerDsn,
-		readerLogger: readerLogger,
-		writerLogger: writerLogger,
-		maxIdleConn:  maxIdleConn,
-		maxOpenConn:  maxOpenConn,
-		migrations:   migrations,
-		autoMigrate:  autoMigrate,
-		output:       output,
-		models:       models,
+		registry:      make(map[reflect.Type]*registration),
+		writerDsn:     writerDsn,
+		readerDsn:     readerDsn,
+		readerLogger:  readerLogger,
+		writerLogger:  writerLogger,
+		cqrsLogger:    cqrsLogger,
+		maxIdleConn:   maxIdleConn,
+		maxOpenConn:   maxOpenConn,
+		migrations:    migrations,
+		autoMigrate:   autoMigrate,
+		output:        output,
+		models:        models,
+		broadcast:     broadcast,
+		messageBroker: messageBroker,
+		Validator:     validator,
+		BatchSize:     batchSize,
+		FlushInterval: flushInterval,
 	}
 }
 
-func (db *DatabaseService) Start(ctx context.Context) {
-	if db.writerSQL != nil {
-		db.writerSQL.Stop(ctx)
-	}
-	if db.readerSQL != nil {
-		db.readerSQL.Stop(ctx)
-	}
+func (db *DatabaseService) Start(ctx context.Context) error {
+	db.Stop(ctx)
 	db.writerSQL = sql.NewSQLService(
 		db.writerDsn,
 		db.maxIdleConn,
@@ -88,22 +120,46 @@ func (db *DatabaseService) Start(ctx context.Context) {
 		db.models,
 		db.readerLogger,
 	)
+	if err := db.writerSQL.Run(ctx); err != nil {
+		return fmt.Errorf("starting writer database: %w", err)
+	}
+	if err := db.readerSQL.Run(ctx); err != nil {
+		_ = db.writerSQL.Stop(ctx)
+		return fmt.Errorf("starting reader database: %w", err)
+	}
+	for _, r := range db.registry {
+		r.build(db.writerSQL, db.readerSQL)
+	}
+	db.started = true
+	return nil
+}
+
+func (db *DatabaseService) Run(ctx context.Context) {
+	for _, r := range db.registry {
+		go func(r *registration) {
+			if err := r.run(ctx); err != nil && ctx.Err() == nil && db.writerLogger != nil {
+				db.writerLogger.Emit("database.run", func(l logger.LoggerLevel) {
+					l.Error(err, "model runner stopped", "model", r.name)
+				})
+			}
+		}(r)
+	}
 }
 
 func (db *DatabaseService) Stop(ctx context.Context) {
 	if db.writerSQL != nil {
-		db.writerSQL.Stop(ctx)
+		_ = db.writerSQL.Stop(ctx)
 	}
 	if db.readerSQL != nil {
-		db.readerSQL.Stop(ctx)
+		_ = db.readerSQL.Stop(ctx)
 	}
+	db.started = false
 }
 
-func (db *DatabaseService) Register[TData any, TResponse any, TRequest any, TID comparable](
-	model any) map[any]cqrs.CQRSServices[any, any, any, any] {
-	return db.registry
+func (db *DatabaseService) Writer() sql.SQLServices {
+	return db.writerSQL
 }
 
-func (db *DatabaseService) GetRegistry() map[any]cqrs.CQRSServices[any, any, any, any] {
-	return db.registry
+func (db *DatabaseService) Reader() sql.SQLServices {
+	return db.readerSQL
 }
