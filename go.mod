@@ -49,6 +49,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
+	github.com/pusher/pusher-http-go/v5 v5.1.1
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/sethvargo/go-retry v0.4.0 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect

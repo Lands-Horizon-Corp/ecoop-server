@@ -30,7 +30,7 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	ReadSQLService       sql.SQLServices
 	WriteSQLService      sql.SQLServices
 	Log                  logger.LogContextService
-	BroadcastService     broadcast.BroadcastService
+	BroadcastService     broadcast.BroadcasterServices
 	MessageBrokerService broker.MessageBrokerService
 
 	PaginationService pagination.PaginationServices[TData, TID]

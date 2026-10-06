@@ -48,7 +48,10 @@ func (b *cqBroker) Subscribe(ctx context.Context, _ string, h func(key, value []
 	return nil
 }
 
-type cqBroadcast struct{ err error }
+type cqBroadcast struct {
+	broadcast.BroadcasterServices // CQRS only calls Broadcast
+	err                           error
+}
 
 func (b cqBroadcast) Broadcast([]broadcast.Channel, broadcast.Events, any) error { return b.err }
 
