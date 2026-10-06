@@ -123,6 +123,12 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) insertOne(
 	data TData,
 	preload []string,
 ) (*TData, error) {
+	if err := checkDB(db); err != nil {
+		return nil, err
+	}
+	if err := c.checkText(&data); err != nil {
+		return nil, err
+	}
 	_, err := db.NewInsert().
 		Model(&data).
 		Returning("*").
@@ -142,6 +148,12 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) insertMany(
 	data []TData,
 	preload []string,
 ) ([]*TData, error) {
+	if err := checkDB(db); err != nil {
+		return nil, err
+	}
+	if err := c.checkTexts(data); err != nil {
+		return nil, err
+	}
 	_, err := db.NewInsert().
 		Model(&data).
 		Returning("*").

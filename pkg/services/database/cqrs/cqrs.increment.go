@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
 	"github.com/uptrace/bun"
@@ -29,13 +30,22 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) IncrementByIDWithTx(
 func incrementByID[TData any](
 	ctx context.Context, db bun.IDB, columnDefaultID string, id any, field string, delta float64,
 ) (*TData, error) {
+	if err := checkDB(db); err != nil {
+		return nil, err
+	}
 	if utils.BunColumnFieldIndex[TData](field) == -1 {
 		return nil, fmt.Errorf("%w: increment %q", ErrUnknownField, field)
+	}
+	// A whole delta is sent as an integer so integer columns (money in minor units) stay exact:
+	// bigint + double precision would round balances above 2^53.
+	var amount any = delta
+	if delta == math.Trunc(delta) && math.Abs(delta) <= 1<<53 {
+		amount = int64(delta)
 	}
 	var data TData
 	_, err := db.NewUpdate().
 		Model((*TData)(nil)).
-		Set("? = ? + ?", bun.Ident(field), bun.Ident(field), delta).
+		Set("? = ? + ?", bun.Ident(field), bun.Ident(field), amount).
 		Where("? = ?", bun.Ident(columnDefaultID), id).
 		Returning("*").
 		Exec(ctx, &data)

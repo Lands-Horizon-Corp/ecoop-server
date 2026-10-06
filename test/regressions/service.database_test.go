@@ -54,7 +54,7 @@ CREATE TABLE processed_events (
 );`
 
 type dbHarness struct {
-	t              *testing.T
+	t              testing.TB
 	svc            *database.DatabaseService
 	broker         *dbBroker
 	writer, reader *sql.DB // independent inspection connections
@@ -73,7 +73,7 @@ func dbMemberRegistration() database.Registration[dbMember, dbMemberResource, db
 
 // newDBHarness creates a writer and a reader database sharing one migrations directory and a
 // DatabaseService over them with dbMember registered. It does not start the service.
-func newDBHarness(t *testing.T) *dbHarness {
+func newDBHarness(t testing.TB) *dbHarness {
 	t.Helper()
 	_, writerDSN := createTestDatabase(t)
 	_, readerDSN := createTestDatabase(t)
@@ -120,7 +120,7 @@ func (h *dbHarness) newService(writerDSN, readerDSN string) *database.DatabaseSe
 	)
 }
 
-func openInspect(t *testing.T, dsn string) *sql.DB {
+func openInspect(t testing.TB, dsn string) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -157,7 +157,7 @@ func (h *dbHarness) publish(handler func(key, value []byte) error, eventID strin
 	dbPublish(h.t, handler, eventID, change, m)
 }
 
-func dbPublish[T any](t *testing.T, handler func(key, value []byte) error, eventID string, change cqrs.ChangeType, payload T) {
+func dbPublish[T any](t testing.TB, handler func(key, value []byte) error, eventID string, change cqrs.ChangeType, payload T) {
 	t.Helper()
 	value, err := json.Marshal(cqrs.CQRSQueuePayload[T]{EventID: eventID, ChangeType: change, Payload: payload})
 	if err != nil {
@@ -187,7 +187,7 @@ func (b *dbBroker) Subscribe(ctx context.Context, channel string, h func(key, va
 }
 
 // await returns the handler subscribed on channel, failing if no runner subscribes in time.
-func (b *dbBroker) await(t *testing.T, channel string) func(key, value []byte) error {
+func (b *dbBroker) await(t testing.TB, channel string) func(key, value []byte) error {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -203,7 +203,7 @@ func (b *dbBroker) await(t *testing.T, channel string) func(key, value []byte) e
 	return nil
 }
 
-func count(t *testing.T, db *sql.DB, query string, args ...any) int64 {
+func count(t testing.TB, db *sql.DB, query string, args ...any) int64 {
 	t.Helper()
 	var n int64
 	if err := db.QueryRow(query, args...).Scan(&n); err != nil {
@@ -213,7 +213,7 @@ func count(t *testing.T, db *sql.DB, query string, args ...any) int64 {
 }
 
 // awaitCount polls until query returns want, failing after a few seconds.
-func awaitCount(t *testing.T, db *sql.DB, want int64, query string, args ...any) {
+func awaitCount(t testing.TB, db *sql.DB, want int64, query string, args ...any) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {

@@ -40,6 +40,9 @@ func (c *PaginationService[TData, TID]) count(
 func (c *PaginationService[TData, TID]) countQuery(
 	ctx context.Context, db bun.IDB, filter StructuredFilter,
 ) (int64, error) {
+	if err := checkDB(db); err != nil {
+		return 0, err
+	}
 	var data []TData
 	q := db.NewSelect().Model(&data)
 	q, err := c.applyFilters(q, filter)

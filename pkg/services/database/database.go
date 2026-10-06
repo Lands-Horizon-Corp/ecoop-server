@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -153,14 +154,15 @@ func (db *DatabaseService) Stop(ctx context.Context) error {
 		db.runners.Wait()
 		db.cancelRunners = nil
 	}
+	db.started = false
+	var errs []error
 	if db.writerSQL != nil {
-		return db.writerSQL.Stop(ctx)
+		errs = append(errs, db.writerSQL.Stop(ctx))
 	}
 	if db.readerSQL != nil {
-		return db.readerSQL.Stop(ctx)
+		errs = append(errs, db.readerSQL.Stop(ctx))
 	}
-	db.started = false
-	return nil
+	return errors.Join(errs...)
 }
 
 func (db *DatabaseService) Writer() sql.SQLServices {

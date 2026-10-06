@@ -22,6 +22,7 @@ type Registration[TData any, TResponse any, TRequest any, TID comparable] struct
 	Channel           broadcast.Channel
 	ColumnDefaultID   string
 	ColumnDefaultSort string
+	ColumnVersion     string // optional; see cqrs.CQRSService.ColumnVersion
 	Preloads          []string
 
 	ToResource  func(*TData) *TResponse
@@ -54,6 +55,7 @@ func Register[TData any, TResponse any, TRequest any, TID comparable](
 			Channel:           re.Channel,
 			ColumnDefaultID:   re.ColumnDefaultID,
 			ColumnDefaultSort: re.ColumnDefaultSort,
+			ColumnVersion:     re.ColumnVersion,
 			Preloads:          re.Preloads,
 
 			ToResource:  re.ToResource,

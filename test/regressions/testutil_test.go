@@ -39,7 +39,7 @@ func envOr(key, def string) string {
 }
 
 // requireReachable fails the test when nothing listens on addr, pointing at the compose services.
-func requireReachable(t *testing.T, addr string) {
+func requireReachable(t testing.TB, addr string) {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
@@ -49,7 +49,7 @@ func requireReachable(t *testing.T, addr string) {
 }
 
 // closedAddr returns a local address nothing is listening on.
-func closedAddr(t *testing.T) string {
+func closedAddr(t testing.TB) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

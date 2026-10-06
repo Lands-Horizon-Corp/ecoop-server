@@ -40,6 +40,9 @@ func (c *PaginationService[TData, TID]) exists(
 func (c *PaginationService[TData, TID]) existsQuery(
 	ctx context.Context, db bun.IDB, filter StructuredFilter,
 ) (bool, error) {
+	if err := checkDB(db); err != nil {
+		return false, err
+	}
 	var data []TData
 	q := db.NewSelect().Model(&data)
 	q, err := c.applyFilters(q, filter)

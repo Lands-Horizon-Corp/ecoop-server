@@ -17,7 +17,10 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	Channel           broadcast.Channel
 	ColumnDefaultID   string
 	ColumnDefaultSort string
-	Preloads          []string
+	// ColumnVersion, when set (e.g. "updated_at" or "version"), makes the read-model sync keep the
+	// newest version of a row: an older change that arrives late never overwrites a newer one.
+	ColumnVersion string
+	Preloads      []string
 
 	ToResource  func(*TData) *TResponse
 	TocCSV      func(*TData) *map[string]any
@@ -43,8 +46,10 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	stringSetPool       *utils.MapPool[string, bool]
 	processedEventsPool *utils.BufferPool[ProcessedEvent]
 
-	idFieldIndex int
-	entity       string
+	idFieldIndex      int
+	versionFieldIndex int
+	textFields        []int
+	entity            string
 }
 
 func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
@@ -78,6 +83,7 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		Channel:              c.Channel,
 		ColumnDefaultID:      c.ColumnDefaultID,
 		ColumnDefaultSort:    c.ColumnDefaultSort,
+		ColumnVersion:        c.ColumnVersion,
 		Preloads:             c.Preloads,
 		ToResource:           c.ToResource,
 		TocCSV:               c.TocCSV,
@@ -98,6 +104,8 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		BatchSize:            c.BatchSize,
 		FlushInterval:        c.FlushInterval,
 		idFieldIndex:         utils.BunColumnFieldIndex[TData](c.ColumnDefaultID),
+		versionFieldIndex:    versionFieldIndex[TData](c.ColumnVersion),
+		textFields:           textFieldIndexes[TData](),
 		entity:               reflect.TypeFor[TData]().String(),
 		PaginationService:    c.PaginationService,
 	}

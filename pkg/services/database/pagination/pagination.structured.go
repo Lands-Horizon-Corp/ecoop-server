@@ -22,6 +22,27 @@ func (c *PaginationService[TData, TID]) Pagination(
 	return c.paginate(ctx, c.ReadSQLService.Client(), StructuredFilter{}, pagination, false, preloads...)
 }
 
+// checkDB rejects a nil or zero-value connection or transaction before it is dereferenced.
+func checkDB(db bun.IDB) error {
+	switch v := db.(type) {
+	case nil:
+		return ErrReadDBNotInitialized
+	case *bun.DB:
+		if v == nil {
+			return ErrReadDBNotInitialized
+		}
+	case bun.Tx:
+		if v.Tx == nil {
+			return ErrNilTx
+		}
+	case *bun.Tx:
+		if v == nil || v.Tx == nil {
+			return ErrNilTx
+		}
+	}
+	return nil
+}
+
 func (c *PaginationService[TData, TID]) checkReady() error {
 	if c.ReadSQLService == nil {
 		return ErrReadServiceRequired
@@ -61,6 +82,9 @@ func (c *PaginationService[TData, TID]) paginateQuery(
 	forUpdate bool,
 	preloads ...string,
 ) (*PaginationResult[TData], error) {
+	if err := checkDB(db); err != nil {
+		return nil, err
+	}
 	if pagination.PageSize <= 0 {
 		pagination.PageSize = 30
 	} else if pagination.PageSize > math.MaxInt-1 {

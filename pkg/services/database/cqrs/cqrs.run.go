@@ -3,6 +3,7 @@ package cqrs
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -65,6 +66,12 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) processBatch(
 	}
 	started := time.Now()
 	appliedMessages, err := c.syncBatchToReadDB(ctx, batch)
+	if err != nil && len(batch) > 1 {
+		// One bad message (e.g. a row the read model rejects) fails the whole batch transaction.
+		// Apply the messages one by one so the valid ones still land and only the bad ones fail.
+		c.warn(ctx, "outbox batch failed, retrying messages individually", "batch_size", len(batch), "error", err.Error())
+		appliedMessages, err = c.syncOneByOne(ctx, batch)
+	}
 	if err != nil {
 		return fmt.Errorf("synchronizing batch to read db: %w", err)
 	}
@@ -92,7 +99,7 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 	ctx context.Context,
 	batch []CQRSQueuePayload[TData],
 ) ([]CQRSQueuePayload[TData], error) {
-	if r.ReadSQLService == nil {
+	if r.ReadSQLService == nil || r.ReadSQLService.Client() == nil {
 		return nil, ErrReadDBNotInitialized
 	}
 	eventIDsPtr := r.stringSlicePool.Get()
@@ -164,8 +171,11 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 		if key == "" {
 			key = msg.EventID
 		}
-		if _, exists := latestEntityState[key]; !exists {
+		prev, exists := latestEntityState[key]
+		if !exists {
 			entityOrder = append(entityOrder, key)
+		} else if r.versionNewer(&prev.Payload, &msg.Payload) {
+			continue // an older version arrived after a newer one in the same batch
 		}
 		latestEntityState[key] = msg
 	}
@@ -194,10 +204,14 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 			return fmt.Errorf("bulk inserting processed events: %w", err)
 		}
 		if len(upsertEntities) > 0 {
-			_, err = tx.NewInsert().
+			q := tx.NewInsert().
 				Model(&upsertEntities).
-				On(fmt.Sprintf("CONFLICT (%s) DO UPDATE", r.ColumnDefaultID)).
-				Exec(ctx)
+				On(fmt.Sprintf("CONFLICT (%s) DO UPDATE", r.ColumnDefaultID))
+			if r.versionFieldIndex >= 0 {
+				// Keep the stored row when it is newer than the incoming change.
+				q = q.Where("?TableAlias.? <= EXCLUDED.?", bun.Ident(r.ColumnVersion), bun.Ident(r.ColumnVersion))
+			}
+			_, err = q.Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("bulk upserting entities to read db: %w", err)
 			}
@@ -217,4 +231,76 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 		return nil, err
 	}
 	return newMessages, nil
+}
+
+// versionFieldIndex is the struct field index of the version column, or -1 when there is none or
+// its type cannot be ordered.
+func versionFieldIndex[TData any](column string) int {
+	if column == "" {
+		return -1
+	}
+	idx := utils.BunColumnFieldIndex[TData](column)
+	if idx < 0 {
+		return -1
+	}
+	if _, ok := versionKey(reflect.New(reflect.TypeFor[TData]()).Elem().Field(idx)); !ok {
+		return -1
+	}
+	return idx
+}
+
+// versionNewer reports whether a carries a strictly newer version than b.
+func (r *CQRSService[TData, TResponse, TRequest, TID]) versionNewer(a, b *TData) bool {
+	if r.versionFieldIndex < 0 {
+		return false
+	}
+	va, okA := versionKey(reflect.ValueOf(a).Elem().Field(r.versionFieldIndex))
+	vb, okB := versionKey(reflect.ValueOf(b).Elem().Field(r.versionFieldIndex))
+	return okA && okB && va > vb
+}
+
+// versionKey turns an integer or time version into an exactly comparable number.
+func versionKey(v reflect.Value) (int64, bool) {
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return 0, true
+		}
+		v = v.Elem()
+	}
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int(), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32:
+		return int64(v.Uint()), true
+	}
+	if t, ok := v.Interface().(time.Time); ok {
+		return t.UnixNano(), true
+	}
+	return 0, false
+}
+
+// syncOneByOne applies each message in its own transaction, in arrival order. It returns the applied
+// messages and an error joining every message that failed; failed messages are not recorded as
+// processed, so a redelivery can apply them later.
+func (c *CQRSService[TData, TResponse, TRequest, TID]) syncOneByOne(
+	ctx context.Context,
+	batch []CQRSQueuePayload[TData],
+) ([]CQRSQueuePayload[TData], error) {
+	var (
+		applied []CQRSQueuePayload[TData]
+		errs    []error
+	)
+	for i := range batch {
+		ok, err := c.syncBatchToReadDB(ctx, batch[i:i+1])
+		if err != nil {
+			c.error(ctx, err, "outbox message rejected by read db", "event_id", batch[i].EventID)
+			errs = append(errs, fmt.Errorf("event %s: %w", batch[i].EventID, err))
+			continue
+		}
+		applied = append(applied, ok...)
+	}
+	if len(applied) == 0 {
+		return nil, errors.Join(errs...)
+	}
+	return applied, nil
 }

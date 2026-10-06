@@ -33,6 +33,12 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) updateOne(
 	data TData,
 	preload []string,
 ) (*TData, error) {
+	if err := checkDB(db); err != nil {
+		return nil, err
+	}
+	if err := c.checkText(&data); err != nil {
+		return nil, err
+	}
 	res, err := db.NewUpdate().
 		Model(&data).
 		Where("? = ?", bun.Ident(c.ColumnDefaultID), id).
@@ -57,6 +63,12 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) updateMany(
 	data []TData,
 	preload []string,
 ) ([]*TData, error) {
+	if err := checkDB(db); err != nil {
+		return nil, err
+	}
+	if err := c.checkTexts(data); err != nil {
+		return nil, err
+	}
 	_, err := db.NewUpdate().
 		Model(&data).
 		Bulk().

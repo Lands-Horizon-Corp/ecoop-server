@@ -35,6 +35,9 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) DeleteByIDWithTx(
 	tx bun.Tx,
 	id TID,
 ) error {
+	if err := checkDB(tx); err != nil {
+		return err
+	}
 	res, err := tx.NewDelete().
 		Model((*TData)(nil)).
 		Where("? = ?", bun.Ident(c.ColumnDefaultID), id).
@@ -75,6 +78,9 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) DeleteManyWithTx(
 	tx bun.Tx,
 	ids []TID,
 ) error {
+	if err := checkDB(tx); err != nil {
+		return err
+	}
 	if len(ids) == 0 {
 		return nil
 	}

@@ -34,7 +34,7 @@ type sqlEnv struct {
 }
 
 // createTestDatabase makes an empty throwaway database and returns its name and DSN.
-func createTestDatabase(t *testing.T) (name, dsn string) {
+func createTestDatabase(t testing.TB) (name, dsn string) {
 	t.Helper()
 	adminDSN := envOr("SQL_TEST_DSN", defaultPostgresDSN)
 	u, err := url.Parse(adminDSN)
