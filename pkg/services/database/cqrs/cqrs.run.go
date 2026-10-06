@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/utils"
@@ -12,12 +13,12 @@ import (
 )
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) error {
-	if c.WriteSQLService.Ping(ctx) != nil {
-		panic("WriteSQLService is not reachable")
+	if err := c.WriteSQLService.Ping(ctx); err != nil {
+		return fmt.Errorf("%w: %w", ErrWriteDBUnreachable, err)
 	}
 	if c.ReadSQLService != nil {
-		if c.ReadSQLService.Ping(ctx) != nil {
-			panic("ReadSQLService is not reachable")
+		if err := c.ReadSQLService.Ping(ctx); err != nil {
+			return fmt.Errorf("%w: %w", ErrReadDBUnreachable, err)
 		}
 	}
 	if c.MessageBrokerService == nil {
@@ -147,12 +148,18 @@ func (r *CQRSService[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 		if existingMap[msg.EventID] {
 			continue
 		}
-		newMessages = append(newMessages, msg)
 		eventsToInsert = append(eventsToInsert, ProcessedEvent{
 			EventID:   msg.EventID,
 			Channel:   string(r.Channel),
 			CreatedAt: now,
 		})
+		// A payload without an id (null, or the id field missing) cannot be applied: it would
+		// upsert a row with an empty primary key. Record it as processed so it is not retried.
+		if r.idFieldIndex >= 0 && reflect.ValueOf(&msg.Payload).Elem().Field(r.idFieldIndex).IsZero() {
+			r.warn(ctx, "outbox message dropped: payload has no id", "event_id", msg.EventID, "change_type", msg.ChangeType.String())
+			continue
+		}
+		newMessages = append(newMessages, msg)
 		key := utils.FieldValueAt(&msg.Payload, r.idFieldIndex)
 		if key == "" {
 			key = msg.EventID

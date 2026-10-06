@@ -12,7 +12,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) DeleteByID(
 	ctx context.Context,
 	id TID,
 ) error {
-	res, err := c.WriteSQLService.Client().NewDelete().
+	db, err := c.writeDB()
+	if err != nil {
+		return err
+	}
+	res, err := db.NewDelete().
 		Model((*TData)(nil)).
 		Where("? = ?", bun.Ident(c.ColumnDefaultID), id).
 		Exec(ctx)
@@ -52,7 +56,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) DeleteMany(
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := c.WriteSQLService.Client().NewDelete().
+	db, err := c.writeDB()
+	if err != nil {
+		return err
+	}
+	_, err = db.NewDelete().
 		Model((*TData)(nil)).
 		Where("? IN (?)", bun.Ident(c.ColumnDefaultID), bun.List(ids)).
 		Exec(ctx)

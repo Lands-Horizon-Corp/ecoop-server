@@ -38,6 +38,9 @@ func Register[TData any, TResponse any, TRequest any, TID comparable](
 	re Registration[TData, TResponse, TRequest, TID],
 ) error {
 	key := reflect.TypeFor[TData]()
+	if db == nil {
+		return ErrNilService
+	}
 	if db.started {
 		return fmt.Errorf("%w: %s", ErrAlreadyStarted, key)
 	}
@@ -96,7 +99,9 @@ func Get[TData any, TResponse any, TRequest any, TID comparable](
 	db *DatabaseService,
 ) (cqrs.CQRSServices[TData, TResponse, TRequest, TID], error) {
 	key := reflect.TypeFor[TData]()
-
+	if db == nil {
+		return nil, ErrNilService
+	}
 	if !db.started {
 		return nil, ErrNotStarted
 	}

@@ -26,6 +26,9 @@ func (c *PaginationService[TData, TID]) checkReady() error {
 	if c.ReadSQLService == nil {
 		return ErrReadServiceRequired
 	}
+	if c.ReadSQLService.Client() == nil {
+		return ErrReadDBNotInitialized
+	}
 	if c.ColumnDefaultID == "" {
 		return ErrColumnDefaultIDMissing
 	}
@@ -65,6 +68,10 @@ func (c *PaginationService[TData, TID]) paginateQuery(
 	}
 
 	pagination.Filter.Filters = c.normalizeFilters(ctx, pagination.Filter.Filters)
+	// Find, FindWithTx and Filter pass their filter as extraFilter; honor its sort order.
+	if len(pagination.Filter.SortFields) == 0 {
+		pagination.Filter.SortFields = extraFilter.SortFields
+	}
 
 	sortFields, err := c.resolveSortFields(pagination.Filter.SortFields)
 	if err != nil {

@@ -7,9 +7,26 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// writeDB returns the write connection, or ErrWriteDBNotInitialized when the service was never
+// started or has been stopped (its client is nil then).
+func (c *CQRSService[TData, TResponse, TRequest, TID]) writeDB() (*bun.DB, error) {
+	if c.WriteSQLService == nil {
+		return nil, ErrWriteDBNotInitialized
+	}
+	db := c.WriteSQLService.Client()
+	if db == nil {
+		return nil, ErrWriteDBNotInitialized
+	}
+	return db, nil
+}
+
 // Transactions
 func (c *CQRSService[TData, TResponse, TRequest, TID]) StartTx(ctx context.Context) (bun.Tx, error) {
-	tx, err := c.WriteSQLService.Client().BeginTx(ctx, nil)
+	db, err := c.writeDB()
+	if err != nil {
+		return bun.Tx{}, err
+	}
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return bun.Tx{}, fmt.Errorf("starting transaction: %w", err)
 	}

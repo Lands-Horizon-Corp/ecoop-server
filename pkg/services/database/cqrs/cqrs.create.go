@@ -17,7 +17,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) Create(
 			return nil, fmt.Errorf("validating request payload: %w", err)
 		}
 	}
-	return c.insertOne(ctx, c.WriteSQLService.Client(), data, preload)
+	db, err := c.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return c.insertOne(ctx, db, data, preload)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateFormat(
@@ -48,7 +52,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateMany(
 			}
 		}
 	}
-	return c.insertMany(ctx, c.WriteSQLService.Client(), data, preload)
+	db, err := c.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return c.insertMany(ctx, db, data, preload)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateManyFormat(

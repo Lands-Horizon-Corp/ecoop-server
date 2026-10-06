@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,14 +14,6 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/sql"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/logger"
 	"github.com/go-playground/validator/v10"
-)
-
-var (
-	ErrAlreadyStarted    = errors.New("database: models must be registered before Start")
-	ErrNotStarted        = errors.New("database: service has not been started")
-	ErrAlreadyRegistered = errors.New("database: model is already registered")
-	ErrNotRegistered     = errors.New("database: model is not registered")
-	ErrTypeMismatch      = errors.New("database: registered model has different type parameters")
 )
 
 type DatabaseService struct {
@@ -141,6 +132,9 @@ func (db *DatabaseService) Start(ctx context.Context) error {
 }
 
 func (db *DatabaseService) Run(ctx context.Context) {
+	if !db.started {
+		return
+	}
 	ctx, db.cancelRunners = context.WithCancel(ctx)
 	for _, r := range db.registry {
 		db.runners.Go(func() {
@@ -153,19 +147,20 @@ func (db *DatabaseService) Run(ctx context.Context) {
 	}
 }
 
-func (db *DatabaseService) Stop(ctx context.Context) {
+func (db *DatabaseService) Stop(ctx context.Context) error {
 	if db.cancelRunners != nil {
 		db.cancelRunners()
 		db.runners.Wait()
 		db.cancelRunners = nil
 	}
 	if db.writerSQL != nil {
-		_ = db.writerSQL.Stop(ctx)
+		return db.writerSQL.Stop(ctx)
 	}
 	if db.readerSQL != nil {
-		_ = db.readerSQL.Stop(ctx)
+		return db.readerSQL.Stop(ctx)
 	}
 	db.started = false
+	return nil
 }
 
 func (db *DatabaseService) Writer() sql.SQLServices {

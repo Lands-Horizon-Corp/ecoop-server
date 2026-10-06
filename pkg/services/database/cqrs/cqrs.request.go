@@ -52,7 +52,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateWithValidation(
 	if err != nil {
 		return nil, err
 	}
-	return c.insertOne(ctx, c.WriteSQLService.Client(), data, preload)
+	db, err := c.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return c.insertOne(ctx, db, data, preload)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateWithValidationFormat(
@@ -105,7 +109,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithValidation(
 	if err != nil {
 		return nil, err
 	}
-	return c.insertMany(ctx, c.WriteSQLService.Client(), data, preload)
+	db, err := c.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return c.insertMany(ctx, db, data, preload)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithValidationFormat(
@@ -159,7 +167,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateByIDWithValidation(
 	if err != nil {
 		return nil, err
 	}
-	return c.updateOne(ctx, c.WriteSQLService.Client(), id, data, preload)
+	db, err := c.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return c.updateOne(ctx, db, id, data, preload)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateByIDWithValidationFormat(
@@ -215,7 +227,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateManyWithValidation(
 	if err != nil {
 		return nil, err
 	}
-	return c.updateMany(ctx, c.WriteSQLService.Client(), data, preload)
+	db, err := c.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return c.updateMany(ctx, db, data, preload)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateManyWithValidationFormat(

@@ -13,7 +13,11 @@ import (
 func (c *CQRSService[TData, TResponse, TRequest, TID]) IncrementByID(
 	ctx context.Context, id TID, field string, delta float64,
 ) (*TData, error) {
-	return incrementByID[TData](ctx, c.WriteSQLService.Client(), c.ColumnDefaultID, id, field, delta)
+	db, err := c.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return incrementByID[TData](ctx, db, c.ColumnDefaultID, id, field, delta)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) IncrementByIDWithTx(

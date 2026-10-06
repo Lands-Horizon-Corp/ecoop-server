@@ -543,7 +543,7 @@ func TestDatabaseCross_SadChildBeforeParentIsRejectedThenRecovers(t *testing.T) 
 	}
 
 	dbPublish(t, ledgerEvents, "l-1", cqrs.ChangeTypeCreated, *l) // the child arrives first
-	time.Sleep(300 * time.Millisecond)                             // several flush intervals
+	time.Sleep(300 * time.Millisecond)                            // several flush intervals
 	if n := count(t, h.reader, `SELECT count(*) FROM db_ledgers`); n != 0 {
 		t.Fatalf("reader accepted a ledger row whose member is missing (%d rows)", n)
 	}

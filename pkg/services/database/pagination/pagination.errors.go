@@ -4,6 +4,7 @@ import "errors"
 
 var (
 	ErrReadServiceRequired    = errors.New("pagination: ReadSQLService must be set")
+	ErrReadDBNotInitialized   = errors.New("pagination: read db is not initialized")
 	ErrColumnDefaultIDMissing = errors.New("pagination: ColumnDefaultID must be set")
 	ErrInvalidPartitionKey    = errors.New("pagination: partition column must be part of the primary key")
 

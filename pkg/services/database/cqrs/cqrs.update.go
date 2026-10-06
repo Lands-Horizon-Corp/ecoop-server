@@ -19,7 +19,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateByID(
 			return nil, fmt.Errorf("validating request payload: %w", err)
 		}
 	}
-	return c.updateOne(ctx, c.WriteSQLService.Client(), id, data, preload)
+	db, err := c.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return c.updateOne(ctx, db, id, data, preload)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) updateOne(
@@ -103,7 +107,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateMany(
 		}
 	}
 
-	return c.updateMany(ctx, c.WriteSQLService.Client(), data, preload)
+	db, err := c.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return c.updateMany(ctx, db, data, preload)
 }
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) UpdateManyFormat(
