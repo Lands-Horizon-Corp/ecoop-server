@@ -42,4 +42,4 @@ Copy `.env.example` to `.env` (Grafana creds + `OTEL_*`, `LOG_LEVEL`, `LOG_FORMA
 
 ## Agent skills
 
-`.claude/skills/` and `.agents/skills/` contain Go (style, naming, concurrency, context, safety, security, performance, OpenTelemetry, slog) and PostgreSQL/SQL skills; consult the relevant ones when writing Go or SQL here.
+`.claude/skills/` and `.agents/skills/` contain Go (style, naming, concurrency, context, safety, security, performance, OpenTelemetry, slog) and PostgreSQL/SQL skills; consult the relevant ones when writing Go or SQL here. **`ecoop-database`** is this repo's own: how to use `pkg/services/database` (models, writes, transactions, filters including complex custom SQL, cursors, tenancy, errors, CDC); load it before touching database code.

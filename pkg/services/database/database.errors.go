@@ -12,6 +12,7 @@ import (
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/cqrs"
 	"github.com/Lands-Horizon-Corp/ecoop-server/pkg/services/database/pagination"
+	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -85,6 +86,9 @@ func MapError(err error) error {
 func classify(err error) error {
 	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
 		return classifySQLState(pg.Code)
+	}
+	if _, ok := errors.AsType[validator.ValidationErrors](err); ok {
+		return ErrInvalidInput // struct validation failed; the field errors stay reachable via errors.As
 	}
 	switch {
 	case errors.Is(err, cqrs.ErrInvalidText):
