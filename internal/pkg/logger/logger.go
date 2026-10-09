@@ -2,37 +2,30 @@ package logger
 
 import (
 	"context"
-	"database/sql"
-	"database/sql/driver"
+	"errors"
 	"fmt"
-	"net/http"
 	"os"
+	"sync"
 	"time"
 
-	"github.com/IBM/sarama"
-	"github.com/XSAM/otelsql"
-	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/cloudwego/hertz/pkg/app/server"
-	"github.com/cloudwego/hertz/pkg/protocol"
-	"github.com/pusher/pusher-http-go/v5"
-	"github.com/redis/go-redis/extra/redisotel/v9"
-	"github.com/redis/go-redis/v9"
-
-	"github.com/dnwe/otelsarama"
 	"go.opentelemetry.io/contrib/bridges/otelzap"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/host"
+	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/log/global"
+	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -41,12 +34,20 @@ type state struct {
 	name     string
 	tp       *sdktrace.TracerProvider
 	lp       *sdklog.LoggerProvider
+	mp       *sdkmetric.MeterProvider
 	tracer   trace.Tracer
+	meter    metric.Meter
 	z        *zap.Logger
+	zl       *zap.Logger // z with one extra caller skip, for the shared LoggerLevel.log path
 	buffered *zapcore.BufferedWriteSyncer
+
+	jobDuration metric.Float64Histogram
+	jobRuns     metric.Int64Counter
 }
 
 type loggerServiceImpl struct {
+	mu        sync.Mutex
+	started   bool
 	state     state
 	logLevel  string
 	logFormat string
@@ -54,14 +55,60 @@ type loggerServiceImpl struct {
 }
 
 func NewLoggerService(serviceName, logLevel, logFormat string) LoggerService {
-	return &loggerServiceImpl{
-		state:     state{name: serviceName},
+	// Until Start runs, logs go to stderr only and spans/metrics are no-ops.
+	enc := zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig())
+	l := &loggerServiceImpl{
+		state: state{
+			name:   serviceName,
+			tracer: tracenoop.NewTracerProvider().Tracer(serviceName),
+			meter:  metricnoop.NewMeterProvider().Meter(serviceName),
+		},
 		logLevel:  logLevel,
 		logFormat: logFormat,
 	}
+	l.setZap(zap.New(zapcore.NewCore(enc, zapcore.AddSync(os.Stderr), zapcore.DebugLevel),
+		zap.AddCaller(), zap.AddCallerSkip(1), zap.WithFatalHook(noExitHook{})))
+	return l
 }
 
-func (l *loggerServiceImpl) Start(ctx context.Context) error {
+// noExitHook keeps zap from calling os.Exit on fatal entries. zap rewrites
+// zapcore.WriteThenNoop to WriteThenFatal, so a custom hook is required.
+type noExitHook struct{}
+
+func (noExitHook) OnWrite(*zapcore.CheckedEntry, []zapcore.Field) {}
+
+func (l *loggerServiceImpl) setZap(z *zap.Logger) {
+	l.state.z = z
+	l.state.zl = z.WithOptions(zap.AddCallerSkip(1))
+}
+
+func (l *loggerServiceImpl) Start(ctx context.Context) (err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return ErrAlreadyStarted
+	}
+	if l.state.name == "" {
+		return errors.New("logger: service name is required")
+	}
+
+	level := zapcore.InfoLevel
+	if l.logLevel != "" {
+		if err := level.UnmarshalText([]byte(l.logLevel)); err != nil {
+			return fmt.Errorf("logger: invalid log level %q: %w", l.logLevel, err)
+		}
+	}
+	if l.logFormat != "" && l.logFormat != "json" && l.logFormat != "console" {
+		return fmt.Errorf("logger: invalid log format %q (want json or console)", l.logFormat)
+	}
+
+	// Undo whatever was created if a later step fails.
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, l.shutdown(ctx))
+		}
+	}()
+
 	res, err := resource.New(ctx,
 		resource.WithAttributes(attribute.String("service.name", l.state.name)),
 		resource.WithFromEnv(),
@@ -69,7 +116,7 @@ func (l *loggerServiceImpl) Start(ctx context.Context) error {
 		resource.WithHost(),
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("logger: resource: %w", err)
 	}
 
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
@@ -78,7 +125,7 @@ func (l *loggerServiceImpl) Start(ctx context.Context) error {
 
 	traceExp, err := otlptracegrpc.New(ctx)
 	if err != nil {
-		return fmt.Errorf("otlp trace exporter: %w", err)
+		return fmt.Errorf("logger: otlp trace exporter: %w", err)
 	}
 	l.state.tp = sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
@@ -91,7 +138,7 @@ func (l *loggerServiceImpl) Start(ctx context.Context) error {
 
 	logExp, err := otlploggrpc.New(ctx)
 	if err != nil {
-		return fmt.Errorf("otlp log exporter: %w", err)
+		return fmt.Errorf("logger: otlp log exporter: %w", err)
 	}
 	l.state.lp = sdklog.NewLoggerProvider(
 		sdklog.WithResource(res),
@@ -99,10 +146,38 @@ func (l *loggerServiceImpl) Start(ctx context.Context) error {
 	)
 	global.SetLoggerProvider(l.state.lp)
 
-	l.state.tracer = otel.Tracer(l.state.name)
+	metricExp, err := otlpmetricgrpc.New(ctx)
+	if err != nil {
+		return fmt.Errorf("logger: otlp metric exporter: %w", err)
+	}
+	l.state.mp = sdkmetric.NewMeterProvider(
+		sdkmetric.WithResource(res),
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(10*time.Second))),
+	)
+	otel.SetMeterProvider(l.state.mp)
 
-	level := zapcore.InfoLevel
-	_ = level.UnmarshalText([]byte(l.logLevel))
+	// Go runtime (memory, GC, goroutines) and process/host (CPU, memory) metrics.
+	if err := runtime.Start(runtime.WithMeterProvider(l.state.mp)); err != nil {
+		return fmt.Errorf("logger: runtime metrics: %w", err)
+	}
+	if err := host.Start(host.WithMeterProvider(l.state.mp)); err != nil {
+		return fmt.Errorf("logger: host metrics: %w", err)
+	}
+
+	l.state.tracer = otel.Tracer(l.state.name)
+	l.state.meter = otel.Meter(l.state.name)
+
+	if l.state.jobDuration, err = l.state.meter.Float64Histogram("job.duration",
+		metric.WithUnit("s"),
+		metric.WithDescription("Duration of background jobs."),
+	); err != nil {
+		return fmt.Errorf("logger: job.duration: %w", err)
+	}
+	if l.state.jobRuns, err = l.state.meter.Int64Counter("job.runs",
+		metric.WithDescription("Background job runs by outcome."),
+	); err != nil {
+		return fmt.Errorf("logger: job.runs: %w", err)
+	}
 
 	encCfg := zap.NewProductionEncoderConfig()
 	encCfg.TimeKey = "timestamp"
@@ -116,131 +191,105 @@ func (l *loggerServiceImpl) Start(ctx context.Context) error {
 		enc = zapcore.NewConsoleEncoder(encCfg)
 	}
 
-	buffered := &zapcore.BufferedWriteSyncer{
+	l.state.buffered = &zapcore.BufferedWriteSyncer{
 		WS:            zapcore.AddSync(os.Stderr),
 		FlushInterval: time.Second,
 		Size:          256 * 1024,
 	}
 
-	cores := []zapcore.Core{zapcore.NewCore(enc, buffered, level)}
-	if l.state.lp != nil {
-		cores = append(cores, otelzap.NewCore(l.state.name, otelzap.WithLoggerProvider(l.state.lp)))
-	}
-	l.state.z = zap.New(
-		zapcore.NewTee(cores...),
+	l.setZap(zap.New(
+		zapcore.NewTee(
+			zapcore.NewCore(enc, l.state.buffered, level),
+			otelzap.NewCore(l.state.name, otelzap.WithLoggerProvider(l.state.lp)),
+		),
 		zap.AddCaller(),
-		zap.AddCallerSkip(2),
-		zap.WithFatalHook(zapcore.WriteThenNoop),
-	)
-	l.state.buffered = buffered
+		zap.AddCallerSkip(1),
+		zap.WithFatalHook(noExitHook{}),
+	))
 	l.Context = ctx
+	l.started = true
 	return nil
 }
 
 func (l *loggerServiceImpl) Stop(ctx context.Context) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.started {
+		return ErrNotStarted
+	}
+	l.started = false
+	return l.shutdown(ctx)
+}
+
+// shutdown flushes and closes every provider that exists, returning all failures.
+func (l *loggerServiceImpl) shutdown(ctx context.Context) error {
+	var errs []error
 	if l.state.buffered != nil {
-		_ = l.state.buffered.Sync()
+		if err := l.state.buffered.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("logger: flush stderr: %w", err))
+		}
 	}
 	if l.state.tp != nil {
-		_ = l.state.tp.Shutdown(ctx)
+		if err := l.state.tp.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("logger: trace provider: %w", err))
+		}
 	}
 	if l.state.lp != nil {
-		_ = l.state.lp.Shutdown(ctx)
+		if err := l.state.lp.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("logger: log provider: %w", err))
+		}
+	}
+	if l.state.mp != nil {
+		if err := l.state.mp.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("logger: meter provider: %w", err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// flush pushes buffered logs, spans and metrics out now without shutting down.
+func (l *loggerServiceImpl) flush(ctx context.Context) error {
+	var errs []error
+	if l.state.buffered != nil {
+		if err := l.state.buffered.Sync(); err != nil {
+			errs = append(errs, fmt.Errorf("logger: flush stderr: %w", err))
+		}
+	}
+	if l.state.tp != nil {
+		if err := l.state.tp.ForceFlush(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("logger: flush traces: %w", err))
+		}
+	}
+	if l.state.lp != nil {
+		if err := l.state.lp.ForceFlush(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("logger: flush logs: %w", err))
+		}
+	}
+	if l.state.mp != nil {
+		if err := l.state.mp.ForceFlush(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("logger: flush metrics: %w", err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (l *loggerServiceImpl) requireStarted() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.started {
+		return ErrNotStarted
 	}
 	return nil
+}
+
+// Meter returns the service meter for custom metrics (counters, histograms, gauges).
+func (l *loggerServiceImpl) Meter() metric.Meter {
+	return l.state.meter
 }
 
 func (l *loggerServiceImpl) NewContext(parent context.Context) LogContextService {
 	if parent == nil {
 		parent = context.Background()
 	}
-	return &logContextImpl{
-		Context: parent,
-		tracer:  l.state.tracer,
-		z:       l.state.z,
-	}
-}
-
-// InjectHertz must be called before routes are registered, since Hertz only
-// applies middleware to routes added after Use.
-func (l *loggerServiceImpl) InjectHertz(h *server.Hertz) {
-	// Hertz's built-in tracer hook can only be set at construction, so spans are created here instead.
-	propagator := otel.GetTextMapPropagator()
-	h.Use(func(ctx context.Context, c *app.RequestContext) {
-		ctx = propagator.Extract(ctx, hertzHeaderCarrier{&c.Request.Header})
-
-		method := string(c.Method())
-		name := method
-		if route := c.FullPath(); route != "" {
-			name = method + " " + route
-		}
-		ctx, span := l.state.tracer.Start(ctx, name,
-			trace.WithSpanKind(trace.SpanKindServer),
-			trace.WithAttributes(
-				semconv.HTTPRequestMethodKey.String(method),
-				semconv.URLPath(string(c.Path())),
-				semconv.HTTPRoute(c.FullPath()),
-			),
-		)
-		defer span.End()
-
-		c.Next(ctx)
-
-		status := c.Response.StatusCode()
-		span.SetAttributes(semconv.HTTPResponseStatusCode(status))
-		if err := c.Errors.Last(); err != nil {
-			span.RecordError(err)
-		}
-		if status >= 500 {
-			span.SetStatus(codes.Error, "")
-		}
-	})
-}
-
-// InjectDB wraps the driver's connector so every query is traced. An already
-// opened *sql.DB cannot be instrumented, so pass the connector instead
-// (e.g. stdlib.GetConnector(cfg) for pgx, pq.NewConnector(dsn) for lib/pq).
-func (l *loggerServiceImpl) InjectDB(connector driver.Connector) *sql.DB {
-	attrs := otelsql.WithAttributes(semconv.DBSystemPostgreSQL)
-	db := otelsql.OpenDB(connector, attrs)
-	// Register open/idle connection stats gauges
-	_, _ = otelsql.RegisterDBStatsMetrics(db, attrs)
-	return db
-}
-
-func (l *loggerServiceImpl) InjectCache(rdb *redis.Client) *redis.Client {
-	_ = redisotel.InstrumentTracing(rdb)
-	_ = redisotel.InstrumentMetrics(rdb)
-	return rdb
-}
-
-func (l *loggerServiceImpl) InjectBrokerProducer(producer sarama.SyncProducer) sarama.SyncProducer {
-	return otelsarama.WrapSyncProducer(nil, producer)
-}
-
-func (l *loggerServiceImpl) InjectBrokerConsumer(handler sarama.ConsumerGroupHandler) sarama.ConsumerGroupHandler {
-	return otelsarama.WrapConsumerGroupHandler(handler)
-}
-
-func (l *loggerServiceImpl) InjectPusher(client *pusher.Client) *pusher.Client {
-	if client.HTTPClient == nil {
-		// Same default the pusher library would otherwise create lazily.
-		client.HTTPClient = &http.Client{Timeout: 5 * time.Second}
-	}
-	client.HTTPClient.Transport = otelhttp.NewTransport(client.HTTPClient.Transport)
-	return client
-}
-
-type hertzHeaderCarrier struct {
-	h *protocol.RequestHeader
-}
-
-func (c hertzHeaderCarrier) Get(key string) string { return string(c.h.Peek(key)) }
-
-func (c hertzHeaderCarrier) Set(key, value string) { c.h.Set(key, value) }
-
-func (c hertzHeaderCarrier) Keys() []string {
-	var keys []string
-	c.h.VisitAll(func(k, _ []byte) { keys = append(keys, string(k)) })
-	return keys
+	return &logContextImpl{Context: parent, svc: l}
 }
