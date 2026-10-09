@@ -175,9 +175,6 @@ func (s *BroadcasterService) Stop(ctx context.Context) error {
 	}
 }
 
-// Runner implements [BroadcasterServices]. It delivers queued broadcasts until
-// the queue is closed by Stop or ctx ends. Run already starts the configured
-// number of runners; call it yourself only to add more.
 func (s *BroadcasterService) Runner(ctx context.Context) {
 	s.mu.RLock()
 	queue := s.queue
@@ -199,20 +196,14 @@ func (s *BroadcasterService) Runner(ctx context.Context) {
 	}
 }
 
-// Publish implements [BroadcasterServices].
 func (s *BroadcasterService) Publish(ctx context.Context, channel, event string, payload any) error {
 	return s.send(ctx, "publish", []string{channel}, event, payload)
 }
 
-// Dispatch implements [BroadcasterServices]. More than 100 channels are sent in batches of 100.
 func (s *BroadcasterService) Dispatch(ctx context.Context, channels []string, event string, payload any) error {
 	return s.send(ctx, "dispatch", channels, event, payload)
 }
 
-// Broadcast implements [BroadcasterServices]. Each event is queued for every
-// channel and delivered in the background under ctx's trace (ctx's
-// cancellation is ignored, so the request may finish first). It returns
-// ErrQueueFull instead of blocking.
 func (s *BroadcasterService) Broadcast(ctx context.Context, channels []Channel, events Events, payload any) error {
 	names := make([]string, len(channels))
 	for i, c := range channels {
@@ -269,7 +260,6 @@ func (s *BroadcasterService) send(ctx context.Context, method string, channels [
 	s.inflight.Add(1)
 	s.mu.RUnlock()
 	defer s.inflight.Done()
-
 	ctx, log := s.log.NewContext(ctx).Trace("broadcast."+method+" "+event, spanAttrs(channels, event)...)
 	defer log.Span().End()
 	return s.deliver(ctx, log, method, channels, event, data)
@@ -284,10 +274,9 @@ func (s *BroadcasterService) deliverQueued(runCtx context.Context, j job) {
 	ctx, log := s.log.NewContext(ctx).Trace("broadcast.broadcast "+j.event,
 		append(spanAttrs(j.channels, j.event), attribute.Float64("broadcast.queue_wait_seconds", time.Since(j.queuedAt).Seconds()))...)
 	defer log.Span().End()
-	_ = s.deliver(ctx, log, "broadcast", j.channels, j.event, j.data) // already logged; no caller to return to
+	_ = s.deliver(ctx, log, "broadcast", j.channels, j.event, j.data)
 }
 
-// deliver sends one event to all channels (in batches), retrying transient failures.
 func (s *BroadcasterService) deliver(ctx context.Context, log logger.LoggerLevel, method string, channels []string, event, data string) error {
 	start := time.Now()
 	var err error
@@ -334,9 +323,6 @@ func (s *BroadcasterService) trigger(ctx context.Context, channels []string, eve
 	}
 	return errors.Join(errs...)
 }
-
-// request sends a call signed the way the Pusher HTTP API requires:
-// auth_signature = HMAC-SHA256(secret, "METHOD\nPATH\nsorted query").
 func (s *BroadcasterService) request(ctx context.Context, method, path string, body []byte) error {
 	q := url.Values{}
 	q.Set("auth_key", s.key)
@@ -374,8 +360,6 @@ func (s *BroadcasterService) request(ctx context.Context, method, path string, b
 	return nil
 }
 
-// encode turns a payload into the event's data string, as the Pusher SDKs do:
-// strings and bytes are sent as-is, anything else as JSON.
 func (s *BroadcasterService) encode(payload any) (string, error) {
 	var data string
 	switch p := payload.(type) {
@@ -400,8 +384,6 @@ func (s *BroadcasterService) encode(payload any) (string, error) {
 	return data, nil
 }
 
-// retryable reports network errors, 5xx and 429 as transient. Nothing is
-// retried once the caller's context has ended.
 func retryable(ctx context.Context, err error) bool {
 	if ctx.Err() != nil {
 		return false

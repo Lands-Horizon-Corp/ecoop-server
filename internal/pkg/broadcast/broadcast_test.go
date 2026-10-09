@@ -77,7 +77,6 @@ func newFakeServer(t *testing.T) *fakeServer {
 	return f
 }
 
-// validSignature checks a request the way a Pusher-protocol server does.
 func validSignature(r *http.Request, body []byte, secret string) bool {
 	q := r.URL.Query()
 	got := q.Get("auth_signature")
@@ -113,7 +112,7 @@ func startedLogger(t *testing.T) logger.LoggerService {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		_ = log.Stop(ctx) // no collector in tests
+		_ = log.Stop(ctx)
 	})
 	return log
 }
