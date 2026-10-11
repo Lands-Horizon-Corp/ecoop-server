@@ -11,6 +11,7 @@ var (
 	ErrInvalidUTF8 = errors.New("qr: data contains invalid UTF-8")
 	ErrTooShort    = errors.New("qr: data is too short")
 	ErrTooLarge    = errors.New("qr: data exceeds size limit")
+	ErrNoTracker   = errors.New("qr: no in-flight tracker; create the service with NewQRServices")
 )
 
 // maxDecodedSize caps the JSON payload in both directions so a small QR

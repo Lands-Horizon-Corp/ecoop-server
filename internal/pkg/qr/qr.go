@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
-	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/bytedance/sonic"
@@ -21,11 +21,9 @@ import (
 
 // QRService is safe for concurrent use. Every Encode and Decode is tracked on
 // inflight while it runs; Stop refuses new calls, waits for the tracked ones
-// to finish, and only then releases the codecs. The mutex only guards
-// swapping the codecs in and out.
+// to finish, and only then releases the codecs.
 type QRService struct {
-	mu       sync.RWMutex
-	codecs   *codecs
+	codecs   atomic.Pointer[codecs]
 	inflight *utils.Inflight
 	secret   string
 }
@@ -55,6 +53,9 @@ func NewQRServices(secret string, inflight *utils.Inflight) QRServices {
 }
 
 func (q *QRService) Start(ctx context.Context) error {
+	if q.inflight == nil {
+		return ErrNoTracker
+	}
 	key := sha256.Sum256([]byte(q.secret))
 	aead, err := chacha20poly1305.NewX(key[:])
 	if err != nil {
@@ -75,11 +76,7 @@ func (q *QRService) Start(ctx context.Context) error {
 		decoder.Close()
 		return fmt.Errorf("qr: creating encoder: %w", err)
 	}
-	q.mu.Lock()
-	old := q.codecs
-	q.codecs = &codecs{aead: aead, encoder: encoder, decoder: decoder}
-	q.mu.Unlock()
-	if old != nil {
+	if old := q.codecs.Swap(&codecs{aead: aead, encoder: encoder, decoder: decoder}); old != nil {
 		// Calls still using the old codecs finish before they are released.
 		go q.releaseWhenDrained(old)
 	}
@@ -91,10 +88,7 @@ func (q *QRService) Start(ctx context.Context) error {
 // the codecs are then released in the background once those calls finish,
 // never out from under them.
 func (q *QRService) Stop(ctx context.Context) error {
-	q.mu.Lock()
-	old := q.codecs
-	q.codecs = nil
-	q.mu.Unlock()
+	old := q.codecs.Swap(nil)
 	if old == nil {
 		return nil
 	}
@@ -113,13 +107,20 @@ func (q *QRService) releaseWhenDrained(c *codecs) {
 
 // acquire tracks a call on the current codecs. Callers must call done when
 // the call finishes.
+//
+// It registers before loading the codecs: any call that sees live codecs is
+// already counted, so Stop (which swaps them out, then waits) cannot release
+// them underneath it.
 func (q *QRService) acquire() (c *codecs, done func(), err error) {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	if q.codecs == nil {
+	if q.codecs.Load() == nil {
+		return nil, nil, ErrNotStarted // fast path: never touches the tracker
+	}
+	done = q.inflight.Track()
+	if c = q.codecs.Load(); c == nil {
+		done()
 		return nil, nil, ErrNotStarted
 	}
-	return q.codecs, q.inflight.Track(), nil
+	return c, done, nil
 }
 
 func (q *QRService) Decode(ctx context.Context, encodedStr string) (QRData, error) {
