@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
 )
@@ -44,7 +45,6 @@ type (
 
 	CQRSServices[TData any, TResponse any, TRequest any, TID comparable] interface {
 		Run(ctx context.Context) error
-		// Shutdown drains the queued change hooks; call it after the runner stopped.
 		Shutdown(ctx context.Context) error
 
 		StartTx(ctx context.Context) (bun.Tx, error)
