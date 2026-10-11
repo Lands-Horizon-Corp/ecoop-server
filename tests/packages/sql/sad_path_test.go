@@ -200,3 +200,29 @@ func TestSad_StartWithCancelledContext(t *testing.T) {
 		t.Fatal("Client set after failed Start")
 	}
 }
+
+// More steps than there are migrations to run is refused before any runs.
+func TestSad_TooManyStepsChangeNothing(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	for v := int64(1); v <= 3; v++ {
+		e.write(t, v, "m", "SELECT 1;", "SELECT 1;")
+	}
+	s := e.started(t)
+	ctx := ctxT(t)
+	if err := s.UpSteps(ctx, 4); !errors.Is(err, ecsql.ErrTooManySteps) {
+		t.Fatalf("UpSteps(4) of 3 = %v", err)
+	}
+	if v := version(t, s, e); v != "0" {
+		t.Fatalf("refused UpSteps applied up to %s", v)
+	}
+	if err := s.UpSteps(ctx, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RollbackSteps(ctx, 3); !errors.Is(err, ecsql.ErrTooManySteps) {
+		t.Fatalf("RollbackSteps(3) of 2 = %v", err)
+	}
+	if v := version(t, s, e); v != "2" {
+		t.Fatalf("refused RollbackSteps reverted to %s", v)
+	}
+}

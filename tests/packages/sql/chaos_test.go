@@ -152,6 +152,7 @@ func TestChaos_LockContentionTimesOutWithoutChange(t *testing.T) {
 func TestChaos_DatabaseGoneIsDetected(t *testing.T) {
 	t.Parallel()
 	e, p := newEnv(t), newProxy(t)
+	e.write(t, 1, "a", "SELECT 1;", "SELECT 1;")
 	s := proxied(t, e, p)
 	_ = p.ln.Close() // no new connections
 	p.DropAll()

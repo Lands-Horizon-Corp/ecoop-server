@@ -12,13 +12,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	ecsql "github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
@@ -40,7 +43,18 @@ var _ ecsql.SQLServices = (*ecsql.SQLService)(nil)
 
 func TestMain(m *testing.M) { os.Exit(runMain(m)) }
 
-func runMain(m *testing.M) int {
+func runMain(m *testing.M) (code int) {
+	scratch := filepath.Join(os.TempDir(), "bun-auto-*")
+	before, _ := filepath.Glob(scratch)
+	defer func() { // Migrate's scratch folders must never be left behind
+		after, _ := filepath.Glob(scratch)
+		for _, d := range after {
+			if !slices.Contains(before, d) {
+				fmt.Fprintln(os.Stderr, "sql tests: leaked scratch folder", d)
+				code = 1
+			}
+		}
+	}()
 	stop, err := startPostgres()
 	if err != nil {
 		skipReason = "no Postgres: " + err.Error()
@@ -55,7 +69,9 @@ func startPostgres() (stop func(), err error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, errors.New("docker not installed")
 	}
-	out, err := exec.Command("docker", "run", "-d", "--rm", "-e", "POSTGRES_PASSWORD="+pgPassword,
+	removeStaleContainers()
+	out, err := exec.Command("docker", "run", "-d", "--rm", "--label", fmt.Sprintf("%s=%d", containerLabel, time.Now().Unix()),
+		"-e", "POSTGRES_PASSWORD="+pgPassword,
 		"-p", "127.0.0.1::5432", "postgres:18-alpine", "-c", "max_connections=500").Output()
 	if err != nil {
 		return nil, fmt.Errorf("docker run: %w", err)
@@ -87,6 +103,24 @@ func startPostgres() (stop func(), err error) {
 			return nil, fmt.Errorf("postgres never became ready: %w", err)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// containerLabel marks the suite's containers with their start time, so a
+// run that was killed before cleaning up (a test timeout) is removed by the
+// next one. Only containers older than any run could last are touched, so
+// two runs at once do not remove each other's.
+const containerLabel = "ecoop-sql-test"
+
+func removeStaleContainers() {
+	out, _ := exec.Command("docker", "ps", "-q", "--filter", "label="+containerLabel,
+		"--format", `{{.ID}} {{.Label "`+containerLabel+`"}}`).Output()
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		id, started, ok := strings.Cut(line, " ")
+		sec, err := strconv.ParseInt(started, 10, 64)
+		if ok && err == nil && time.Since(time.Unix(sec, 0)) > time.Hour {
+			_ = exec.Command("docker", "rm", "-f", id).Run()
+		}
 	}
 }
 
@@ -192,12 +226,7 @@ func tables(t testing.TB, s ecsql.SQLServices) []string {
 }
 
 func hasTable(t testing.TB, s ecsql.SQLServices, name string) bool {
-	for _, tb := range tables(t, s) {
-		if tb == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tables(t, s), name)
 }
 
 func columns(t testing.TB, s ecsql.SQLServices, table string) []string {
@@ -336,11 +365,80 @@ func dbName(dsn string) string {
 	return name
 }
 
-func containsAny(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if strings.Contains(s, sub) {
-			return true
+// snapshot describes the current schema: columns, indexes, constraints,
+// views, triggers, functions and types, goose's table excluded. Two
+// databases with the same snapshot have the same schema.
+func snapshot(t testing.TB, s ecsql.SQLServices) string {
+	t.Helper()
+	const q = `
+SELECT 'col ' || table_name || '.' || column_name || ' ' || data_type || coalesce('(' || character_maximum_length || ')', '') ||
+       coalesce(' p' || numeric_precision || ',' || numeric_scale, '') || ' null=' || is_nullable || ' def=' || coalesce(column_default, '-')
+  FROM information_schema.columns WHERE table_schema = current_schema() AND table_name <> 'goose_db_version'
+UNION ALL
+SELECT 'idx ' || indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename <> 'goose_db_version'
+UNION ALL
+SELECT 'con ' || c.conrelid::regclass || ' ' || c.conname || ' ' || pg_get_constraintdef(c.oid)
+  FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
+ WHERE n.nspname = current_schema() AND c.conrelid::regclass::text <> 'goose_db_version'
+UNION ALL
+SELECT 'view ' || viewname || ' ' || definition FROM pg_views WHERE schemaname = current_schema()
+UNION ALL
+SELECT 'trg ' || tgrelid::regclass || ' ' || tgname FROM pg_trigger WHERE NOT tgisinternal
+UNION ALL
+SELECT 'fn ' || pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = current_schema()
+UNION ALL
+SELECT 'type ' || t.typname || ' ' || string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
+  FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid JOIN pg_namespace n ON n.oid = t.typnamespace
+ WHERE n.nspname = current_schema() GROUP BY t.typname
+ORDER BY 1`
+	var rows []string
+	if err := s.Client().NewRaw(q).Scan(ctxT(t), &rows); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	return strings.Join(rows, "\n")
+}
+
+// count returns the rows of a SQL count query.
+func count(t testing.TB, s ecsql.SQLServices, query string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := s.Client().NewRaw(query, args...).Scan(ctxT(t), &n); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return n
+}
+
+func execSQL(t testing.TB, s ecsql.SQLServices, query string, args ...any) {
+	t.Helper()
+	if _, err := s.Client().ExecContext(ctxT(t), query, args...); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+}
+
+// diffLines shows what differs between two snapshots.
+func diffLines(a, b string) string {
+	in := func(s string) map[string]bool {
+		m := map[string]bool{}
+		for l := range strings.SplitSeq(s, "\n") {
+			m[l] = true
+		}
+		return m
+	}
+	ma, mb := in(a), in(b)
+	var out []string
+	for l := range ma {
+		if !mb[l] {
+			out = append(out, "- "+l)
 		}
 	}
-	return false
+	for l := range mb {
+		if !ma[l] {
+			out = append(out, "+ "+l)
+		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, "\n")
 }
+
+// pgArray passes ids as a Postgres array parameter.
+func pgArray(ids []int64) any { return pgdialect.Array(ids) }

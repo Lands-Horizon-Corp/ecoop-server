@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"testing"
-	"time"
 
 	ecsql "github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
 )
@@ -166,26 +165,30 @@ func TestZeroValue_ClientHandleAfterStop(t *testing.T) {
 
 func TestZeroValue_NilContext(t *testing.T) {
 	t.Parallel()
-	// A nil ctx is a programming error: it must fail fast, not hang.
+	// A nil ctx is a programming error. It is refused up front: one reaching
+	// database/sql panics while holding the pool's lock and hangs every later
+	// query on that pool.
 	e := newEnv(t)
 	s := e.started(t)
 	var nilCtx context.Context
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for _, fn := range []func(){
-			func() { _ = s.Ping(nilCtx) },
-			func() { _ = s.Migrate(nilCtx) },
-			func() { _ = s.Status(nilCtx) },
-			func() { _ = s.Stop(nilCtx) },
-		} {
-			_, _ = capturePanic(fn)
+	for name, fn := range map[string]func() error{
+		"Start":   func() error { return e.service().Start(nilCtx) },
+		"Ping":    func() error { return s.Ping(nilCtx) },
+		"Run":     func() error { return ecsql.NewSQLService(e.dsn, 1, 1, e.dir, true, nil, nil, nil).Run(nilCtx) },
+		"Migrate": func() error { return s.Migrate(nilCtx) },
+		"Status":  func() error { return s.Status(nilCtx) },
+		"Version": func() error { return s.Version(nilCtx) },
+		"Create":  func() error { return s.Create(nilCtx, "x") },
+		"Stop":    func() error { return s.Stop(nilCtx) },
+	} {
+		var err error
+		mustNotPanic(t, name, func() { err = fn() })
+		if !errors.Is(err, ecsql.ErrNilContext) {
+			t.Errorf("%s(nil) = %v, want ErrNilContext", name, err)
 		}
-	}()
-	select {
-	case <-done:
-	case <-time.After(20 * time.Second):
-		t.Fatal("nil ctx hung")
+	}
+	if err := s.Ping(ctxT(t)); err != nil {
+		t.Fatalf("pool unusable after nil-ctx calls: %v", err)
 	}
 }
 

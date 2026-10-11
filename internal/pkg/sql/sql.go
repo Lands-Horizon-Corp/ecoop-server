@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	"github.com/pressly/goose/v3"
-	"github.com/pressly/goose/v3/lock"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
@@ -34,8 +34,8 @@ type SQLService struct {
 	maxOpenConn int
 	autoMigrate bool
 
-	db         atomic.Pointer[bun.DB]
-	sqldb      atomic.Pointer[sql.DB]
+	db         atomic.Pointer[bun.DB] // the app's pool, returned by Client
+	migdb      atomic.Pointer[sql.DB] // the pool migrations run on
 	migrations *os.File
 	output     io.Writer
 	models     []any
@@ -43,16 +43,17 @@ type SQLService struct {
 	connMaxLifetime time.Duration
 	connMaxIdleTime time.Duration
 
-	lifecycle sync.Mutex // serialises Start and Stop
+	lifecycle sync.Mutex    // serialises Start and Stop
+	migrating chan struct{} // one migration command at a time in this process
 	gate      *utils.Gate
 	inflight  *utils.Inflight
 }
 
 // NewSQLService creates a Postgres service. migrations is an opened
 // directory holding goose .sql files; output receives Status and Version
-// (os.Stdout if nil); models are the Bun models Migrate diffs against the
-// database. inflight may be shared with other services; nil gives the
-// service its own tracker.
+// (os.Stdout if nil); models are pointers to the Bun models Migrate diffs
+// against the database. inflight may be shared with other services; nil
+// gives the service its own tracker.
 func NewSQLService(
 	dsn string,
 	maxIdleConn int,
@@ -79,6 +80,7 @@ func NewSQLService(
 		models:          models,
 		connMaxLifetime: DefaultConnMaxLifetime,
 		connMaxIdleTime: DefaultConnMaxIdleTime,
+		migrating:       make(chan struct{}, 1),
 		gate:            utils.NewGate(inflight),
 		inflight:        inflight,
 	}
@@ -86,9 +88,17 @@ func NewSQLService(
 
 // Lifecycle
 
-// Start opens the connection pool and checks the database answers. Calling
+// Start opens the connection pools and checks the database answers. Calling
 // it while started does nothing.
+//
+// Migrations get a pool of their own: app queries keep pgdriver's socket
+// timeouts, while a migration statement (an index build, a backfill, a wait
+// on a lock) runs as long as its ctx allows, and never waits for a
+// connection held by app traffic.
 func (s *SQLService) Start(ctx context.Context) error {
+	if ctx == nil {
+		return ErrNilContext
+	}
 	if s.dsn == "" {
 		return ErrNoDSN
 	}
@@ -98,25 +108,44 @@ func (s *SQLService) Start(ctx context.Context) error {
 	if s.gate == nil {
 		return ErrNoTracker
 	}
+	app, err := connector(s.dsn)
+	if err != nil {
+		return err
+	}
+	mig, _ := connector(s.dsn, pgdriver.WithReadTimeout(0))
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
 	if s.gate.IsOpen() {
 		return nil
 	}
-	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(s.dsn)))
+	sqldb := sql.OpenDB(app)
 	sqldb.SetMaxOpenConns(s.maxOpenConn)
 	sqldb.SetMaxIdleConns(s.maxIdleConn) // database/sql caps it at MaxOpenConns
 	sqldb.SetConnMaxLifetime(s.connMaxLifetime)
 	sqldb.SetConnMaxIdleTime(s.connMaxIdleTime)
 	db := bun.NewDB(sqldb, pgdialect.New())
+	migdb := sql.OpenDB(mig)
+	migdb.SetConnMaxIdleTime(s.connMaxIdleTime)
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
+		_ = migdb.Close()
 		return fmt.Errorf("sql: connecting: %w", err)
 	}
-	s.sqldb.Store(sqldb)
+	s.migdb.Store(migdb)
 	s.db.Store(db)
 	s.gate.Open()
 	return nil
+}
+
+// connector builds a pgdriver connector, which panics on a malformed DSN.
+// The DSN holds the password, so the error does not repeat it.
+func connector(dsn string, opts ...pgdriver.Option) (c *pgdriver.Connector, err error) {
+	defer func() {
+		if recover() != nil {
+			c, err = nil, ErrInvalidDSN
+		}
+	}()
+	return pgdriver.NewConnector(append([]pgdriver.Option{pgdriver.WithDSN(dsn)}, opts...)...), nil
 }
 
 // Run applies pending migrations when autoMigrate is on, and does nothing
@@ -128,42 +157,48 @@ func (s *SQLService) Run(ctx context.Context) error {
 	if !s.autoMigrate {
 		return nil
 	}
-	return s.up(ctx)
+	return s.migration(ctx, func(mig *sql.DB, dir string) error {
+		return withMigrationLock(ctx, mig, func() error { return upLocked(ctx, mig, dir) })
+	})
 }
 
 // Stop refuses new commands, waits for running ones (a migration is never
-// cut off halfway), then closes the pool; database/sql lets queries already
+// cut off halfway), then closes the pools; database/sql lets queries already
 // running through Client finish first. If ctx ends first Stop returns its
-// error and closes the pool in the background once the commands finish.
+// error and closes the pools in the background once the commands finish.
 func (s *SQLService) Stop(ctx context.Context) error {
+	if ctx == nil {
+		return ErrNilContext
+	}
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
-	db, sqldb := s.db.Load(), s.sqldb.Load()
+	db, migdb := s.db.Load(), s.migdb.Load()
 	if err := s.gate.Close(ctx); err != nil {
 		go func() {
 			_ = s.inflight.Wait(context.Background())
-			s.release(db, sqldb)
+			s.release(db, migdb)
 		}()
 		return fmt.Errorf("sql: stop: commands still running: %w", err)
 	}
-	return s.release(db, sqldb)
+	return s.release(db, migdb)
 }
 
-// release closes db and clears it, unless a later Start replaced it.
-func (s *SQLService) release(db *bun.DB, sqldb *sql.DB) error {
+// release closes the pools and clears them, unless a later Start replaced
+// them.
+func (s *SQLService) release(db *bun.DB, migdb *sql.DB) error {
 	if db == nil {
 		return nil
 	}
 	s.db.CompareAndSwap(db, nil)
-	s.sqldb.CompareAndSwap(sqldb, nil)
-	if err := db.Close(); err != nil {
+	s.migdb.CompareAndSwap(migdb, nil)
+	if err := errors.Join(db.Close(), migdb.Close()); err != nil {
 		return fmt.Errorf("sql: closing: %w", err)
 	}
 	return nil
 }
 
 func (s *SQLService) Ping(ctx context.Context) error {
-	db, _, done, err := s.ready(false)
+	db, _, done, err := s.ready(ctx)
 	if err != nil {
 		return err
 	}
@@ -181,55 +216,68 @@ func (s *SQLService) Client() *bun.DB {
 
 // Migrations
 
-// Migrate generates a migration from the models, then applies every pending
-// migration. Bun diffs the models against the live schema (goose's own table
+// Migrate applies pending migrations, then generates migrations from the
+// models and applies them until the schema matches (at most MigratePasses).
+// Applying first means the models are diffed against an
+// up-to-date schema, so a teammate's pending migration is never generated
+// again. Bun diffs the models against the live schema (goose's own table
 // excluded) and the changes are written as a goose .sql file. If they drop a
 // table or a column, the file gets ReviewSuffix instead and is not applied
 // until a person renames it. When the models match the schema no file is
-// written.
+// written. A generated file that fails to apply is removed (goose rolled it
+// back), so fixing the cause and running Migrate again starts clean.
 func (s *SQLService) Migrate(ctx context.Context) error {
-	db, dir, done, err := s.ready(true)
-	if err != nil {
+	if err := validModels(s.models); err != nil {
 		return err
 	}
-	defer done()
-	return s.withMigrationLock(ctx, func() error {
-		if len(s.models) > 0 {
-			if err := s.generate(ctx, db, dir); err != nil {
+	return s.migration(ctx, func(mig *sql.DB, dir string) error {
+		return withMigrationLock(ctx, mig, func() error {
+			if err := upLocked(ctx, mig, dir); err != nil || len(s.models) == 0 {
 				return err
 			}
-		}
-		return s.upLocked(ctx)
+			for range MigratePasses {
+				file, err := s.generate(ctx, mig, dir)
+				if err != nil || file == "" {
+					return err
+				}
+				if err := upLocked(ctx, mig, dir); err != nil {
+					return errors.Join(ErrInvalidMigration, err, os.Remove(file))
+				}
+			}
+			return ErrNotConverged
+		})
 	})
 }
 
 // Fresh drops everything in the current schema and reapplies all migrations.
 // It destroys all data in that schema.
 func (s *SQLService) Fresh(ctx context.Context) error {
-	db, _, done, err := s.ready(true)
-	if err != nil {
-		return err
-	}
-	defer done()
-	return s.withMigrationLock(ctx, func() error {
-		var schema string
-		if err := db.NewRaw("SELECT current_schema()").Scan(ctx, &schema); err != nil {
-			return fmt.Errorf("sql: fresh: %w", err)
-		}
-		ident := bun.Ident(schema)
-		if _, err := db.ExecContext(ctx, "DROP SCHEMA ? CASCADE", ident); err != nil {
-			return fmt.Errorf("sql: fresh: dropping schema %q: %w", schema, err)
-		}
-		if _, err := db.ExecContext(ctx, "CREATE SCHEMA ?", ident); err != nil {
-			return fmt.Errorf("sql: fresh: creating schema %q: %w", schema, err)
-		}
-		return s.upLocked(ctx)
+	return s.migration(ctx, func(mig *sql.DB, dir string) error {
+		return withMigrationLock(ctx, mig, func() error {
+			db := bun.NewDB(mig, pgdialect.New()) // for quoting; never Close it
+			var schema string
+			if err := db.NewRaw("SELECT current_schema()").Scan(ctx, &schema); err != nil {
+				return fmt.Errorf("sql: fresh: %w", err)
+			}
+			ident := bun.Ident(schema)
+			if _, err := db.ExecContext(ctx, "DROP SCHEMA ? CASCADE", ident); err != nil {
+				return fmt.Errorf("sql: fresh: dropping schema %q: %w", schema, err)
+			}
+			if _, err := db.ExecContext(ctx, "CREATE SCHEMA ?", ident); err != nil {
+				return fmt.Errorf("sql: fresh: creating schema %q: %w", schema, err)
+			}
+			return upLocked(ctx, mig, dir)
+		})
 	})
 }
 
 // Create writes a new goose .sql migration from the standard template, named
-// name in snake_case, versioned after every existing migration.
+// name in snake_case, versioned after every existing migration. It needs no
+// Start.
 func (s *SQLService) Create(ctx context.Context, name string) error {
+	if ctx == nil {
+		return ErrNilContext
+	}
 	dir, err := s.dir()
 	if err != nil {
 		return err
@@ -238,12 +286,17 @@ func (s *SQLService) Create(ctx context.Context, name string) error {
 	if slug == "" {
 		return ErrEmptyName
 	}
+	select { // so two Creates here never pick the same version
+	case s.migrating <- struct{}{}:
+		defer func() { <-s.migrating }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	version, err := nextVersion(dir)
 	if err != nil {
 		return err
 	}
-	file := filepath.Join(dir, fmt.Sprintf("%d_%s.sql", version, slug))
-	if err := os.WriteFile(file, []byte(migrationTemplate), 0o644); err != nil {
+	if err := writeNew(filepath.Join(dir, fmt.Sprintf("%d_%s.sql", version, slug)), migrationTemplate); err != nil {
 		return fmt.Errorf("sql: create %q: %w", name, err)
 	}
 	return nil
@@ -278,43 +331,59 @@ func (s *SQLService) RollbackTo(ctx context.Context, version int64) error {
 	})
 }
 
-// Redo reverts the last applied migration and applies it again.
+// Redo reverts the last applied migration and applies it again. With none
+// applied there is nothing to redo.
 func (s *SQLService) Redo(ctx context.Context) error {
 	return s.withProvider(ctx, func(p *goose.Provider) error {
 		if _, err := p.Down(ctx); err != nil {
-			return err
+			return noVersionOK(err)
 		}
 		_, err := p.UpByOne(ctx)
 		return err
 	})
 }
 
-// RollbackSteps reverts up to steps migrations, stopping early when none
-// are left.
+// RollbackSteps reverts steps migrations. Asking for more than are applied
+// is refused before any is reverted.
 func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
-	if steps <= 0 {
-		return ErrInvalidSteps
-	}
-	return s.withProvider(ctx, func(p *goose.Provider) error {
-		for range steps {
-			if _, err := p.Down(ctx); err != nil {
-				return noVersionOK(err)
-			}
-		}
-		return nil
+	return s.steps(ctx, steps, goose.StateApplied, func(p *goose.Provider) error {
+		_, err := p.Down(ctx)
+		return err
 	})
 }
 
-// UpSteps applies up to steps pending migrations, stopping early when none
-// are left.
+// UpSteps applies steps pending migrations. Asking for more than are
+// pending is refused before any is applied.
 func (s *SQLService) UpSteps(ctx context.Context, steps int) error {
+	return s.steps(ctx, steps, goose.StatePending, func(p *goose.Provider) error {
+		_, err := p.UpByOne(ctx)
+		return err
+	})
+}
+
+// steps runs step steps times, after checking that many migrations are in
+// state.
+func (s *SQLService) steps(ctx context.Context, steps int, state goose.State, step func(*goose.Provider) error) error {
 	if steps <= 0 {
 		return ErrInvalidSteps
 	}
 	return s.withProvider(ctx, func(p *goose.Provider) error {
+		statuses, err := p.Status(ctx)
+		if err != nil {
+			return err
+		}
+		n := 0
+		for _, st := range statuses {
+			if st.State == state {
+				n++
+			}
+		}
+		if steps > n {
+			return fmt.Errorf("%w: %d asked, %d %s", ErrTooManySteps, steps, n, state)
+		}
 		for range steps {
-			if _, err := p.UpByOne(ctx); err != nil {
-				return noVersionOK(err)
+			if err := step(p); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -323,13 +392,13 @@ func (s *SQLService) UpSteps(ctx context.Context, steps int) error {
 
 // Status writes every migration and whether it is applied to the output.
 func (s *SQLService) Status(ctx context.Context) error {
-	return s.withProvider(ctx, func(p *goose.Provider) error {
+	w := tabwriter.NewWriter(s.output, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "VERSION\tSTATE\tAPPLIED AT\tFILE")
+	err := s.withProvider(ctx, func(p *goose.Provider) error {
 		statuses, err := p.Status(ctx)
 		if err != nil {
 			return err
 		}
-		w := tabwriter.NewWriter(s.output, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "VERSION\tSTATE\tAPPLIED AT\tFILE")
 		for _, st := range statuses {
 			applied := "-"
 			if !st.AppliedAt.IsZero() {
@@ -337,36 +406,80 @@ func (s *SQLService) Status(ctx context.Context) error {
 			}
 			fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", st.Source.Version, st.State, applied, filepath.Base(st.Source.Path))
 		}
-		return w.Flush()
+		return nil
 	})
-}
-
-// Version writes the latest applied migration version to the output.
-func (s *SQLService) Version(ctx context.Context) error {
-	return s.withProvider(ctx, func(p *goose.Provider) error {
-		v, err := p.GetDBVersion(ctx)
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(s.output, "version: %d\n", v)
+	if err != nil {
 		return err
-	})
+	}
+	return w.Flush()
 }
 
-// Helpers
-
-func (s *SQLService) up(ctx context.Context) error {
-	_, _, done, err := s.ready(true)
+// Version writes the latest applied migration version to the output: 0
+// when nothing has been applied.
+func (s *SQLService) Version(ctx context.Context) error {
+	_, mig, done, err := s.ready(ctx)
 	if err != nil {
 		return err
 	}
 	defer done()
-	return s.withMigrationLock(ctx, func() error { return s.upLocked(ctx) })
+	var v int64
+	err = mig.QueryRowContext(ctx, "SELECT COALESCE(MAX(version_id), 0) FROM "+GooseTable).Scan(&v)
+	if pg, ok := errors.AsType[pgdriver.Error](err); ok && pg.Field('C') == "42P01" { // no goose table yet
+		err = nil
+	}
+	if err != nil {
+		return fmt.Errorf("sql: version: %w", err)
+	}
+	_, err = fmt.Fprintf(s.output, "version: %d\n", v)
+	return err
+}
+
+// Helpers
+
+// ready checks ctx and enters the gate, returning the app and migration
+// pools. The caller must call done when it finishes, so Stop waits for it.
+func (s *SQLService) ready(ctx context.Context) (db *bun.DB, mig *sql.DB, done func(), err error) {
+	if ctx == nil {
+		return nil, nil, nil, ErrNilContext
+	}
+	done, ok := s.gate.Enter()
+	if !ok {
+		return nil, nil, nil, ErrNotStarted
+	}
+	db, mig = s.db.Load(), s.migdb.Load()
+	if db == nil || mig == nil {
+		done()
+		return nil, nil, nil, ErrNotStarted
+	}
+	return db, mig, done, nil
+}
+
+// migration runs fn as this process's only migration command at the time:
+// commands queue here (giving up when ctx ends) rather than each holding a
+// connection while waiting for the database lock. fn gets the migration
+// pool and the migrations directory.
+func (s *SQLService) migration(ctx context.Context, fn func(mig *sql.DB, dir string) error) error {
+	_, mig, done, err := s.ready(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+	dir, err := s.dir()
+	if err != nil {
+		return err
+	}
+	select {
+	case s.migrating <- struct{}{}:
+		defer func() { <-s.migrating }()
+	case <-ctx.Done():
+		return fmt.Errorf("sql: waiting for another migration command: %w", ctx.Err())
+	}
+	return fn(mig, dir)
 }
 
 // upLocked applies pending migrations; the caller holds the migration lock.
-func (s *SQLService) upLocked(ctx context.Context) error {
-	p, err := s.provider(false)
+func upLocked(ctx context.Context, mig *sql.DB, dir string) error {
+	p, err := provider(mig, dir)
 	if errors.Is(err, goose.ErrNoMigrations) {
 		return nil
 	}
@@ -379,41 +492,33 @@ func (s *SQLService) upLocked(ctx context.Context) error {
 	return nil
 }
 
-// withProvider runs fn with a goose provider that takes the migration lock
-// itself, so commands cannot interleave with another instance's migration.
+// withProvider runs fn with a goose provider while holding the migration
+// lock, so a command of several steps (Redo, RollbackSteps) cannot
+// interleave with another instance's. With no migration files there is
+// nothing to do.
 func (s *SQLService) withProvider(ctx context.Context, fn func(*goose.Provider) error) error {
-	_, _, done, err := s.ready(true)
-	if err != nil {
-		return err
-	}
-	defer done()
-	p, err := s.provider(true)
-	if err != nil {
-		return err
-	}
-	if err := fn(p); err != nil {
-		return fmt.Errorf("sql: %w", err)
-	}
-	return nil
+	return s.migration(ctx, func(mig *sql.DB, dir string) error {
+		return withMigrationLock(ctx, mig, func() error {
+			p, err := provider(mig, dir)
+			if errors.Is(err, goose.ErrNoMigrations) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if err := fn(p); err != nil {
+				return fmt.Errorf("sql: %w", err)
+			}
+			return nil
+		})
+	})
 }
 
-// provider builds a goose provider over the migrations directory. It is
-// rebuilt per command so files added by Create or Migrate are seen. Never
-// Close it: goose's Provider.Close closes the shared *sql.DB.
-func (s *SQLService) provider(locked bool) (*goose.Provider, error) {
-	dir, err := s.dir()
-	if err != nil {
-		return nil, err
-	}
-	opts := []goose.ProviderOption{goose.WithDisableGlobalRegistry(true)}
-	if locked {
-		locker, err := lock.NewPostgresSessionLocker(lock.WithLockID(MigrationLockID))
-		if err != nil {
-			return nil, err
-		}
-		opts = append(opts, goose.WithSessionLocker(locker))
-	}
-	p, err := goose.NewProvider(goose.DialectPostgres, s.sqldb.Load(), os.DirFS(dir), opts...)
+// provider builds a goose provider over dir; the caller holds the migration
+// lock. It is rebuilt per command so files added by Create or Migrate are
+// seen. Never Close it: goose's Provider.Close closes the shared *sql.DB.
+func provider(mig *sql.DB, dir string) (*goose.Provider, error) {
+	p, err := goose.NewProvider(goose.DialectPostgres, mig, os.DirFS(dir), goose.WithDisableGlobalRegistry(true))
 	if err != nil {
 		return nil, fmt.Errorf("sql: reading migrations in %s: %w", dir, err)
 	}
@@ -421,13 +526,10 @@ func (s *SQLService) provider(locked bool) (*goose.Provider, error) {
 }
 
 // withMigrationLock runs fn while holding the Postgres advisory lock, so
-// generating and applying migrations happen on one instance at a time.
-func (s *SQLService) withMigrationLock(ctx context.Context, fn func() error) error {
-	sqldb := s.sqldb.Load()
-	if sqldb == nil {
-		return ErrNotStarted
-	}
-	conn, err := sqldb.Conn(ctx)
+// migration commands run on one instance at a time. The lock is held by a
+// session, so a crashed instance's lock goes when its connection does.
+func withMigrationLock(ctx context.Context, mig *sql.DB, fn func() error) error {
+	conn, err := mig.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("sql: migration lock: %w", err)
 	}
@@ -439,28 +541,6 @@ func (s *SQLService) withMigrationLock(ctx context.Context, fn func() error) err
 		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock($1)", MigrationLockID)
 	}()
 	return fn()
-}
-
-// ready enters the gate and returns the database (and, when needDir, the
-// migrations directory). The caller must call done when it finishes, so Stop
-// waits for it.
-func (s *SQLService) ready(needDir bool) (db *bun.DB, dir string, done func(), err error) {
-	done, ok := s.gate.Enter()
-	if !ok {
-		return nil, "", nil, ErrNotStarted
-	}
-	db = s.db.Load()
-	if db == nil {
-		done()
-		return nil, "", nil, ErrNotStarted
-	}
-	if needDir {
-		if dir, err = s.dir(); err != nil {
-			done()
-			return nil, "", nil, err
-		}
-	}
-	return db, dir, done, nil
 }
 
 func (s *SQLService) dir() (string, error) {
@@ -478,32 +558,62 @@ func (s *SQLService) dir() (string, error) {
 	return dir, nil
 }
 
+// validModels checks every model is a pointer to a struct, as Bun needs;
+// anything else makes Bun panic.
+func validModels(models []any) error {
+	for i, m := range models {
+		if t := reflect.TypeOf(m); t == nil || t.Kind() != reflect.Pointer || t.Elem().Kind() != reflect.Struct {
+			return fmt.Errorf("%w: models[%d] is %T, want a pointer to a struct", ErrInvalidModel, i, m)
+		}
+	}
+	return nil
+}
+
+// writeNew creates file with content, failing rather than overwriting an
+// existing migration.
+func writeNew(file, content string) error {
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(content)
+	return errors.Join(err, f.Close())
+}
+
 // generate diffs the models against the schema and, if they differ, writes
 // a goose migration. When the changes drop a table or column the whole
 // migration is written with ReviewSuffix instead, which goose ignores, so no
-// data is lost until a person reviews it and renames it to .sql.
-func (s *SQLService) generate(ctx context.Context, db *bun.DB, dir string) error {
+// data is lost until a person reviews it and renames it to .sql. It returns
+// the file to apply, or "" when there is none. A panic in Bun (a model it
+// cannot map) becomes an error.
+func (s *SQLService) generate(ctx context.Context, mig *sql.DB, dir string) (file string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			file, err = "", fmt.Errorf("%w: %v", ErrInvalidModel, r)
+		}
+	}()
 	scratch, err := os.MkdirTemp("", "bun-auto-*")
 	if err != nil {
-		return fmt.Errorf("sql: generating migration: %w", err)
+		return "", fmt.Errorf("sql: generating migration: %w", err)
 	}
 	defer os.RemoveAll(scratch)
-	auto, err := migrate.NewAutoMigrator(db,
+	auto, err := migrate.NewAutoMigrator(bun.NewDB(mig, pgdialect.New()),
 		migrate.WithModel(s.models...),
 		migrate.WithExcludeTable(GooseTable),
 		migrate.WithMigrationsDirectoryAuto(scratch),
 	)
 	if err != nil {
-		return fmt.Errorf("sql: generating migration: %w", err)
+		return "", fmt.Errorf("sql: generating migration: %w", err)
 	}
 	files, err := auto.CreateSQLMigrations(ctx)
 	if err != nil {
-		return fmt.Errorf("sql: generating migration: %w", err)
+		return "", fmt.Errorf("sql: generating migration: %w", err)
 	}
 	if len(files) != 2 { // models match the schema
-		return nil
+		return "", nil
 	}
 	up, down := lineComments(files[0].Content), lineComments(files[1].Content)
+	down = nameDrops(up, down)
 	body := "-- +goose Up\n" + up + "\n\n-- +goose Down\n" + down + "\n"
 
 	if destructive.MatchString(up) {
@@ -511,12 +621,12 @@ func (s *SQLService) generate(ctx context.Context, db *bun.DB, dir string) error
 			if pending != "" {
 				fmt.Fprintf(s.output, "sql: destructive changes already waiting for review in %s\n", pending)
 			}
-			return err
+			return "", err
 		}
 	}
 	version, err := nextVersion(dir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	name := fmt.Sprintf("%d_auto.sql", version)
 	header := "-- Generated by Migrate from the models. Review before committing.\n"
@@ -525,13 +635,15 @@ func (s *SQLService) generate(ctx context.Context, db *bun.DB, dir string) error
 		header = "-- Generated by Migrate from the models. It DROPS tables or columns, so it\n" +
 			"-- is not applied: review it, then rename it to end in .sql to apply it.\n"
 	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(header+body), 0o644); err != nil {
-		return fmt.Errorf("sql: writing %s: %w", name, err)
+	file = filepath.Join(dir, name)
+	if err := writeNew(file, header+body); err != nil {
+		return "", fmt.Errorf("sql: writing %s: %w", name, err)
 	}
 	if strings.HasSuffix(name, ReviewSuffix) {
 		fmt.Fprintf(s.output, "sql: destructive changes written to %s for review; not applied\n", name)
+		return "", nil
 	}
-	return nil
+	return file, nil
 }
 
 // pendingReview returns the review file in dir that already holds body, so
@@ -554,31 +666,52 @@ func pendingReview(dir, body string) (string, error) {
 }
 
 // lineComments turns /* ... */ blocks, which Bun uses for notes such as
-// irreversible changes and goose cannot parse, into -- line comments.
+// irreversible changes and goose cannot parse, into -- line comments. SQL
+// before or after a block on the same line stays SQL.
 func lineComments(sqlText string) string {
+	sqlText = blockComment.ReplaceAllStringFunc(sqlText, func(block string) string {
+		var out []string
+		for line := range strings.SplitSeq(block[2:len(block)-2], "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				out = append(out, "-- "+line)
+			}
+		}
+		return "\n" + strings.Join(out, "\n") + "\n"
+	})
 	var out []string
-	inBlock := false
-	for _, line := range strings.Split(strings.TrimSpace(sqlText), "\n") {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case !inBlock && strings.HasPrefix(trimmed, "/*"):
-			inBlock = !strings.HasSuffix(trimmed, "*/")
-			if text := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "/*"), "*/")); text != "" {
-				out = append(out, "-- "+text)
-			}
-		case inBlock:
-			if strings.HasSuffix(trimmed, "*/") {
-				inBlock = false
-				trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, "*/"))
-			}
-			if trimmed != "" {
-				out = append(out, "-- "+trimmed)
-			}
-		default:
+	for line := range strings.SplitSeq(sqlText, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
 			out = append(out, line)
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+var blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+
+var (
+	addConstraint = regexp.MustCompile(`(?m)^ALTER TABLE (\S+) ADD CONSTRAINT "([^"]+)"`)
+	dropUnnamed   = regexp.MustCompile(`(?m)^ALTER TABLE (\S+) DROP CONSTRAINT ""`)
+)
+
+// nameDrops fills in the constraint names Bun leaves empty in Down, which
+// Postgres rejects, so the migration could never be rolled back. Down undoes
+// Up in reverse, so each unnamed drop is the latest constraint Up added to
+// that table.
+func nameDrops(up, down string) string {
+	added := map[string][]string{}
+	for _, m := range addConstraint.FindAllStringSubmatch(up, -1) {
+		added[m[1]] = append(added[m[1]], m[2])
+	}
+	return dropUnnamed.ReplaceAllStringFunc(down, func(stmt string) string {
+		table := dropUnnamed.FindStringSubmatch(stmt)[1]
+		names := added[table]
+		if len(names) == 0 {
+			return stmt
+		}
+		added[table] = names[:len(names)-1]
+		return strings.Replace(stmt, `""`, `"`+names[len(names)-1]+`"`, 1)
+	})
 }
 
 // nextVersion is the current UTC time as a goose timestamp version, raised

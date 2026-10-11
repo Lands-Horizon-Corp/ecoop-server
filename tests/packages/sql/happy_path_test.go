@@ -152,10 +152,10 @@ func TestHappy_RollbackFamily(t *testing.T) {
 	step("Migrate", s.Migrate(ctx), "4")
 	step("Rollback", s.Rollback(ctx), "3")
 	step("RollbackSteps(2)", s.RollbackSteps(ctx, 2), "1")
-	step("UpSteps(10)", s.UpSteps(ctx, 10), "4")
+	step("UpSteps(3)", s.UpSteps(ctx, 3), "4")
 	step("RollbackTo(2)", s.RollbackTo(ctx, 2), "2")
 	step("Redo", s.Redo(ctx), "2")
-	step("RollbackSteps(10)", s.RollbackSteps(ctx, 10), "0")
+	step("RollbackSteps(2)", s.RollbackSteps(ctx, 2), "0")
 	if got := tables(t, s); len(got) != 0 {
 		t.Fatalf("tables after full rollback = %v", got)
 	}

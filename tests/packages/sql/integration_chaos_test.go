@@ -2,6 +2,7 @@ package sql_test
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"sync"
 	"testing"
@@ -151,7 +152,7 @@ func TestIntegrationChaos_RandomCommandsStayConsistent(t *testing.T) {
 				case 5:
 					err = s.Redo(ctx)
 				}
-				if err != nil && !isNothingToRedo(err) {
+				if err != nil && !errors.Is(err, ecsql.ErrTooManySteps) {
 					t.Errorf("replica %d: %v", i, err)
 				}
 			}
@@ -168,10 +169,4 @@ func TestIntegrationChaos_RandomCommandsStayConsistent(t *testing.T) {
 	if got := len(tables(t, ss[0])); got != want || applied(t, ss[0]) != want {
 		t.Fatalf("version %s but %d tables and %d applied rows", v, got, applied(t, ss[0]))
 	}
-}
-
-// Redo at version 0 has nothing to revert; that is the only error the random
-// mix may produce.
-func isNothingToRedo(err error) bool {
-	return err != nil && containsAny(err.Error(), "no current version", "no migrations")
 }

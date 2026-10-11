@@ -18,17 +18,28 @@ const (
 	// ReviewSuffix ends a generated migration that drops tables or columns.
 	// goose ignores it; renaming the file to .sql after review applies it.
 	ReviewSuffix = ".review"
+	// MigratePasses caps how many migrations one Migrate generates. Bun
+	// sometimes needs a second pass (a column added NOT NULL with a default
+	// comes out nullable first); models that still differ after this many
+	// cannot be expressed by the generator.
+	MigratePasses = 3
 )
 
 var (
-	ErrNotStarted      = errors.New("sql: service not started")
-	ErrNoTracker       = errors.New("sql: service has no in-flight tracker; create it with NewSQLService")
-	ErrNoDSN           = errors.New("sql: dsn is empty")
-	ErrNoMigrationsDir = errors.New("sql: migrations directory is not set")
-	ErrNotADirectory   = errors.New("sql: migrations path is not a directory")
-	ErrEmptyName       = errors.New("sql: migration name is empty")
-	ErrInvalidSteps    = errors.New("sql: steps must be greater than zero")
-	ErrInvalidPool     = errors.New("sql: max open and max idle connections must be zero or more")
+	ErrNotStarted       = errors.New("sql: service not started")
+	ErrNoTracker        = errors.New("sql: service has no in-flight tracker; create it with NewSQLService")
+	ErrNoDSN            = errors.New("sql: dsn is empty")
+	ErrInvalidDSN       = errors.New("sql: dsn is malformed")
+	ErrNilContext       = errors.New("sql: nil context")
+	ErrInvalidModel     = errors.New("sql: invalid model")
+	ErrNoMigrationsDir  = errors.New("sql: migrations directory is not set")
+	ErrNotADirectory    = errors.New("sql: migrations path is not a directory")
+	ErrEmptyName        = errors.New("sql: migration name is empty")
+	ErrInvalidSteps     = errors.New("sql: steps must be greater than zero")
+	ErrTooManySteps     = errors.New("sql: more steps than migrations to run")
+	ErrInvalidMigration = errors.New("sql: the generated migration does not apply, so it was removed")
+	ErrNotConverged     = errors.New("sql: the schema still differs from the models after migrating")
+	ErrInvalidPool      = errors.New("sql: max open and max idle connections must be zero or more")
 )
 
 type (
