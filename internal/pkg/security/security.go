@@ -43,7 +43,24 @@ func (s *SecurityService) pasetoKey() paseto.V4SymmetricKey {
 	return key
 }
 
+func (s *SecurityService) validateHashConfig() error {
+	switch {
+	case s.iterations < 1:
+		return fmt.Errorf("%w: iterations must be at least 1", ErrInvalidConfig)
+	case s.parallelism < 1:
+		return fmt.Errorf("%w: parallelism must be at least 1", ErrInvalidConfig)
+	case s.salt < minSaltLength:
+		return fmt.Errorf("%w: salt length must be at least %d bytes", ErrInvalidConfig, minSaltLength)
+	case s.key < minKeyLength:
+		return fmt.Errorf("%w: key length must be at least %d bytes", ErrInvalidConfig, minKeyLength)
+	}
+	return nil
+}
+
 func (s *SecurityService) GeneratePassword(ctx context.Context, password string) (string, error) {
+	if err := s.validateHashConfig(); err != nil {
+		return "", err
+	}
 	salt := make([]byte, s.salt)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("failed to generate salt: %w", err)
@@ -56,8 +73,12 @@ func (s *SecurityService) GeneratePassword(ctx context.Context, password string)
 
 func (s *SecurityService) VerifyPassword(ctx context.Context, hash string, password string) (bool, error) {
 	vals := strings.Split(hash, "$")
-	if len(vals) != 6 {
-		return false, fmt.Errorf("invalid hash format")
+	if len(vals) != 6 || vals[0] != "" || vals[1] != hashAlgorithm ||
+		vals[2] != fmt.Sprintf("v=%d", argon2.Version) {
+		return false, ErrInvalidHash
+	}
+	if s.key < 1 {
+		return false, fmt.Errorf("%w: key length must be at least 1 byte", ErrInvalidConfig)
 	}
 	var m, t uint32
 	var p uint8

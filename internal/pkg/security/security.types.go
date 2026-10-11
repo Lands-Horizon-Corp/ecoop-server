@@ -7,7 +7,15 @@ import (
 )
 
 var (
-	ErrDecrypt = errors.New("security: cannot decrypt data")
+	ErrDecrypt       = errors.New("security: cannot decrypt data")
+	ErrInvalidConfig = errors.New("security: invalid password hashing config")
+	ErrInvalidHash   = errors.New("security: invalid hash format")
+)
+
+const (
+	hashAlgorithm = "argon2id"
+	minSaltLength = 16 // bytes, RFC 9106 recommendation
+	minKeyLength  = 16 // bytes
 )
 
 const (
