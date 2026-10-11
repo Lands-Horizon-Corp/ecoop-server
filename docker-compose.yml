@@ -1,9 +1,3 @@
-# Local stack. Every host, port, user and password comes from .env; the
-# values after ":-" are only defaults for a machine without one.
-#
-#   docker compose up -d --wait postgres  -> database (integration tests start it)
-#   docker compose up -d --wait valkey    -> cache (integration tests start it)
-#   docker compose up -d --wait mailpit   -> SMTP catcher; web UI on MAILPIT_UI_PORT
 
 name: ecoop
 
@@ -46,6 +40,64 @@ services:
     networks:
       - app-network
 
+  # S3-compatible object storage. The app talks to it with the S3 API, so the
+  # same code runs against AWS S3 or MinIO by changing STORAGE_* in .env.
+  storage:
+    image: rustfs/rustfs:${STORAGE_IMAGE_TAG:-latest}
+    environment:
+      RUSTFS_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-ecoop}
+      RUSTFS_SECRET_KEY: ${STORAGE_SECRET_KEY:-ecoop-secret}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_VOLUMES: /data
+    ports:
+      - "${STORAGE_HOST:-127.0.0.1}:${STORAGE_PORT:-9000}:9000"
+      - "${STORAGE_HOST:-127.0.0.1}:${STORAGE_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - storage-data:/data
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Pusher-protocol websocket server. The app publishes over its HTTP API;
+  # browsers subscribe over websockets. Scales out through Valkey.
+  sockudo:
+    image: sockudo/sockudo:${BROADCAST_IMAGE_TAG:-latest}
+    depends_on:
+      valkey:
+        condition: service_healthy
+    environment:
+      PORT: "6001"
+      DEBUG: ${BROADCAST_DEBUG:-false}
+      ADAPTER_DRIVER: redis
+      CACHE_DRIVER: redis
+      QUEUE_DRIVER: redis
+      RATE_LIMITER_DRIVER: redis
+      REDIS_URL: redis://:${CACHE_PASSWORD:-ecoop}@valkey:6379/${BROADCAST_REDIS_DB:-2}
+      SOCKUDO_DEFAULT_APP_ID: ${BROADCAST_APP_ID:-ecoop}
+      SOCKUDO_DEFAULT_APP_KEY: ${BROADCAST_APP_KEY:-ecoop-key}
+      SOCKUDO_DEFAULT_APP_SECRET: ${BROADCAST_APP_SECRET:-ecoop-secret}
+      SOCKUDO_DEFAULT_APP_ENABLED: "true"
+      SOCKUDO_DEFAULT_APP_MAX_EVENT_PAYLOAD_IN_KB: ${BROADCAST_MAX_PAYLOAD_KB:-5120}
+      SOCKUDO_DEFAULT_APP_MAX_PRESENCE_MEMBER_SIZE_IN_KB: ${BROADCAST_MAX_PAYLOAD_KB:-5120}
+      MAX_EVENT_PAYLOAD_IN_KB: ${BROADCAST_MAX_PAYLOAD_KB:-5120}
+      MAX_PRESENCE_MEMBER_SIZE_IN_KB: ${BROADCAST_MAX_PAYLOAD_KB:-5120}
+      WEBSOCKET_MAX_PAYLOAD_KB: ${BROADCAST_MAX_PAYLOAD_KB:-5120}
+      METRICS_ENABLED: "true"
+      PUSH_ALLOW_MEMORY_DRIVERS: "true"
+    ports:
+      - "${BROADCAST_HOST:-127.0.0.1}:${BROADCAST_PORT:-6001}:6001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:6001/up || exit 1"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+    restart: unless-stopped
+    networks:
+      - app-network
+
   # Catches every email sent to it; nothing leaves the machine.
   mailpit:
     image: axllent/mailpit:latest
@@ -60,5 +112,6 @@ networks:
   app-network:
 
 volumes:
+  storage-data:
   postgres-data:
   valkey-data:
