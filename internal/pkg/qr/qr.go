@@ -28,7 +28,6 @@ func NewQRServices(secret string) QRServices {
 	}
 }
 
-// Start implements [QRServices].
 func (q *QRService) Start(ctx context.Context) error {
 	key := sha256.Sum256([]byte(q.secret))
 	aead, err := chacha20poly1305.NewX(key[:])
