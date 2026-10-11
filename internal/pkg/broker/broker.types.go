@@ -13,12 +13,10 @@ var (
 )
 
 type (
-	Handler func(ctx context.Context, key, value []byte) error
-
 	MessageBrokerServices interface {
 		Run(ctx context.Context) error
 		Stop(ctx context.Context) error
 		Publish(ctx context.Context, topic string, key, value []byte) error
-		Subscribe(ctx context.Context, topic string, handler Handler) error
+		Subscribe(ctx context.Context, topic string, handler func(ctx context.Context, key, value []byte) error) error
 	}
 )
