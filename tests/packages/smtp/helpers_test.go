@@ -22,30 +22,42 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hibiken/asynq"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/smtp"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
-// Delivery tests run against the mailpit service in docker-compose.yml,
-// using SMTP_HOST, SMTP_PORT and MAILPIT_UI_PORT from the environment or the
-// repo's .env. TestMain starts it if needed. Every test sends to its own
-// inbox address and deletes those messages when it finishes.
+// Delivery tests run against the mailpit and valkey services in
+// docker-compose.yml, using SMTP_*, MAILPIT_UI_PORT and CACHE_* from the
+// environment or the repo's .env. TestMain starts them if needed. Every test
+// sends to its own inbox address and uses its own queue, and deletes both
+// when it finishes.
 var (
-	smtpHost   string
-	smtpPort   int
-	mailpitAPI string
-	sender     string
-	senderName string
-	skipReason string
+	smtpHost      string
+	smtpPort      int
+	mailpitAPI    string
+	sender        string
+	senderName    string
+	queueAddr     string
+	queuePassword string
+	skipReason    string
 )
 
 var _ smtp.SMTPServices = (*smtp.SMTPService)(nil)
 
 func TestMain(m *testing.M) {
+	os.Exit(runMain(m))
+}
+
+func runMain(m *testing.M) int {
 	if err := startMailpit(); err != nil {
 		skipReason = "no Mailpit: " + err.Error()
 		fmt.Fprintln(os.Stderr, "smtp tests:", skipReason)
 	}
-	os.Exit(m.Run())
+	return m.Run()
 }
 
 func startMailpit() error {
@@ -53,12 +65,13 @@ func startMailpit() error {
 	if err != nil {
 		return err
 	}
-	env, err := loadEnv(filepath.Join(root, ".env"), "SMTP_HOST", "SMTP_PORT", "MAILPIT_UI_PORT", "SMTP_FROM", "SMTP_FROM_NAME")
+	required := []string{"SMTP_HOST", "SMTP_PORT", "MAILPIT_UI_PORT", "SMTP_FROM", "CACHE_HOST", "CACHE_PORT", "CACHE_PASSWORD"}
+	env, err := loadEnv(filepath.Join(root, ".env"), append(required, "SMTP_FROM_NAME")...)
 	if err != nil {
 		return err
 	}
 	var missing []string
-	for _, k := range []string{"SMTP_HOST", "SMTP_PORT", "MAILPIT_UI_PORT", "SMTP_FROM"} {
+	for _, k := range required {
 		if env[k] == "" {
 			missing = append(missing, k)
 		}
@@ -72,14 +85,15 @@ func startMailpit() error {
 	}
 	mailpitAPI = "http://" + net.JoinHostPort(smtpHost, env["MAILPIT_UI_PORT"]) + "/api/v1"
 	sender, senderName = env["SMTP_FROM"], env["SMTP_FROM_NAME"]
+	queueAddr, queuePassword = net.JoinHostPort(env["CACHE_HOST"], env["CACHE_PORT"]), env["CACHE_PASSWORD"]
 
 	if _, err := exec.LookPath("docker"); err != nil {
 		return errors.New("docker not installed")
 	}
-	up := exec.Command("docker", "compose", "up", "-d", "--wait", "mailpit")
+	up := exec.Command("docker", "compose", "up", "-d", "--wait", "mailpit", "valkey")
 	up.Dir = root
 	if out, err := up.CombinedOutput(); err != nil {
-		return fmt.Errorf("docker compose up mailpit: %w\n%s", err, out)
+		return fmt.Errorf("docker compose up mailpit valkey: %w\n%s", err, out)
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
@@ -104,7 +118,7 @@ func loadEnv(path string, keys ...string) (map[string]string, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -146,18 +160,52 @@ func requireMailpit(t testing.TB) {
 	}
 }
 
-// newService returns a started service that delivers to Mailpit (or to addr
-// if given, e.g. a proxy or a fake server).
-func newService(t testing.TB, addr ...string) smtp.SMTPServices {
+// serviceOpts tweaks a test service; zero values mean "use the default".
+type serviceOpts struct {
+	smtpAddr string          // deliver here instead of Mailpit (proxy, fake server)
+	fromName string          // default display name
+	noName   bool            // no default display name at all
+	inflight *utils.Inflight // shared tracker
+}
+
+// newSMTP builds (but does not start) a service with its own cache
+// connection. All services share the one email queue, as instances behind a
+// load balancer do; it is cleared when the test ends.
+func newSMTP(t testing.TB, opts serviceOpts) smtp.SMTPServices {
 	t.Helper()
 	requireMailpit(t)
 	host, port := smtpHost, smtpPort
-	if len(addr) > 0 {
-		h, p, _ := net.SplitHostPort(addr[0])
+	if opts.smtpAddr != "" {
+		h, p, _ := net.SplitHostPort(opts.smtpAddr)
 		host = h
 		port, _ = strconv.Atoi(p)
 	}
-	svc := smtp.NewSMTPService(host, port, "", "", sender, senderName, true, nil)
+	name := senderName
+	if opts.fromName != "" {
+		name = opts.fromName
+	}
+	if opts.noName {
+		name = ""
+	}
+	t.Cleanup(func() { deleteQueue(smtp.QueueName) })
+	q := newQueue(t)
+	return smtp.NewSMTPService(host, port, "", "", sender, name, true, q, opts.inflight)
+}
+
+// newService returns a started service that delivers to Mailpit (or to
+// addr if given, e.g. a proxy or a fake server).
+func newService(t testing.TB, addr ...string) smtp.SMTPServices {
+	t.Helper()
+	var opts serviceOpts
+	if len(addr) > 0 {
+		opts.smtpAddr = addr[0]
+	}
+	return startService(t, opts)
+}
+
+func startService(t testing.TB, opts serviceOpts) smtp.SMTPServices {
+	t.Helper()
+	svc := newSMTP(t, opts)
 	if err := svc.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -168,15 +216,83 @@ func newService(t testing.TB, addr ...string) smtp.SMTPServices {
 // mockService runs with secured=false: validates and formats, sends nothing.
 func mockService(t testing.TB) smtp.SMTPServices {
 	t.Helper()
-	svc := smtp.NewSMTPService("", 0, "", "", "noreply@ecoop.test", "eCoop", false, nil)
+	svc := smtp.NewSMTPService("", 0, "", "", "noreply@ecoop.test", "eCoop", false, nil, nil)
 	if err := svc.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	return svc
 }
 
+// newQueue returns a started queue on a running cache, both stopped (queue
+// first) when the test ends.
+func newQueue(t testing.TB) queue.QueueServices {
+	t.Helper()
+	ch := cache.NewCacheService([]string{queueAddr}, queuePassword, nil)
+	if err := ch.Run(context.Background()); err != nil {
+		t.Fatalf("cache Run: %v", err)
+	}
+	t.Cleanup(func() { _ = ch.Stop(context.Background()) })
+	q := queue.NewQueueService(ch)
+	if err := q.Start(context.Background()); err != nil {
+		t.Fatalf("queue Start: %v", err)
+	}
+	t.Cleanup(func() { _ = q.Stop(context.Background()) })
+	return q
+}
+
+func inspector() *asynq.Inspector {
+	return asynq.NewInspector(asynq.RedisClientOpt{Addr: queueAddr, Password: queuePassword, DB: queue.DB})
+}
+
+// deleteQueue clears the email queue between tests. asynq refuses while a
+// delivery is still active (e.g. a worker finishing a timed-out Stop in the
+// background), so it retries until the worker has let go.
+func deleteQueue(name string) {
+	in := inspector()
+	defer in.Close()
+	deadline := time.Now().Add(queue.ShutdownTimeout + 5*time.Second)
+	for {
+		err := in.DeleteQueue(name, true)
+		if err == nil || errors.Is(err, asynq.ErrQueueNotFound) || time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// failedDeliveries is how many delivery attempts have failed today on the
+// email queue. Tests compare it with a count taken before they act.
+func failedDeliveries(t testing.TB) int {
+	t.Helper()
+	in := inspector()
+	defer in.Close()
+	info, err := in.GetQueueInfo(smtp.QueueName)
+	if err != nil {
+		return 0 // queue not created yet
+	}
+	return info.Failed
+}
+
+// minRateLimitedSpan is the least time n emails can take at SendRateLimit
+// per RateWindow. The first can land at the very end of a window and the
+// last at the very start of one, so two windows are only partly used.
+func minRateLimitedSpan(n int) time.Duration {
+	return time.Duration(max(n/smtp.SendRateLimit-2, 0)) * smtp.RateWindow
+}
+
+func eventually(t testing.TB, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("not met within %v: %s", timeout, msg)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func ctxT(t testing.TB) context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
 	return ctx
 }
@@ -252,10 +368,11 @@ func search(t testing.TB, to string) []summary {
 	return res.Messages
 }
 
-// received waits until n messages addressed to `to` have arrived.
+// received waits until n messages addressed to `to` have arrived. Delivery
+// is queued and rate limited, so allow for SendRateLimit per RateWindow.
 func received(t testing.TB, to string, n int) []message {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(10*time.Second + time.Duration(n/smtp.SendRateLimit+1)*smtp.RateWindow)
 	var got []summary
 	for time.Now().Before(deadline) {
 		if got = search(t, to); len(got) >= n {
@@ -347,13 +464,15 @@ func assertNoXSS(t testing.TB, html string) {
 
 // Fault injection.
 
-// proxy relays TCP to Mailpit and can cut connections or delay replies.
+// proxy relays TCP to Mailpit and can cut connections, delay replies, or
+// refuse connections to simulate an outage.
 type proxy struct {
 	ln     net.Listener
 	target string
 	mu     sync.Mutex
 	conns  map[net.Conn]struct{}
 	delay  atomic.Int64
+	down   atomic.Bool
 }
 
 func newProxy(t testing.TB) *proxy {
@@ -376,6 +495,10 @@ func (p *proxy) serve() {
 		c, err := p.ln.Accept()
 		if err != nil {
 			return
+		}
+		if p.down.Load() {
+			_ = c.Close()
+			continue
 		}
 		s, err := net.Dial("tcp", p.target)
 		if err != nil {
@@ -420,6 +543,14 @@ func (p *proxy) DropAll() {
 
 // SetDelay holds every server reply for d, keeping sends in flight.
 func (p *proxy) SetDelay(d time.Duration) { p.delay.Store(int64(d)) }
+
+// SetDown makes the server unreachable (true) or reachable again (false).
+func (p *proxy) SetDown(down bool) {
+	p.down.Store(down)
+	if down {
+		p.DropAll()
+	}
+}
 
 // fakeServer accepts connections and hands each to handle.
 func fakeServer(t testing.TB, handle func(net.Conn)) string {

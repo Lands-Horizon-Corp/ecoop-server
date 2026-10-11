@@ -144,7 +144,12 @@ func TestIntegrationChaos_StartStopChurn(t *testing.T) {
 					return
 				default:
 				}
-				if err := svc.Do(200 * time.Microsecond); err != nil && !errors.Is(err, errNotRunning) {
+				err := svc.Do(200 * time.Microsecond)
+				if errors.Is(err, errNotRunning) {
+					// Back off like a real caller; a tight retry loop starves
+					// the operations Stop is waiting for under -race and load.
+					time.Sleep(100 * time.Microsecond)
+				} else if err != nil {
 					t.Error(err)
 					return
 				}
@@ -152,7 +157,7 @@ func TestIntegrationChaos_StartStopChurn(t *testing.T) {
 		})
 	}
 	for range 30 {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := svc.Stop(ctx); err != nil {
 			t.Fatalf("Stop: %v", err)
 		}

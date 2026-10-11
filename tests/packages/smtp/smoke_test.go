@@ -7,11 +7,10 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/smtp"
 )
 
-// Smoke: start, ping, send one email, see it arrive, stop.
+// Smoke: start, ping, queue one email, see it arrive, stop.
 func TestSmoke(t *testing.T) {
-	requireMailpit(t)
 	ctx := ctxT(t)
-	svc := smtp.NewSMTPService(smtpHost, smtpPort, "", "", sender, senderName, true, nil)
+	svc := newSMTP(t, serviceOpts{})
 	if err := svc.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

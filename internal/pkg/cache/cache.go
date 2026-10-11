@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,9 +15,11 @@ import (
 )
 
 type CacheService struct {
-	mu        sync.RWMutex
-	client    valkey.Client
-	inflight  *utils.Inflight
+	mu     sync.RWMutex
+	client valkey.Client
+
+	inflight *utils.Inflight
+
 	password  string
 	addresses []string
 }
@@ -32,14 +35,17 @@ func NewCacheService(addresses []string, password string, inflight *utils.Inflig
 	}
 }
 
+// Run connects to Valkey. Calling it while already running does nothing.
 func (c *CacheService) Run(ctx context.Context) error {
 	if len(c.addresses) == 0 {
 		return ErrNoAddresses
 	}
-	client, err := valkey.NewClient(valkey.ClientOption{
-		InitAddress: c.addresses,
-		Password:    c.password,
-	})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.client != nil {
+		return nil
+	}
+	client, err := valkey.NewClient(valkey.ClientOption{InitAddress: c.addresses, Password: c.password})
 	if err != nil {
 		return fmt.Errorf("cache: connecting: %w", err)
 	}
@@ -47,21 +53,13 @@ func (c *CacheService) Run(ctx context.Context) error {
 		client.Close()
 		return fmt.Errorf("cache: ping: %w", err)
 	}
-	c.mu.Lock()
-	old := c.client
 	c.client = client
-	c.mu.Unlock()
-	if old != nil {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), ReplaceDrainTimeout)
-			defer cancel()
-			_ = c.inflight.Wait(ctx)
-			old.Close()
-		}()
-	}
 	return nil
 }
 
+// Stop refuses new operations, waits for in-flight ones, then closes the
+// connection. If ctx ends first it returns an error and closes in the
+// background.
 func (c *CacheService) Stop(ctx context.Context) error {
 	c.mu.Lock()
 	client := c.client
@@ -76,6 +74,12 @@ func (c *CacheService) Stop(ctx context.Context) error {
 	}
 	client.Close()
 	return nil
+}
+
+// Config returns the settings the cache was created with, for services that
+// open their own connection to the same Valkey.
+func (c *CacheService) Config() Config {
+	return Config{Addresses: slices.Clone(c.addresses), Password: c.password}
 }
 
 func (c *CacheService) Client() valkey.Client {
@@ -100,7 +104,8 @@ func (c *CacheService) Flush(ctx context.Context) error {
 	}
 	defer done()
 	for addr, node := range client.Nodes() {
-		if err := node.Do(ctx, node.B().Flushdb().Build()).Error(); err != nil && !isReadOnly(err) {
+		err := node.Do(ctx, node.B().Flushdb().Build()).Error()
+		if verr, ok := valkey.IsValkeyErr(err); err != nil && !(ok && strings.HasPrefix(verr.Error(), "READONLY")) {
 			return fmt.Errorf("cache: flushing %s: %w", addr, err)
 		}
 	}
@@ -294,9 +299,4 @@ func (c *CacheService) running() (client valkey.Client, done func(), err error) 
 		return nil, nil, ErrNotRunning
 	}
 	return c.client, c.inflight.Track(), nil
-}
-
-func isReadOnly(err error) bool {
-	verr, ok := valkey.IsValkeyErr(err)
-	return ok && strings.HasPrefix(verr.Error(), "READONLY")
 }

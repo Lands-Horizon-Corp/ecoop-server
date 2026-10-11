@@ -3,6 +3,18 @@ package smtp
 import (
 	"context"
 	"errors"
+	"time"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
+)
+
+const (
+	QueueName       = queue.Critical   // OTPs and notices are time-sensitive
+	TaskTypeSend    = "smtp:send"      // queue job type
+	SendRateLimit   = 10               // emails per RateWindow, shared by every instance
+	RateWindow      = time.Second      // rate limit window
+	MaxRetries      = 8                // delivery attempts after the first
+	DeliveryTimeout = 30 * time.Second // one delivery attempt, connect to QUIT
 )
 
 var (
@@ -18,6 +30,9 @@ var (
 	ErrFormatBody       = errors.New("failed to inject variables into body")
 	ErrConnect          = errors.New("smtp connect failed")
 	ErrSendFailed       = errors.New("smtp send failed")
+	ErrQueueUnavailable = errors.New("smtp queue is not reachable")
+	ErrNoQueue          = errors.New("smtp service needs a queue service")
+	ErrEnqueue          = errors.New("smtp enqueue failed")
 )
 
 type (

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"maps"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/wneessen/go-mail"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -24,12 +26,26 @@ type SMTPService struct {
 	from        string
 	secured     bool
 	defaultName string
-	started     atomic.Bool
+	queue       queue.QueueServices
 	inflight    *utils.Inflight
+
+	started atomic.Bool
+	client  *mail.Client
+	send    *queue.Job[sendPayload]
+}
+
+type sendPayload struct {
+	FromName string `json:"from_name"`
+	To       string `json:"to"`
+	Subject  string `json:"subject"`
+	Body     string `json:"body"`
 }
 
 func NewSMTPService(
-	host string, port int, username, password, from, defaultName string, secured bool, inflight *utils.Inflight) SMTPServices {
+	host string, port int, username, password, from,
+	defaultName string, secured bool,
+	queue queue.QueueServices,
+	inflight *utils.Inflight) SMTPServices {
 	if inflight == nil {
 		inflight = utils.NewInflight()
 	}
@@ -41,10 +57,10 @@ func NewSMTPService(
 		from:        from,
 		defaultName: defaultName,
 		secured:     secured,
+		queue:       queue,
 		inflight:    inflight,
 	}
 }
-
 func (s *SMTPService) Start(ctx context.Context) error {
 	if s.inflight == nil {
 		return ErrNoTracker
@@ -60,9 +76,44 @@ func (s *SMTPService) Start(ctx context.Context) error {
 		if s.port < 1 || s.port > 65535 {
 			errs = append(errs, ErrInvalidPort)
 		}
+		if s.queue == nil {
+			errs = append(errs, ErrNoQueue)
+		}
 	}
 	if err := errors.Join(errs...); err != nil {
 		return err
+	}
+	if s.secured {
+		if err := s.queue.Ping(ctx); err != nil {
+			return errors.Join(ErrQueueUnavailable, err)
+		}
+		if s.client == nil {
+			opts := []mail.Option{
+				mail.WithPort(s.port),
+				mail.WithTimeout(DeliveryTimeout),
+				mail.WithTLSPolicy(mail.TLSOpportunistic),
+				mail.WithTLSConfig(&tls.Config{ServerName: s.host, MinVersion: tls.VersionTLS12}),
+			}
+			if s.port == 465 {
+				opts = append(opts, mail.WithSSL())
+			}
+			if s.username != "" && s.password != "" {
+				opts = append(opts, mail.WithSMTPAuth(mail.SMTPAuthPlain), mail.WithUsername(s.username), mail.WithPassword(s.password))
+			}
+			client, err := mail.NewClient(s.host, opts...)
+			if err != nil {
+				return errors.Join(ErrConnect, err)
+			}
+			s.client = client
+		}
+		if s.send == nil {
+			s.send = queue.NewJob(s.queue, TaskTypeSend, s.deliver,
+				queue.RateLimit(SendRateLimit, RateWindow),
+				queue.Priority(QueueName),
+				queue.MaxRetry(MaxRetries),
+				queue.Timeout(DeliveryTimeout),
+			)
+		}
 	}
 	s.started.Store(true)
 	return nil
@@ -79,14 +130,26 @@ func (s *SMTPService) Ping(ctx context.Context) error {
 	if !s.secured {
 		return nil
 	}
-	client, err := s.client(ctx)
-	if err != nil {
-		return errors.Join(ErrConnect, err)
+	if !s.started.Load() {
+		return ErrNotStarted
 	}
-	if err := client.DialWithContext(ctx); err != nil {
-		return errors.Join(ErrConnect, err)
+	errc := make(chan error, 1)
+	go func() {
+		conn, err := s.client.DialToSMTPClientWithContext(ctx)
+		if err == nil {
+			err = s.client.CloseWithSMTPClient(conn)
+		}
+		errc <- err
+	}()
+	select {
+	case err := <-errc:
+		if err != nil {
+			return errors.Join(ErrConnect, err)
+		}
+	case <-ctx.Done():
+		return errors.Join(ErrConnect, ctx.Err())
 	}
-	return client.Close()
+	return s.queue.Ping(ctx)
 }
 
 func (s *SMTPService) acquire() (done func(), err error) {
@@ -102,11 +165,10 @@ func (s *SMTPService) acquire() (done func(), err error) {
 }
 
 func (s *SMTPService) Format(ctx context.Context, req SMTPRequest) (*SMTPRequest, error) {
-	var formattedReq *SMTPRequest
-	if req.Vars == nil {
-		req.Vars = make(map[string]string)
-	}
-	req.Vars["Name"] = req.Name
+	vars := make(map[string]string, len(req.Vars)+1)
+	maps.Copy(vars, req.Vars)
+	vars["Name"] = req.Name
+	req.Vars = vars
 	var tmplBody string
 	if err := utils.IsValidFilePath(req.Body); err == nil {
 		content, err := os.ReadFile(req.Body)
@@ -117,7 +179,7 @@ func (s *SMTPService) Format(ctx context.Context, req SMTPRequest) (*SMTPRequest
 	} else {
 		tmplBody = req.Body
 	}
-	tmpl, err := template.New("email").Parse(tmplBody)
+	tmpl, err := template.New("email").Option("missingkey=zero").Parse(tmplBody)
 	if err != nil {
 		return nil, errors.Join(ErrParseTemplate, err)
 	}
@@ -126,8 +188,7 @@ func (s *SMTPService) Format(ctx context.Context, req SMTPRequest) (*SMTPRequest
 		return nil, errors.Join(ErrExecuteTemplate, err)
 	}
 	req.Body = buf.String()
-	formattedReq = &req
-	return formattedReq, nil
+	return &req, nil
 }
 
 func (s *SMTPService) Send(ctx context.Context, req SMTPRequest) error {
@@ -138,9 +199,6 @@ func (s *SMTPService) Send(ctx context.Context, req SMTPRequest) error {
 	defer done()
 	if !utils.IsValidEmail(req.To) {
 		return ErrInvalidRecipient
-	}
-	if !utils.IsValidEmail(s.from) {
-		return ErrInvalidSender
 	}
 	formatted, err := s.Format(ctx, req)
 	if err != nil {
@@ -155,47 +213,37 @@ func (s *SMTPService) Send(ctx context.Context, req SMTPRequest) error {
 	if name == "" {
 		name = s.defaultName
 	}
-	msg := mail.NewMsg()
-	name = strings.Join(strings.Fields(name), " ")
-	if err := msg.FromFormat(name, s.from); err != nil {
-		return errors.Join(ErrInvalidSender, err)
-	}
-	if err := msg.To(req.To); err != nil {
-		return errors.Join(ErrInvalidRecipient, err)
-	}
-	msg.Subject(req.Subject)
-	msg.SetDate()
-	msg.SetMessageID()
-	msg.SetBodyString(mail.TypeTextHTML, body)
-
-	client, err := s.client(ctx)
+	err = s.send.Deliver(ctx, sendPayload{
+		FromName: strings.Join(strings.Fields(name), " "),
+		To:       req.To,
+		Subject:  req.Subject,
+		Body:     body,
+	})
 	if err != nil {
-		return errors.Join(ErrConnect, err)
-	}
-	if err := client.DialAndSendWithContext(ctx, msg); err != nil {
-		return errors.Join(ErrSendFailed, err)
+		return errors.Join(ErrEnqueue, err)
 	}
 	return nil
 }
 
-func (s *SMTPService) client(ctx context.Context) (*mail.Client, error) {
-	opts := []mail.Option{
-		mail.WithPort(s.port),
-		mail.WithTLSPolicy(mail.TLSOpportunistic),
-		mail.WithTLSConfig(&tls.Config{ServerName: s.host, MinVersion: tls.VersionTLS12}),
+func (s *SMTPService) deliver(ctx context.Context, p sendPayload) error {
+	done, err := s.acquire()
+	if err != nil {
+		return queue.RetryAfter(time.Second, err)
 	}
-	if deadline, ok := ctx.Deadline(); ok {
-		opts = append(opts, mail.WithTimeout(max(time.Until(deadline), time.Millisecond)))
+	defer done()
+	msg := mail.NewMsg()
+	if err := msg.FromFormat(p.FromName, s.from); err != nil {
+		return errors.Join(ErrInvalidSender, err, queue.ErrSkipRetry)
 	}
-	if s.port == 465 {
-		opts = append(opts, mail.WithSSL())
+	if err := msg.To(p.To); err != nil {
+		return errors.Join(ErrInvalidRecipient, err, queue.ErrSkipRetry)
 	}
-	if s.username != "" && s.password != "" {
-		opts = append(opts,
-			mail.WithSMTPAuth(mail.SMTPAuthPlain),
-			mail.WithUsername(s.username),
-			mail.WithPassword(s.password),
-		)
+	msg.Subject(p.Subject)
+	msg.SetDate()
+	msg.SetMessageID()
+	msg.SetBodyString(mail.TypeTextHTML, p.Body)
+	if err := s.client.DialAndSendWithContext(ctx, msg); err != nil {
+		return errors.Join(ErrSendFailed, err)
 	}
-	return mail.NewClient(s.host, opts...)
+	return nil
 }

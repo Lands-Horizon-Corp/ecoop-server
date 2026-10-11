@@ -93,6 +93,22 @@ func TestZeroValue_StopIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestZeroValue_ConfigIsACopy(t *testing.T) {
+	addrs := []string{"127.0.0.1:1"}
+	svc := cache.NewCacheService(addrs, "pw", nil)
+	cfg := svc.Config()
+	if len(cfg.Addresses) != 1 || cfg.Addresses[0] != "127.0.0.1:1" || cfg.Password != "pw" {
+		t.Fatalf("Config = %+v", cfg)
+	}
+	cfg.Addresses[0] = "changed"
+	if svc.Config().Addresses[0] != "127.0.0.1:1" {
+		t.Fatal("mutating the returned Config changed the cache's settings")
+	}
+	if got := (&cache.CacheService{}).Config(); len(got.Addresses) != 0 || got.Password != "" {
+		t.Fatalf("zero struct Config = %+v", got)
+	}
+}
+
 func TestZeroValue_NoAddresses(t *testing.T) {
 	ctx := context.Background()
 	for name, svc := range map[string]cache.CacheServices{

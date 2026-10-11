@@ -28,9 +28,14 @@ var (
 )
 
 const (
-	ScanCount           = 1000
-	ReplaceDrainTimeout = 30 * time.Second
+	ScanCount = 1000
 )
+
+// Config is how a CacheService connects to Valkey.
+type Config struct {
+	Addresses []string
+	Password  string
+}
 
 type CacheServices interface {
 	Client() valkey.Client
@@ -51,4 +56,7 @@ type CacheServices interface {
 	SetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error)
 	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
 	Expire(ctx context.Context, key string, ttl time.Duration) (bool, error)
+
+	// Config returns the settings the cache was created with.
+	Config() Config
 }

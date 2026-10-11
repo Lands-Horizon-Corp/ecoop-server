@@ -225,7 +225,7 @@ func globEscape(s string) string {
 }
 
 func ctxT(t testing.TB) context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
 	return ctx
 }

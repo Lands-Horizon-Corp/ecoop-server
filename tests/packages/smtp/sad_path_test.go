@@ -6,18 +6,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/smtp"
 )
 
 func TestSadPath_StartRejectsBadConfigAllAtOnce(t *testing.T) {
-	err := smtp.NewSMTPService("", 0, "", "", "not-an-email", "", true, nil).Start(context.Background())
-	for _, want := range []error{smtp.ErrInvalidSender, smtp.ErrInvalidHost, smtp.ErrInvalidPort} {
+	err := smtp.NewSMTPService("", 0, "", "", "not-an-email", "", true, nil, nil).Start(context.Background())
+	for _, want := range []error{smtp.ErrInvalidSender, smtp.ErrInvalidHost, smtp.ErrInvalidPort, smtp.ErrNoQueue} {
 		if !errors.Is(err, want) {
 			t.Errorf("Start error %v does not include %v", err, want)
 		}
 	}
 	for _, port := range []int{-1, 65536, 100000} {
-		if err := smtp.NewSMTPService("h", port, "", "", "a@b.co", "", true, nil).Start(context.Background()); !errors.Is(err, smtp.ErrInvalidPort) {
+		if err := smtp.NewSMTPService("h", port, "", "", "a@b.co", "", true, nil, nil).Start(context.Background()); !errors.Is(err, smtp.ErrInvalidPort) {
 			t.Errorf("port %d: err = %v, want ErrInvalidPort", port, err)
 		}
 	}
@@ -53,17 +55,50 @@ func TestSadPath_TemplateErrors(t *testing.T) {
 }
 
 func TestSadPath_UnreachableServer(t *testing.T) {
-	requireMailpit(t)
-	svc := smtp.NewSMTPService("127.0.0.1", 1, "", "", sender, "", true, nil)
+	before := failedDeliveries(t)
+	svc := newSMTP(t, serviceOpts{smtpAddr: "127.0.0.1:1"})
 	if err := svc.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = svc.Stop(context.Background()) })
 	ctx := ctxT(t)
 	if err := svc.Ping(ctx); !errors.Is(err, smtp.ErrConnect) {
 		t.Errorf("Ping = %v, want ErrConnect", err)
 	}
-	if err := svc.Send(ctx, smtp.SMTPRequest{To: "a@b.co", Body: "x"}); !errors.Is(err, smtp.ErrSendFailed) {
-		t.Errorf("Send = %v, want ErrSendFailed", err)
+	// Send only queues; the failed delivery shows up on the queue and is retried.
+	to := inbox(t)
+	if err := svc.Send(ctx, smtp.SMTPRequest{To: to, Body: "x"}); err != nil {
+		t.Fatalf("Send = %v; queueing must not depend on the SMTP server", err)
+	}
+	eventually(t, 10*time.Second, func() bool { return failedDeliveries(t) > before }, "delivery should fail and be retried")
+	noneReceived(t, to)
+}
+
+func TestSadPath_QueueUnavailable(t *testing.T) {
+	// Jobs and the rate limit live in Valkey, so Start refuses to run on a
+	// queue that is not running instead of failing on the first Send.
+	requireMailpit(t)
+	ch := cache.NewCacheService([]string{queueAddr}, queuePassword, nil)
+	err := smtp.NewSMTPService(smtpHost, smtpPort, "", "", sender, "", true, queue.NewQueueService(ch), nil).Start(ctxT(t))
+	if !errors.Is(err, smtp.ErrQueueUnavailable) || !errors.Is(err, queue.ErrNotStarted) {
+		t.Fatalf("Start = %v, want ErrQueueUnavailable + queue.ErrNotStarted", err)
+	}
+}
+
+func TestSadPath_QueueStoppedAfterStart(t *testing.T) {
+	// If the queue stops while running, Send reports it rather than
+	// dropping the email.
+	requireMailpit(t)
+	q := newQueue(t)
+	svc := smtp.NewSMTPService(smtpHost, smtpPort, "", "", sender, "", true, q, nil)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Stop(context.Background()) })
+	_ = q.Stop(context.Background())
+	err := svc.Send(ctxT(t), smtp.SMTPRequest{To: "a@b.co", Body: "x"})
+	if !errors.Is(err, smtp.ErrEnqueue) || !errors.Is(err, queue.ErrNotStarted) {
+		t.Fatalf("Send with a stopped queue = %v, want ErrEnqueue + queue.ErrNotStarted", err)
 	}
 }
 
@@ -83,8 +118,7 @@ func TestSadPath_DeadContextDeliversNothing(t *testing.T) {
 }
 
 func TestSadPath_SendBeforeStartAndAfterStop(t *testing.T) {
-	requireMailpit(t)
-	svc := smtp.NewSMTPService(smtpHost, smtpPort, "", "", sender, "", true, nil)
+	svc := newSMTP(t, serviceOpts{})
 	to := inbox(t)
 	if err := svc.Send(ctxT(t), smtp.SMTPRequest{To: to, Body: "x"}); !errors.Is(err, smtp.ErrNotStarted) {
 		t.Errorf("before Start: %v", err)

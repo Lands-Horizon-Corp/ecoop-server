@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
-	valkey "github.com/valkey-io/valkey-go"
 )
 
 func TestHappyPath_SetGetEncodings(t *testing.T) {
@@ -237,23 +236,16 @@ func TestHappyPath_ClientIsUsable(t *testing.T) {
 	}
 }
 
-func TestHappyPath_RunAgainReplacesClient(t *testing.T) {
+func TestHappyPath_RunWhileRunningIsNoop(t *testing.T) {
 	ctx := ctxT(t)
 	svc := newRunning(t)
-	old := svc.Client()
+	before := svc.Client()
 	if err := svc.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if svc.Client() == old {
-		t.Fatal("Run did not replace the client")
+	if svc.Client() != before {
+		t.Fatal("Run while running replaced the client")
 	}
-	// The old connection is drained in the background, then closed.
-	eventually(t, 2*time.Second, func() error {
-		if err := old.Do(ctx, old.B().Ping().Build()).Error(); !errors.Is(err, valkey.ErrClosing) {
-			return fmt.Errorf("old client not closed: %v", err)
-		}
-		return nil
-	})
 	if err := svc.Ping(ctx); err != nil {
 		t.Fatal(err)
 	}
