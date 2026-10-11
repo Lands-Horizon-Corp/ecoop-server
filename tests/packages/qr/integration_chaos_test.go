@@ -35,9 +35,7 @@ func TestIntegrationChaos_ClusterWithRandomFaults(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 90 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			r := rand.New(rand.NewPCG(seed, uint64(i)))
 			issuer, scanner := nodes[r.IntN(len(nodes))], nodes[r.IntN(len(nodes))]
 			f := fault(r.IntN(4))
@@ -67,7 +65,7 @@ func TestIntegrationChaos_ClusterWithRandomFaults(t *testing.T) {
 			case f != faultNone && err == nil:
 				t.Errorf("run %d: fault %d undetected, got %+v", i, f, out)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

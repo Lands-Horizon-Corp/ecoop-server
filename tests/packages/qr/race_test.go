@@ -3,6 +3,7 @@ package qr_test
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -24,9 +25,7 @@ func TestRace_SharedEncodeDecode(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for w := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			for i := range 50 {
 				in := qr.QRData{Data: fmt.Sprintf("w%d-i%d", w, i), Type: "race"}
@@ -40,7 +39,7 @@ func TestRace_SharedEncodeDecode(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -53,9 +52,7 @@ func TestRace_NoncesUniqueUnderConcurrency(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 100 {
 				raw, _ := base64.StdEncoding.DecodeString(mustEncode(t, svc, &qr.QRData{Data: "same"}))
 				nonce := string(raw[:24])
@@ -66,7 +63,7 @@ func TestRace_NoncesUniqueUnderConcurrency(t *testing.T) {
 				seen[nonce] = struct{}{}
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -79,13 +76,11 @@ func TestRace_SharedPayloadScannedConcurrently(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if out, err := svc.Decode(ctx, enc); err != nil || out != in {
 				t.Errorf("got %+v, %v", out, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -94,9 +89,7 @@ func TestRace_IndependentInstancesInParallel(t *testing.T) {
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	for w := range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			svc := qr.NewQRServices(fmt.Sprintf("tenant-%d", w))
 			if err := svc.Start(ctx); err != nil {
 				t.Error(err)
@@ -108,7 +101,7 @@ func TestRace_IndependentInstancesInParallel(t *testing.T) {
 			if out, err := svc.Decode(ctx, enc); err != nil || out != in {
 				t.Errorf("tenant %d: %+v, %v", w, out, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -136,4 +129,40 @@ func TestRace_RepeatedStartDoesNotLeakGoroutines(t *testing.T) {
 	if after := runtime.NumGoroutine(); after > before+2 {
 		t.Fatalf("goroutines %d -> %d after 20 Starts and one Stop; earlier codecs were never closed", before, after)
 	}
+}
+
+// Stop arriving mid-traffic (e.g. on SIGTERM) must let in-flight calls
+// finish; calls that arrive after it must get ErrNotStarted, never a panic.
+func TestRace_StopDuringTraffic(t *testing.T) {
+	ctx := context.Background()
+	svc := qr.NewQRServices(testSecret)
+	if err := svc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	enc, _ := svc.Encode(ctx, &qr.QRData{Data: "in-flight"})
+
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 200 {
+				mustNotPanic(t, "Encode/Decode during Stop", func() {
+					if _, err := svc.Encode(ctx, &qr.QRData{Data: "x"}); err != nil && !errors.Is(err, qr.ErrNotStarted) {
+						t.Errorf("Encode: %v", err)
+					}
+					if out, err := svc.Decode(ctx, enc); err == nil && out.Data != "in-flight" {
+						t.Errorf("Decode returned corrupted data: %+v", out)
+					} else if err != nil && !errors.Is(err, qr.ErrNotStarted) {
+						t.Errorf("Decode: %v", err)
+					}
+				})
+			}
+		}()
+	}
+	time.Sleep(time.Millisecond)
+	if err := svc.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
 }

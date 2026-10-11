@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/bytedance/sonic"
@@ -16,7 +17,11 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
+// QRService is safe for concurrent use. Encode and Decode share a read lock;
+// Start and Stop take the write lock, so Stop waits for in-flight calls to
+// finish before releasing the codecs.
 type QRService struct {
+	mu      sync.RWMutex
 	decoder *zstd.Decoder
 	encoder *zstd.Encoder
 	aead    cipher.AEAD
@@ -30,6 +35,8 @@ func NewQRServices(secret string) QRServices {
 }
 
 func (q *QRService) Start(ctx context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	key := sha256.Sum256([]byte(q.secret))
 	aead, err := chacha20poly1305.NewX(key[:])
 	if err != nil {
@@ -58,12 +65,14 @@ func (q *QRService) Start(ctx context.Context) error {
 }
 
 func (q *QRService) Stop(ctx context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.closeCodecs()
 	q.aead = nil
 	return nil
 }
 
-// closeCodecs releases the current codecs.
+// closeCodecs releases the current codecs; callers must hold q.mu.
 func (q *QRService) closeCodecs() {
 	if q.encoder != nil {
 		_ = q.encoder.Close()
@@ -76,6 +85,8 @@ func (q *QRService) closeCodecs() {
 }
 
 func (q *QRService) Decode(ctx context.Context, encodedStr string) (QRData, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
 	if q.aead == nil {
 		return QRData{}, ErrNotStarted
 	}
@@ -110,6 +121,8 @@ func (q *QRService) Encode(ctx context.Context, data *QRData) (string, error) {
 	if !utf8.ValidString(data.Data) || !utf8.ValidString(data.Type) {
 		return "", ErrInvalidUTF8
 	}
+	q.mu.RLock()
+	defer q.mu.RUnlock()
 	if q.aead == nil {
 		return "", ErrNotStarted
 	}
