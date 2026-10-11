@@ -13,15 +13,13 @@ var (
 )
 
 type (
-	Channel string
-	Events  []string
-
 	BroadcasterServices interface {
+		Start(ctx context.Context) error
 		Run(ctx context.Context) error
 		Stop(ctx context.Context) error
 		Publish(ctx context.Context, channel, event string, payload any) error
 		Dispatch(ctx context.Context, channels []string, event string, payload any) error
-		Broadcast(ctx context.Context, channels []Channel, events Events, payload any) error
+		Broadcast(ctx context.Context, channels []string, events []string, payload any) error
 		Runner(ctx context.Context)
 	}
 )
