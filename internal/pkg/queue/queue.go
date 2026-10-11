@@ -40,6 +40,7 @@ type route struct {
 	handler Handler
 	limit   int64
 	per     time.Duration
+	gate    *utils.Gate
 }
 
 // settings is what a list of Options adds up to.
@@ -47,6 +48,7 @@ type settings struct {
 	enqueue []asynq.Option
 	limit   int64
 	per     time.Duration
+	gate    *utils.Gate
 }
 
 type retryAfterError struct {
@@ -169,7 +171,7 @@ func (q *QueueService) conn() (asynq.RedisConnOpt, error) {
 
 func (q *QueueService) Handle(taskType string, handler Handler, opts ...Option) {
 	set := apply(opts)
-	q.routes.Store(taskType, route{handler: handler, limit: set.limit, per: set.per})
+	q.routes.Store(taskType, route{handler: handler, limit: set.limit, per: set.per, gate: set.gate})
 }
 
 func (q *QueueService) Enqueue(ctx context.Context, taskType string, payload any, opts ...Option) (string, error) {
@@ -210,6 +212,13 @@ func (q *QueueService) run(ctx context.Context, t *asynq.Task) error {
 		return RetryAfter(UnhandledRetry, ErrNoHandler)
 	}
 	r := v.(route)
+	if r.gate != nil {
+		done, ok := r.gate.Enter()
+		if !ok {
+			return RetryAfter(GuardRetry, ErrClosed)
+		}
+		defer done()
+	}
 	if r.limit > 0 {
 		now := time.Now()
 		window := now.UnixNano() / int64(r.per)
@@ -364,6 +373,13 @@ func RateLimit(n int, per time.Duration) Option {
 			s.limit, s.per = int64(n), per
 		}
 	}
+}
+
+// Guard runs the job type only while gate is open, counting each run in
+// the gate so the service's Stop waits for it. While the gate is closed on
+// this instance, jobs go back for another instance.
+func Guard(gate *utils.Gate) Option {
+	return func(s *settings) { s.gate = gate }
 }
 
 func enqueueOption(o asynq.Option) Option {

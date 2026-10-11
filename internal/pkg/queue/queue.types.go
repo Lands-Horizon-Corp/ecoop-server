@@ -34,6 +34,7 @@ const (
 	LeaderTTL     = 15 * time.Second
 	LeaderRenew   = 5 * time.Second
 	EnqueueOnTick = 10 * time.Second // deadline for enqueueing one cron tick
+	GuardRetry    = time.Second      // retry delay for a job whose Guard gate is closed here
 )
 
 // RateLimitKeyPrefix names the cache counters behind RateLimit; one counter
@@ -47,6 +48,7 @@ var (
 	ErrNoSchedule  = errors.New("queue: no schedule with this id")
 	ErrRateLimited = errors.New("queue: rate limit reached")
 	ErrRetryLater  = errors.New("queue: retry later")
+	ErrClosed      = errors.New("queue: the job's service is stopped on this instance")
 	// ErrSkipRetry, wrapped in a handler's error, stops further attempts.
 	ErrSkipRetry = asynq.SkipRetry
 )

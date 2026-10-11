@@ -60,7 +60,7 @@ func startValkey() error {
 	}
 	env := map[string]string{}
 	if data, err := os.ReadFile(filepath.Join(root, ".env")); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
+		for line := range strings.SplitSeq(string(data), "\n") {
 			if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok && !strings.HasPrefix(k, "#") {
 				env[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
 			}

@@ -7,9 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
-	"sync/atomic"
 	"text/template"
-	"time"
 	"unicode/utf8"
 
 	"github.com/twilio/twilio-go"
@@ -30,11 +28,10 @@ type SMSService struct {
 	maxCharacters int32
 	secured       bool
 	queue         queue.QueueServices
-	inflight      *utils.Inflight
 
-	started atomic.Bool
-	twilio  *twilio.RestClient
-	send    *queue.Job[sendPayload]
+	gate   *utils.Gate
+	twilio *twilio.RestClient
+	send   *queue.Job[sendPayload]
 }
 
 type sendPayload struct {
@@ -48,9 +45,6 @@ func NewSMSService(
 	accountSID, authToken, sender string, maxCharacters int32, secured bool,
 	queue queue.QueueServices,
 	inflight *utils.Inflight) SMSServices {
-	if inflight == nil {
-		inflight = utils.NewInflight()
-	}
 	return &SMSService{
 		accountSID:    accountSID,
 		authToken:     authToken,
@@ -58,12 +52,12 @@ func NewSMSService(
 		maxCharacters: maxCharacters,
 		secured:       secured,
 		queue:         queue,
-		inflight:      inflight,
+		gate:          utils.NewGate(inflight),
 	}
 }
 
 func (s *SMSService) Start(ctx context.Context) error {
-	if s.inflight == nil {
+	if s.gate == nil {
 		return ErrNoTracker
 	}
 	var errs []error
@@ -94,6 +88,7 @@ func (s *SMSService) Start(ctx context.Context) error {
 		}
 		if s.send == nil {
 			s.send = queue.NewJob(s.queue, TaskTypeSend, s.deliver,
+				queue.Guard(s.gate),
 				queue.RateLimit(SendRateLimit, RateWindow),
 				queue.Priority(QueueName),
 				queue.MaxRetry(MaxRetries),
@@ -101,7 +96,7 @@ func (s *SMSService) Start(ctx context.Context) error {
 			)
 		}
 	}
-	s.started.Store(true)
+	s.gate.Open()
 	return nil
 }
 
@@ -109,10 +104,7 @@ func (s *SMSService) Start(ctx context.Context) error {
 // and deliveries, or returns ctx.Err() if ctx ends first. Queued messages
 // stay in the queue: another instance, or this one after Start, sends them.
 func (s *SMSService) Stop(ctx context.Context) error {
-	if !s.started.Swap(false) {
-		return nil
-	}
-	return s.inflight.Wait(ctx)
+	return s.gate.Close(ctx)
 }
 
 // Ping checks the Twilio account and the queue. It returns when ctx ends even
@@ -121,7 +113,7 @@ func (s *SMSService) Ping(ctx context.Context) error {
 	if !s.secured {
 		return nil
 	}
-	if !s.started.Load() {
+	if !s.gate.IsOpen() {
 		return ErrNotStarted
 	}
 	errc := make(chan error, 1)
@@ -174,9 +166,9 @@ func (s *SMSService) Format(ctx context.Context, req SMSRequest) (*SMSRequest, e
 // Send validates and formats the message now, so bad input fails fast, then
 // queues it. Delivery happens on the queue worker, rate limited and retried.
 func (s *SMSService) Send(ctx context.Context, req SMSRequest) error {
-	done, err := s.acquire()
-	if err != nil {
-		return err
+	done, ok := s.gate.Enter()
+	if !ok {
+		return ErrNotStarted
 	}
 	defer done()
 	if !utils.IsValidPhoneNumber(req.To) {
@@ -206,11 +198,6 @@ func (s *SMSService) Send(ctx context.Context, req SMSRequest) error {
 // back for another instance. Twilio rejecting the message itself (a 4xx
 // other than 429) is not retried; outages and throttling are.
 func (s *SMSService) deliver(ctx context.Context, p sendPayload) error {
-	done, err := s.acquire()
-	if err != nil {
-		return queue.RetryAfter(time.Second, err)
-	}
-	defer done()
 	params := &openapi.CreateMessageParams{}
 	params.SetTo(p.To)
 	params.SetFrom(s.sender)
@@ -223,18 +210,4 @@ func (s *SMSService) deliver(ctx context.Context, p sendPayload) error {
 		return errors.Join(ErrSendFailed, err)
 	}
 	return nil
-}
-
-// acquire tracks a send or delivery. It registers before checking started,
-// so Stop (which clears started, then waits) cannot miss one under way.
-func (s *SMSService) acquire() (done func(), err error) {
-	if !s.started.Load() {
-		return nil, ErrNotStarted
-	}
-	done = s.inflight.Track()
-	if !s.started.Load() {
-		done()
-		return nil, ErrNotStarted
-	}
-	return done, nil
 }

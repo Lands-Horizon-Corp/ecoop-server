@@ -8,9 +8,7 @@ import (
 	"maps"
 	"os"
 	"strings"
-	"sync/atomic"
 	"text/template"
-	"time"
 
 	"github.com/wneessen/go-mail"
 
@@ -27,11 +25,10 @@ type SMTPService struct {
 	secured     bool
 	defaultName string
 	queue       queue.QueueServices
-	inflight    *utils.Inflight
 
-	started atomic.Bool
-	client  *mail.Client
-	send    *queue.Job[sendPayload]
+	gate   *utils.Gate
+	client *mail.Client
+	send   *queue.Job[sendPayload]
 }
 
 type sendPayload struct {
@@ -46,9 +43,6 @@ func NewSMTPService(
 	defaultName string, secured bool,
 	queue queue.QueueServices,
 	inflight *utils.Inflight) SMTPServices {
-	if inflight == nil {
-		inflight = utils.NewInflight()
-	}
 	return &SMTPService{
 		host:        host,
 		port:        port,
@@ -58,11 +52,11 @@ func NewSMTPService(
 		defaultName: defaultName,
 		secured:     secured,
 		queue:       queue,
-		inflight:    inflight,
+		gate:        utils.NewGate(inflight),
 	}
 }
 func (s *SMTPService) Start(ctx context.Context) error {
-	if s.inflight == nil {
+	if s.gate == nil {
 		return ErrNoTracker
 	}
 	var errs []error
@@ -108,6 +102,7 @@ func (s *SMTPService) Start(ctx context.Context) error {
 		}
 		if s.send == nil {
 			s.send = queue.NewJob(s.queue, TaskTypeSend, s.deliver,
+				queue.Guard(s.gate),
 				queue.RateLimit(SendRateLimit, RateWindow),
 				queue.Priority(QueueName),
 				queue.MaxRetry(MaxRetries),
@@ -115,22 +110,19 @@ func (s *SMTPService) Start(ctx context.Context) error {
 			)
 		}
 	}
-	s.started.Store(true)
+	s.gate.Open()
 	return nil
 }
 
 func (s *SMTPService) Stop(ctx context.Context) error {
-	if !s.started.Swap(false) {
-		return nil
-	}
-	return s.inflight.Wait(ctx)
+	return s.gate.Close(ctx)
 }
 
 func (s *SMTPService) Ping(ctx context.Context) error {
 	if !s.secured {
 		return nil
 	}
-	if !s.started.Load() {
+	if !s.gate.IsOpen() {
 		return ErrNotStarted
 	}
 	errc := make(chan error, 1)
@@ -150,18 +142,6 @@ func (s *SMTPService) Ping(ctx context.Context) error {
 		return errors.Join(ErrConnect, ctx.Err())
 	}
 	return s.queue.Ping(ctx)
-}
-
-func (s *SMTPService) acquire() (done func(), err error) {
-	if !s.started.Load() {
-		return nil, ErrNotStarted
-	}
-	done = s.inflight.Track()
-	if !s.started.Load() {
-		done()
-		return nil, ErrNotStarted
-	}
-	return done, nil
 }
 
 func (s *SMTPService) Format(ctx context.Context, req SMTPRequest) (*SMTPRequest, error) {
@@ -192,9 +172,9 @@ func (s *SMTPService) Format(ctx context.Context, req SMTPRequest) (*SMTPRequest
 }
 
 func (s *SMTPService) Send(ctx context.Context, req SMTPRequest) error {
-	done, err := s.acquire()
-	if err != nil {
-		return err
+	done, ok := s.gate.Enter()
+	if !ok {
+		return ErrNotStarted
 	}
 	defer done()
 	if !utils.IsValidEmail(req.To) {
@@ -226,11 +206,6 @@ func (s *SMTPService) Send(ctx context.Context, req SMTPRequest) error {
 }
 
 func (s *SMTPService) deliver(ctx context.Context, p sendPayload) error {
-	done, err := s.acquire()
-	if err != nil {
-		return queue.RetryAfter(time.Second, err)
-	}
-	defer done()
 	msg := mail.NewMsg()
 	if err := msg.FromFormat(p.FromName, s.from); err != nil {
 		return errors.Join(ErrInvalidSender, err, queue.ErrSkipRetry)
