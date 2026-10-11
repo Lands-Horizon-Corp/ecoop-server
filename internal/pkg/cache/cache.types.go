@@ -14,7 +14,7 @@ var (
 )
 
 type CacheServices interface {
-	Client() (valkey.Client, error)
+	Client() valkey.Client
 	Run(ctx context.Context) error
 	Stop(ctx context.Context) error
 	Ping(ctx context.Context) error
