@@ -238,6 +238,7 @@ func (p *planner) generate(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	changes = explicitDrops(have, renames(changes))
+	changes = dependencyOrder(convertUsing(changes))
 	review := destructive(changes, p.want)
 	ready, rest, err := p.concurrentIndexes(ctx, have, changes)
 	if err != nil {
@@ -254,6 +255,9 @@ func (p *planner) generate(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if err := p.renameSequences(ctx, changes, plan); err != nil {
+		return "", err
+	}
+	if err := p.enumReverses(ctx, plan); err != nil {
 		return "", err
 	}
 	if concurrent {
@@ -305,6 +309,189 @@ func (p *planner) generate(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	return file, nil
+}
+
+var addEnumValue = regexp.MustCompile(`^ALTER TYPE "?([\w]+)"? ADD VALUE`)
+
+// enumReverses writes the Down Atlas leaves empty for ALTER TYPE ... ADD
+// VALUE (Postgres cannot remove an enum value), so a rollback restores the
+// type instead of silently keeping the value: the type is rebuilt with its
+// previous values and every column using it is converted back. Checks and
+// indexes on those columns are dropped first and recreated after, since
+// they would otherwise still point at the old type. The definitions come
+// from the replayed folder, which is the state the Down returns to.
+func (p *planner) enumReverses(ctx context.Context, plan *migrate.Plan) error {
+	done := map[string]bool{}
+	for _, c := range plan.Changes {
+		m := addEnumValue.FindStringSubmatch(c.Cmd)
+		if m == nil || c.Reverse != nil {
+			continue
+		}
+		typ := m[1]
+		if done[typ] {
+			c.Reverse = []string{} // the first change of this type reverses them all
+			continue
+		}
+		done[typ] = true
+		reverse, err := p.rebuildEnum(ctx, typ)
+		if err != nil {
+			return err
+		}
+		c.Reverse = reverse
+	}
+	return nil
+}
+
+func (p *planner) rebuildEnum(ctx context.Context, typ string) ([]string, error) {
+	q := func(query string, args ...any) ([][]string, error) {
+		rows, err := p.folder.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("sql: planning: enum %s: %w", typ, err)
+		}
+		defer rows.Close()
+		cols, _ := rows.Columns()
+		var out [][]string
+		for rows.Next() {
+			vals := make([]string, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				return nil, err
+			}
+			out = append(out, vals)
+		}
+		return out, rows.Err()
+	}
+	values, err := q(`SELECT quote_literal(enumlabel) FROM pg_enum WHERE enumtypid = to_regtype($1) ORDER BY enumsortorder`, typ)
+	if err != nil {
+		return nil, err
+	}
+	columns, err := q(`SELECT quote_ident(c.relname), quote_ident(a.attname), coalesce(pg_get_expr(d.adbin, d.adrelid), '')
+  FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid AND c.relkind IN ('r', 'p')
+  LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+ WHERE a.atttypid = to_regtype($1) AND NOT a.attisdropped ORDER BY 1, 2`, typ)
+	if err != nil {
+		return nil, err
+	}
+	// Checks and plain indexes that use those columns (constraint indexes go
+	// with their constraint).
+	dependents, err := q(`SELECT DISTINCT kind, name, quote_ident(rel), def FROM (
+  SELECT 'constraint' AS kind, quote_ident(con.conname) AS name, cl.relname AS rel, pg_get_constraintdef(con.oid) AS def
+    FROM pg_constraint con JOIN pg_class cl ON cl.oid = con.conrelid
+   WHERE con.contype IN ('c', 'u', 'x') AND EXISTS (SELECT 1 FROM pg_attribute a
+     WHERE a.attrelid = con.conrelid AND a.attnum = ANY (con.conkey) AND a.atttypid = to_regtype($1))
+  UNION ALL
+  SELECT 'index', quote_ident(ic.relname), tc.relname, pg_get_indexdef(i.indexrelid)
+    FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_class tc ON tc.oid = i.indrelid
+   WHERE NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = i.indexrelid)
+     AND EXISTS (SELECT 1 FROM pg_depend d JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+       WHERE d.classid = 'pg_class'::regclass AND d.objid = i.indexrelid AND a.atttypid = to_regtype($1))
+) x ORDER BY 1, 2`, typ)
+	if err != nil {
+		return nil, err
+	}
+	var before, after []string
+	for _, d := range dependents {
+		kind, name, rel, def := d[0], d[1], d[2], d[3]
+		if kind == "constraint" {
+			before = append(before, fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", rel, name))
+			after = append(after, fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s %s", rel, name, def))
+		} else {
+			before = append(before, "DROP INDEX "+name)
+			after = append(after, strings.Replace(def, " ON public.", " ON ", 1))
+		}
+	}
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = v[0]
+	}
+	old := typ + "__old"
+	stmts := append(before,
+		fmt.Sprintf("ALTER TYPE %q RENAME TO %q", typ, old),
+		fmt.Sprintf("CREATE TYPE %q AS ENUM (%s)", typ, strings.Join(quoted, ", ")))
+	for _, col := range columns {
+		table, name, def := col[0], col[1], col[2]
+		alter := fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT, ALTER COLUMN %s TYPE %q USING %s::text::%q", table, name, name, typ, name, typ)
+		if def != "" {
+			alter += fmt.Sprintf(", ALTER COLUMN %s SET DEFAULT %s", name, strings.ReplaceAll(def, old, typ))
+		}
+		stmts = append(stmts, alter)
+	}
+	stmts = append(stmts, fmt.Sprintf("DROP TYPE %q", old))
+	return append(stmts, after...), nil
+}
+
+// dependencyOrder sorts each table's changes so every one runs after what
+// it depends on, in Up and, reversed, in Down: dropped constraints and
+// indexes, dropped columns, renames, added columns, changed columns, then
+// added or changed constraints and indexes. Atlas keeps the diff's order,
+// and its Down reverses it, so "add check, add column" would come back as
+// "drop column (taking the check with it), drop check", which fails.
+func dependencyOrder(changes []schema.Change) []schema.Change {
+	rank := func(c schema.Change) int {
+		switch c.(type) {
+		case *schema.DropForeignKey, *schema.DropCheck, *schema.DropIndex:
+			return 0
+		case *schema.DropColumn:
+			return 1
+		case *schema.RenameColumn, *schema.RenameIndex:
+			return 2
+		case *schema.AddColumn:
+			return 3
+		case *schema.AddCheck, *schema.AddIndex, *schema.AddForeignKey,
+			*schema.ModifyCheck, *schema.ModifyIndex, *schema.ModifyForeignKey:
+			return 5
+		}
+		return 4
+	}
+	for _, c := range changes {
+		if m, ok := c.(*schema.ModifyTable); ok {
+			slices.SortStableFunc(m.Changes, func(a, b schema.Change) int { return rank(a) - rank(b) })
+		}
+	}
+	return changes
+}
+
+// convertUsing gives every column type change an explicit USING cast:
+// Postgres only converts implicitly between compatible types (text to an
+// enum, for one, needs the cast spelled out). A column with a default has
+// the default dropped by a statement of its own first, since the old
+// default cannot be cast either; the type change then sets the new one.
+func convertUsing(changes []schema.Change) []schema.Change {
+	var out []schema.Change
+	for _, c := range changes {
+		m, ok := c.(*schema.ModifyTable)
+		if !ok {
+			out = append(out, c)
+			continue
+		}
+		var dropDefaults []schema.Change
+		for _, ch := range m.Changes {
+			mc, ok := ch.(*schema.ModifyColumn)
+			if !ok || mc.Change&schema.ChangeType == 0 || mc.To.Type == nil {
+				continue
+			}
+			if typ, err := postgres.FormatType(mc.To.Type.Type); err == nil {
+				mc.Extra = append(mc.Extra, &postgres.ConvertUsing{X: fmt.Sprintf("%q::%s", mc.To.Name, typ)})
+			}
+			if mc.From.Default != nil {
+				bare := *mc.From
+				bare.Default = nil
+				dropDefaults = append(dropDefaults, &schema.ModifyColumn{From: mc.From, To: &bare, Change: schema.ChangeDefault})
+				mc.From = &bare
+				if mc.To.Default != nil {
+					mc.Change |= schema.ChangeDefault
+				}
+			}
+		}
+		if len(dropDefaults) > 0 {
+			out = append(out, &schema.ModifyTable{T: m.T, Changes: dropDefaults})
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 var createIndex = regexp.MustCompile(`^CREATE (UNIQUE )?INDEX `)

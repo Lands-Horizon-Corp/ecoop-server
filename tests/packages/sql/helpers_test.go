@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
@@ -47,6 +48,10 @@ var (
 
 var _ ecsql.SQLServices = (*ecsql.SQLService)(nil)
 
+// suiteCleanups undo what fixtures shared by the whole run set up; they run
+// after every test.
+var suiteCleanups []func()
+
 func TestMain(m *testing.M) { os.Exit(runMain(m)) }
 
 func runMain(m *testing.M) (code int) {
@@ -58,6 +63,9 @@ func runMain(m *testing.M) (code int) {
 	defer admin.Close()
 	scratchBefore := scratchDatabases()
 	code = m.Run()
+	for _, cleanup := range slices.Backward(suiteCleanups) {
+		cleanup()
+	}
 	// Migrate's scratch databases must never be left behind, failures included.
 	var left []string
 	for _, name := range scratchDatabases() {
@@ -448,6 +456,14 @@ func dbName(dsn string) string {
 // databases with the same snapshot have the same schema.
 func snapshot(t testing.TB, s ecsql.SQLServices) string {
 	t.Helper()
+	snap, err := snapshotOf(ctxT(t), s.Client())
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	return snap
+}
+
+func snapshotOf(ctx context.Context, db *bun.DB) (string, error) {
 	const q = `
 SELECT 'col ' || table_name || '.' || column_name || ' ' || data_type || coalesce('(' || character_maximum_length || ')', '') ||
        coalesce(' p' || numeric_precision || ',' || numeric_scale, '') || ' null=' || is_nullable || ' def=' || coalesce(column_default, '-')
@@ -494,10 +510,10 @@ UNION ALL
 SELECT 'ext ' || extname FROM pg_extension WHERE extname <> 'plpgsql'
 ORDER BY 1`
 	var rows []string
-	if err := s.Client().NewRaw(q).Scan(ctxT(t), &rows); err != nil {
-		t.Fatalf("snapshot: %v", err)
+	if err := db.NewRaw(q).Scan(ctx, &rows); err != nil {
+		return "", err
 	}
-	return strings.Join(rows, "\n")
+	return strings.Join(rows, "\n"), nil
 }
 
 // count returns the rows of a SQL count query.

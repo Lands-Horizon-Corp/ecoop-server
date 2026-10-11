@@ -559,14 +559,31 @@ func provider(mig *sql.DB, dir string) (*goose.Provider, error) {
 // withMigrationLock runs fn while holding the Postgres advisory lock, so
 // migration commands run on one instance at a time. The lock is held by a
 // session, so a crashed instance's lock goes when its connection does.
+//
+// Waiting instances poll with pg_try_advisory_lock rather than block in
+// pg_advisory_lock: a blocked statement keeps its snapshot open, and CREATE
+// INDEX CONCURRENTLY on the instance holding the lock waits for every older
+// snapshot to end. Blocking would make them wait for each other forever,
+// through this process, where Postgres cannot see the deadlock.
 func withMigrationLock(ctx context.Context, mig *sql.DB, fn func() error) error {
 	conn, err := mig.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("sql: migration lock: %w", err)
 	}
 	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", MigrationLockID); err != nil {
-		return fmt.Errorf("sql: migration lock: %w", err)
+	for wait := 50 * time.Millisecond; ; wait = min(2*wait, time.Second) {
+		var locked bool
+		if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", MigrationLockID).Scan(&locked); err != nil {
+			return fmt.Errorf("sql: migration lock: %w", err)
+		}
+		if locked {
+			break
+		}
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return fmt.Errorf("sql: migration lock: %w", ctx.Err())
+		}
 	}
 	defer func() {
 		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock($1)", MigrationLockID)
