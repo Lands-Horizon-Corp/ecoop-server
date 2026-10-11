@@ -80,7 +80,7 @@ func TestPoisonPill_PatternCannotEscapeNamespace(t *testing.T) {
 	cleanupKey(t, other)
 	_ = svc.Set(ctx, mine, 1, time.Minute)
 	_ = svc.Set(ctx, other, 1, time.Minute)
-	defer svc.Delete(ctx, other)
+	defer func() { _, _ = svc.Delete(ctx, other) }()
 
 	for _, suffix := range []string{"*", "a", "[a-z]", "?", "\\*", "*\r\n*"} {
 		keys, err := svc.Keys(ctx, key(t, suffix))

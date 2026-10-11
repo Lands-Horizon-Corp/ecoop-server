@@ -102,14 +102,14 @@ func TestHappyPath_ExistsDelete(t *testing.T) {
 	if ok, err := svc.Exists(ctx, k); !ok || err != nil {
 		t.Fatalf("Exists = %v, %v", ok, err)
 	}
-	if err := svc.Delete(ctx, k); err != nil {
-		t.Fatal(err)
+	if deleted, err := svc.Delete(ctx, k); err != nil || !deleted {
+		t.Fatalf("Delete = %v, %v; want true, nil", deleted, err)
 	}
 	if ok, _ := svc.Exists(ctx, k); ok {
 		t.Fatal("key exists after Delete")
 	}
-	if err := svc.Delete(ctx, k); err != nil {
-		t.Fatalf("deleting a missing key: %v", err)
+	if deleted, err := svc.Delete(ctx, k); err != nil || deleted {
+		t.Fatalf("deleting a missing key = %v, %v; want false, nil", deleted, err)
 	}
 }
 

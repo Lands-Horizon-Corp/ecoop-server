@@ -46,7 +46,7 @@ type CacheServices interface {
 	Get(ctx context.Context, key string) ([]byte, error)
 	Set(ctx context.Context, key string, value any, ttl time.Duration) error
 	Exists(ctx context.Context, key string) (bool, error)
-	Delete(ctx context.Context, key string) error
+	Delete(ctx context.Context, key string) (bool, error)
 	Keys(ctx context.Context, pattern string) ([]string, error)
 	ZAdd(ctx context.Context, key string, score float64, member any) error
 	ZRange(ctx context.Context, key string, start, stop int64) ([]string, error)

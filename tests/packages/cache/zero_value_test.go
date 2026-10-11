@@ -27,7 +27,7 @@ func allOps(ctx context.Context, k string) []op {
 		{"Set", func(s cache.CacheServices) error { return s.Set(ctx, k, "v", 0) }},
 		{"SetNX", func(s cache.CacheServices) error { return e(s.SetNX(ctx, k, "v", 0)) }},
 		{"Exists", func(s cache.CacheServices) error { return e(s.Exists(ctx, k)) }},
-		{"Delete", func(s cache.CacheServices) error { return s.Delete(ctx, k) }},
+		{"Delete", func(s cache.CacheServices) error { return e(s.Delete(ctx, k)) }},
 		{"Keys", func(s cache.CacheServices) error { return e(s.Keys(ctx, k)) }},
 		{"ZAdd", func(s cache.CacheServices) error { return s.ZAdd(ctx, k, 1, "m") }},
 		{"ZRange", func(s cache.CacheServices) error { return e(s.ZRange(ctx, k, 0, -1)) }},
@@ -176,7 +176,7 @@ func TestZeroValue_EmptyKey(t *testing.T) {
 	if err := svc.Set(ctx, "", "v", time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	defer svc.Delete(ctx, "")
+	defer func() { _, _ = svc.Delete(ctx, "") }()
 	if v, err := svc.Get(ctx, ""); err != nil || string(v) != "v" {
 		t.Fatalf("Get(\"\") = %q, %v", v, err)
 	}

@@ -174,13 +174,17 @@ func (c *CacheService) Exists(ctx context.Context, key string) (bool, error) {
 	return n > 0, err
 }
 
-func (c *CacheService) Delete(ctx context.Context, key string) error {
+// Delete removes key and reports whether it existed. Only one of several
+// concurrent Deletes of the same key gets true, which makes it usable to
+// consume something exactly once.
+func (c *CacheService) Delete(ctx context.Context, key string) (bool, error) {
 	client, done, err := c.running()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer done()
-	return client.Do(ctx, client.B().Del().Key(key).Build()).Error()
+	n, err := client.Do(ctx, client.B().Del().Key(key).Build()).AsInt64()
+	return n > 0, err
 }
 
 func (c *CacheService) Keys(ctx context.Context, pattern string) ([]string, error) {

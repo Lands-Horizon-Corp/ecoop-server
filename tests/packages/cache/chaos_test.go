@@ -157,7 +157,10 @@ func TestChaos_RandomOpsMatchModel(t *testing.T) {
 				t.Fatalf("step %d Get(%s) = %q, %v; model %q, %v", step, k, got, err, want, exists)
 			}
 		case 2:
-			_ = svc.Delete(ctx, k)
+			deleted, err := svc.Delete(ctx, k)
+			if _, exists := model[k]; err != nil || deleted != exists {
+				t.Fatalf("step %d Delete(%s) = %v, %v; model exists = %v", step, k, deleted, err, exists)
+			}
 			delete(model, k)
 		case 3:
 			ok, _ := svc.Exists(ctx, k)

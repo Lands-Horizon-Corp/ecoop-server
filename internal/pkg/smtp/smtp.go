@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"maps"
 	"os"
 	"strings"
 	"text/template"
@@ -145,10 +144,7 @@ func (s *SMTPService) Ping(ctx context.Context) error {
 }
 
 func (s *SMTPService) Format(ctx context.Context, req SMTPRequest) (*SMTPRequest, error) {
-	vars := make(map[string]string, len(req.Vars)+1)
-	maps.Copy(vars, req.Vars)
-	vars["Name"] = req.Name
-	req.Vars = vars
+	req.Vars = utils.CloneWith(req.Vars, "Name", req.Name)
 	var tmplBody string
 	if err := utils.IsValidFilePath(req.Body); err == nil {
 		content, err := os.ReadFile(req.Body)

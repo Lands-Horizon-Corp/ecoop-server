@@ -26,7 +26,7 @@ func TestSmoke(t *testing.T) {
 	if v, err := svc.Get(ctx, k); err != nil || string(v) != "hello" {
 		t.Fatalf("Get = %q, %v", v, err)
 	}
-	if err := svc.Delete(ctx, k); err != nil {
+	if _, err := svc.Delete(ctx, k); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if err := svc.Stop(context.Background()); err != nil {

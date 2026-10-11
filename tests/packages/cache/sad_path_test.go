@@ -159,10 +159,10 @@ func TestSadPath_DeadContexts(t *testing.T) {
 	for name, ctx := range map[string]context.Context{"cancelled": cancelled, "expired": expired} {
 		t.Run(name, func(t *testing.T) {
 			errs := map[string]error{
-				"Ping":   svc.Ping(ctx),
-				"Set":    svc.Set(ctx, k, "v", 0),
-				"Delete": svc.Delete(ctx, k),
+				"Ping": svc.Ping(ctx),
+				"Set":  svc.Set(ctx, k, "v", 0),
 			}
+			_, errs["Delete"] = svc.Delete(ctx, k)
 			_, errs["Get"] = svc.Get(ctx, k)
 			_, errs["Incr"] = svc.Incr(ctx, k, time.Second)
 			_, errs["Keys"] = svc.Keys(ctx, k)
