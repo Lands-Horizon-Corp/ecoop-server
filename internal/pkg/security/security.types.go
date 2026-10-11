@@ -2,7 +2,18 @@ package security
 
 import (
 	"context"
+	"errors"
 	"time"
+)
+
+var (
+	ErrDecrypt = errors.New("security: cannot decrypt data")
+)
+
+const (
+	maxVerifyMemory      uint32 = 256 * 1024 // KiB
+	maxVerifyIterations  uint32 = 16
+	maxVerifyParallelism uint8  = 64
 )
 
 type (
