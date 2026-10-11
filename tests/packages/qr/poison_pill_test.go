@@ -82,7 +82,10 @@ func TestPoisonPill_ForgedJSONIsHandledSafely(t *testing.T) {
 // huge allocation (decompression bomb).
 func TestPoisonPill_DecompressionBomb(t *testing.T) {
 	svc := newStarted(t)
-	bomb := forge(t, testSecret, bytes.Repeat([]byte{' '}, 64<<20), true)
+	// Valid JSON, so the only thing that can stop it is a size limit on
+	// decompression (a JSON error would mask the 64MiB expansion).
+	body := append([]byte(`{"type":"bomb","data":"`), bytes.Repeat([]byte{'a'}, 64<<20)...)
+	bomb := forge(t, testSecret, append(body, `"}`...), true)
 	if len(bomb) > 64<<10 {
 		t.Fatalf("bomb unexpectedly large (%d bytes)", len(bomb))
 	}

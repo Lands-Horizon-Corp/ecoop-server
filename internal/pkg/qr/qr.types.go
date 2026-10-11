@@ -1,6 +1,21 @@
 package qr
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var (
+	ErrNotStarted  = errors.New("qr: service not started")
+	ErrNilData     = errors.New("qr: data is nil")
+	ErrInvalidUTF8 = errors.New("qr: data contains invalid UTF-8")
+	ErrTooShort    = errors.New("qr: data is too short")
+	ErrTooLarge    = errors.New("qr: data exceeds size limit")
+)
+
+// maxDecodedSize caps the JSON payload in both directions so a small QR
+// cannot decompress into a large allocation.
+const maxDecodedSize = 1 << 20 // 1 MiB
 
 type (
 	QRData struct {
