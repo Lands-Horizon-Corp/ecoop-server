@@ -1,6 +1,7 @@
 # Local stack. Every host, port and password comes from .env.
 #
-#   docker compose up -d --wait valkey   -> cache (go test starts it for you)
+#   docker compose up -d --wait valkey    -> cache (go test starts it for you)
+#   docker compose up -d --wait mailpit   -> SMTP catcher; web UI on MAILPIT_UI_PORT
 
 name: ecoop
 
@@ -20,6 +21,21 @@ services:
       timeout: 3s
       retries: 30
     restart: unless-stopped
+    networks:
+      - app-network
+
+  # Catches every email sent to it; nothing leaves the machine.
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: always
+    ports:
+      - "${SMTP_HOST:?set SMTP_HOST in .env}:${SMTP_PORT:?set SMTP_PORT in .env}:1025"
+      - "${SMTP_HOST:?set SMTP_HOST in .env}:${MAILPIT_UI_PORT:?set MAILPIT_UI_PORT in .env}:8025"
+    networks:
+      - app-network
+
+networks:
+  app-network:
 
 volumes:
   valkey-data:
