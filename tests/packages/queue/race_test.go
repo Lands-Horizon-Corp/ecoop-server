@@ -17,6 +17,7 @@ import (
 const workers = 32
 
 func TestRace_ConcurrentEnqueue(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	typ := taskType(t, "concurrent")
 	var r recorder
@@ -36,6 +37,7 @@ func TestRace_ConcurrentEnqueue(t *testing.T) {
 }
 
 func TestRace_HandleWhileDispatching(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	typ := taskType(t, "swap")
 	var ran atomic.Int64
@@ -64,6 +66,7 @@ func TestRace_HandleWhileDispatching(t *testing.T) {
 }
 
 func TestRace_LifecycleChurn(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	typ := taskType(t, "churn")
 	q.Handle(typ, (&recorder{}).handler(nil))
@@ -96,6 +99,7 @@ func TestRace_LifecycleChurn(t *testing.T) {
 }
 
 func TestRace_ConcurrentScheduleAndUnschedule(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	typ := taskType(t, "sched")
 	q.Handle(typ, (&recorder{}).handler(nil))
@@ -118,6 +122,7 @@ func TestRace_ConcurrentScheduleAndUnschedule(t *testing.T) {
 }
 
 func TestRace_ConcurrentStartAndStop(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var wg sync.WaitGroup
 	for i := range workers {

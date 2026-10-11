@@ -13,6 +13,7 @@ import (
 )
 
 func TestHappyPath_PasswordRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 
@@ -39,6 +40,7 @@ func TestHappyPath_PasswordRoundTrip(t *testing.T) {
 }
 
 func TestHappyPath_HashFormat(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	hash, err := svc.GeneratePassword(context.Background(), "pw")
 	if err != nil {
@@ -69,6 +71,7 @@ func TestHappyPath_HashFormat(t *testing.T) {
 }
 
 func TestHappyPath_HashesAreSalted(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	ctx := context.Background()
 	a, _ := svc.GeneratePassword(ctx, "same")
@@ -79,6 +82,7 @@ func TestHappyPath_HashesAreSalted(t *testing.T) {
 }
 
 func TestHappyPath_TokenRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 
@@ -106,6 +110,7 @@ func TestHappyPath_TokenRoundTrip(t *testing.T) {
 }
 
 func TestHappyPath_TokenIsNotPlaintext(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	tok, _ := svc.Encrypt(context.Background(), "super-secret-marker", time.Minute)
 	if strings.Contains(tok, "super-secret-marker") {
@@ -114,6 +119,7 @@ func TestHappyPath_TokenIsNotPlaintext(t *testing.T) {
 }
 
 func TestHappyPath_DataRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 
@@ -140,6 +146,7 @@ func TestHappyPath_DataRoundTrip(t *testing.T) {
 }
 
 func TestHappyPath_DataNonceIsRandom(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	ctx := context.Background()
 	a, _ := svc.EncryptData(ctx, []byte("same"))
@@ -150,6 +157,7 @@ func TestHappyPath_DataNonceIsRandom(t *testing.T) {
 }
 
 func TestHappyPath_SameSecretInteroperates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, b := newService(t), newService(t)
 

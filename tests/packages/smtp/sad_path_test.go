@@ -9,9 +9,11 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/smtp"
+	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/qns"
 )
 
 func TestSadPath_StartRejectsBadConfigAllAtOnce(t *testing.T) {
+	t.Parallel()
 	err := smtp.NewSMTPService("", 0, "", "", "not-an-email", "", true, nil, nil).Start(context.Background())
 	for _, want := range []error{smtp.ErrInvalidSender, smtp.ErrInvalidHost, smtp.ErrInvalidPort, smtp.ErrNoQueue} {
 		if !errors.Is(err, want) {
@@ -26,6 +28,7 @@ func TestSadPath_StartRejectsBadConfigAllAtOnce(t *testing.T) {
 }
 
 func TestSadPath_InvalidRecipients(t *testing.T) {
+	t.Parallel()
 	svc := mockService(t)
 	for _, to := range []string{"", "plain", "@ecoop.test", "a@", "a b@ecoop.test", "a@b.co, c@d.co", "<>", "a@b.co\r\nBcc: x@evil.test"} {
 		if err := svc.Send(ctxT(t), smtp.SMTPRequest{To: to, Body: "x"}); !errors.Is(err, smtp.ErrInvalidRecipient) {
@@ -35,6 +38,7 @@ func TestSadPath_InvalidRecipients(t *testing.T) {
 }
 
 func TestSadPath_TemplateErrors(t *testing.T) {
+	t.Parallel()
 	svc := mockService(t)
 	cases := map[string]struct {
 		body string
@@ -55,6 +59,7 @@ func TestSadPath_TemplateErrors(t *testing.T) {
 }
 
 func TestSadPath_UnreachableServer(t *testing.T) {
+	t.Parallel()
 	before := failedDeliveries(t)
 	svc := newSMTP(t, serviceOpts{smtpAddr: "127.0.0.1:1"})
 	if err := svc.Start(context.Background()); err != nil {
@@ -75,17 +80,19 @@ func TestSadPath_UnreachableServer(t *testing.T) {
 }
 
 func TestSadPath_QueueUnavailable(t *testing.T) {
+	t.Parallel()
 	// Jobs and the rate limit live in Valkey, so Start refuses to run on a
 	// queue that is not running instead of failing on the first Send.
 	requireMailpit(t)
 	ch := cache.NewCacheService([]string{queueAddr}, queuePassword, nil)
-	err := smtp.NewSMTPService(smtpHost, smtpPort, "", "", sender, "", true, queue.NewQueueService(ch), nil).Start(ctxT(t))
+	err := smtp.NewSMTPService(smtpHost, smtpPort, "", "", sender, "", true, queue.NewQueueService(ch, queue.Namespace(qns.For(t, queueAddr, queuePassword))), nil).Start(ctxT(t))
 	if !errors.Is(err, smtp.ErrQueueUnavailable) || !errors.Is(err, queue.ErrNotStarted) {
 		t.Fatalf("Start = %v, want ErrQueueUnavailable + queue.ErrNotStarted", err)
 	}
 }
 
 func TestSadPath_QueueStoppedAfterStart(t *testing.T) {
+	t.Parallel()
 	// If the queue stops while running, Send reports it rather than
 	// dropping the email.
 	requireMailpit(t)
@@ -103,6 +110,7 @@ func TestSadPath_QueueStoppedAfterStart(t *testing.T) {
 }
 
 func TestSadPath_DeadContextDeliversNothing(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	to := inbox(t)
 	cancelled, cancel := context.WithCancel(context.Background())
@@ -118,6 +126,7 @@ func TestSadPath_DeadContextDeliversNothing(t *testing.T) {
 }
 
 func TestSadPath_SendBeforeStartAndAfterStop(t *testing.T) {
+	t.Parallel()
 	svc := newSMTP(t, serviceOpts{})
 	to := inbox(t)
 	if err := svc.Send(ctxT(t), smtp.SMTPRequest{To: to, Body: "x"}); !errors.Is(err, smtp.ErrNotStarted) {

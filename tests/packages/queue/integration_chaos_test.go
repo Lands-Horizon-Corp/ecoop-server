@@ -15,6 +15,7 @@ import (
 // balancer: shared work, shared rate limits, one cron leader with handover.
 
 func TestIntegrationChaos_InstancesShareTheWork(t *testing.T) {
+	t.Parallel()
 	a, b := newQueue(t), newQueue(t)
 	typ := taskType(t, "shared")
 	var byA, byB atomic.Int64
@@ -58,6 +59,7 @@ func TestIntegrationChaos_InstancesShareTheWork(t *testing.T) {
 }
 
 func TestIntegrationChaos_RateLimitSharedAcrossInstances(t *testing.T) {
+	t.Parallel()
 	a, b := newQueue(t), newQueue(t)
 	typ := taskType(t, "shared-limit")
 	var r recorder
@@ -81,6 +83,7 @@ func TestIntegrationChaos_RateLimitSharedAcrossInstances(t *testing.T) {
 }
 
 func TestIntegrationChaos_JobFindsTheInstanceWithItsHandler(t *testing.T) {
+	t.Parallel()
 	without, with := newQueue(t), newQueue(t)
 	typ := taskType(t, "routed")
 	var r recorder
@@ -97,6 +100,7 @@ func TestIntegrationChaos_JobFindsTheInstanceWithItsHandler(t *testing.T) {
 }
 
 func TestIntegrationChaos_OneCronLeaderAndHandover(t *testing.T) {
+	t.Parallel()
 	a, b := newQueue(t), newQueue(t)
 	typ := taskType(t, "tick")
 	var r recorder
@@ -121,6 +125,7 @@ func TestIntegrationChaos_OneCronLeaderAndHandover(t *testing.T) {
 }
 
 func TestIntegrationChaos_DeliverFromManyInstances(t *testing.T) {
+	t.Parallel()
 	type msg struct{ From, N int }
 	var mu sync.Mutex
 	got := map[string]bool{}

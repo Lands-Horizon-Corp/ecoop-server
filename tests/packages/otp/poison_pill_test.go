@@ -13,6 +13,7 @@ import (
 // leak the code.
 
 func TestPoisonPill_HostileKeys(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx := ctxT(t)
 	for name, suffix := range map[string]string{
@@ -40,6 +41,7 @@ func TestPoisonPill_HostileKeys(t *testing.T) {
 }
 
 func TestPoisonPill_HostileGuesses(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx := ctxT(t)
 	for name, guess := range map[string]string{
@@ -72,6 +74,7 @@ func TestPoisonPill_HostileGuesses(t *testing.T) {
 }
 
 func TestPoisonPill_CodeNotTrimmedOrNormalised(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx, k := ctxT(t), key(t)
 	code, _ := o.Generate(ctx, k)
@@ -86,6 +89,7 @@ func TestPoisonPill_CodeNotTrimmedOrNormalised(t *testing.T) {
 }
 
 func TestPoisonPill_CallerCannotOverrideTheCode(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx, k := ctxT(t), key(t)
 	// A caller (or user input reaching Vars) setting Code must not change
@@ -103,6 +107,7 @@ func TestPoisonPill_CallerCannotOverrideTheCode(t *testing.T) {
 }
 
 func TestPoisonPill_StoredValueIsNotTheCode(t *testing.T) {
+	t.Parallel()
 	ch := newCache(t)
 	o := startOTP(t, secret, ch, mockSMTP(t), mockSMS(t))
 	ctx, k := ctxT(t), key(t)
@@ -117,6 +122,7 @@ func TestPoisonPill_StoredValueIsNotTheCode(t *testing.T) {
 }
 
 func TestPoisonPill_StolenHashUselessWithoutPepper(t *testing.T) {
+	t.Parallel()
 	// The same code hashed by a service with another secret must not verify:
 	// a leaked hash is useless without the server's pepper.
 	ch := newCache(t)
@@ -130,6 +136,7 @@ func TestPoisonPill_StolenHashUselessWithoutPepper(t *testing.T) {
 }
 
 func TestPoisonPill_LockoutCannotBeResetByWrongKeys(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx, k, other := ctxT(t), key(t), key(t)
 	code, _ := o.Generate(ctx, k)

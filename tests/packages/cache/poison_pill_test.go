@@ -14,6 +14,7 @@ import (
 // corrupt data.
 
 func TestPoisonPill_HostileKeysAreBinarySafe(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	cases := map[string]string{
@@ -48,6 +49,7 @@ func TestPoisonPill_HostileKeysAreBinarySafe(t *testing.T) {
 }
 
 func TestPoisonPill_HostileValues(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	cases := map[string]string{
@@ -73,6 +75,7 @@ func TestPoisonPill_HostileValues(t *testing.T) {
 }
 
 func TestPoisonPill_PatternCannotEscapeNamespace(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	mine := key(t, "a")
@@ -102,6 +105,7 @@ func TestPoisonPill_PatternCannotEscapeNamespace(t *testing.T) {
 // INCR, so without care a non-numeric key gets a TTL it never had and
 // silently disappears later.
 func TestPoisonPill_FailedIncrDoesNotExpireKey(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -116,6 +120,7 @@ func TestPoisonPill_FailedIncrDoesNotExpireKey(t *testing.T) {
 }
 
 func TestPoisonPill_CyclicValue(t *testing.T) {
+	t.Parallel()
 	type node struct{ Next *node }
 	n := &node{}
 	n.Next = n
@@ -128,6 +133,7 @@ func TestPoisonPill_CyclicValue(t *testing.T) {
 }
 
 func TestPoisonPill_ManyMembers(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -145,6 +151,7 @@ func TestPoisonPill_ManyMembers(t *testing.T) {
 }
 
 func TestPoisonPill_ErrorsAreDistinguishable(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)

@@ -27,6 +27,7 @@ const (
 )
 
 func TestIntegrationChaos_ClusterWithRandomFaults(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	nodes := []qr.QRServices{newStarted(t), newStarted(t), newStarted(t)}
 	rogue := newStartedWithSecret(t, "rogue")
@@ -71,6 +72,7 @@ func TestIntegrationChaos_ClusterWithRandomFaults(t *testing.T) {
 }
 
 func TestIntegrationChaos_SecretRotation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	oldNode := newStartedWithSecret(t, "qr-v1")
 	newNode := newStartedWithSecret(t, "qr-v2")
@@ -85,6 +87,7 @@ func TestIntegrationChaos_SecretRotation(t *testing.T) {
 }
 
 func TestIntegrationChaos_PrintedBeforeRestartScannedAfter(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := qr.NewQRServices(testSecret, nil)
 	if err := svc.Start(ctx); err != nil {
@@ -104,6 +107,7 @@ func TestIntegrationChaos_PrintedBeforeRestartScannedAfter(t *testing.T) {
 }
 
 func TestIntegrationChaos_URLTransport(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newStarted(t)
 	in := qr.QRData{Data: "?&=+/ #%", Type: "url"}

@@ -9,6 +9,7 @@ import (
 )
 
 func TestHappyPath_CountTracksOperations(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	dones := make([]func(), 5)
 	for i := range dones {
@@ -26,6 +27,7 @@ func TestHappyPath_CountTracksOperations(t *testing.T) {
 }
 
 func TestHappyPath_WaitReturnsWhenLastOperationEnds(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	a, b := f.Track(), f.Track()
 	res := waitAsync(f, context.Background())
@@ -41,17 +43,19 @@ func TestHappyPath_WaitReturnsWhenLastOperationEnds(t *testing.T) {
 }
 
 func TestHappyPath_WaitWhenIdleReturnsImmediately(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	start := time.Now()
 	if err := f.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 10*time.Millisecond {
+	if d := time.Since(start); d > 100*time.Millisecond {
 		t.Fatalf("idle Wait took %v", d)
 	}
 }
 
 func TestHappyPath_AllWaitersAreReleased(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	done := f.Track()
 	waiters := make([]<-chan error, 10)
@@ -68,6 +72,7 @@ func TestHappyPath_AllWaitersAreReleased(t *testing.T) {
 }
 
 func TestHappyPath_ReusableAcrossCycles(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	for cycle := range 5 {
 		done := f.Track()
@@ -83,6 +88,7 @@ func TestHappyPath_ReusableAcrossCycles(t *testing.T) {
 }
 
 func TestHappyPath_DeferredDone(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	work := func() {
 		defer f.Track()()

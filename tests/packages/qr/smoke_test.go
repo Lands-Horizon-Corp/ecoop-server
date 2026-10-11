@@ -9,6 +9,7 @@ import (
 
 // Smoke: the full lifecycle works once with sane input.
 func TestSmoke(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := qr.NewQRServices(testSecret, nil)
 	if err := svc.Start(ctx); err != nil {

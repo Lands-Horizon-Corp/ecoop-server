@@ -10,6 +10,7 @@ import (
 )
 
 func TestHappyPath_RoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newStarted(t)
 	cases := map[string]qr.QRData{
@@ -37,6 +38,7 @@ func TestHappyPath_RoundTrip(t *testing.T) {
 }
 
 func TestHappyPath_OutputIsStdBase64(t *testing.T) {
+	t.Parallel()
 	enc := mustEncode(t, newStarted(t), &qr.QRData{Data: "x", Type: "y"})
 	if _, err := base64.StdEncoding.DecodeString(enc); err != nil {
 		t.Fatalf("output is not standard base64: %v", err)
@@ -44,6 +46,7 @@ func TestHappyPath_OutputIsStdBase64(t *testing.T) {
 }
 
 func TestHappyPath_OutputHidesContent(t *testing.T) {
+	t.Parallel()
 	enc := mustEncode(t, newStarted(t), &qr.QRData{Data: "SECRET-MARKER", Type: "TYPE-MARKER"})
 	raw, _ := base64.StdEncoding.DecodeString(enc)
 	for _, s := range []string{enc, string(raw)} {
@@ -54,6 +57,7 @@ func TestHappyPath_OutputHidesContent(t *testing.T) {
 }
 
 func TestHappyPath_NonceMakesOutputUnique(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	d := &qr.QRData{Data: "same", Type: "same"}
 	if mustEncode(t, svc, d) == mustEncode(t, svc, d) {
@@ -62,6 +66,7 @@ func TestHappyPath_NonceMakesOutputUnique(t *testing.T) {
 }
 
 func TestHappyPath_CompressionShrinksRepetitiveData(t *testing.T) {
+	t.Parallel()
 	d := &qr.QRData{Data: strings.Repeat("A", 10_000), Type: "bulk"}
 	enc := mustEncode(t, newStarted(t), d)
 	if len(enc) >= len(d.Data) {
@@ -70,6 +75,7 @@ func TestHappyPath_CompressionShrinksRepetitiveData(t *testing.T) {
 }
 
 func TestHappyPath_SameSecretInteroperates(t *testing.T) {
+	t.Parallel()
 	a, b := newStartedWithSecret(t, "shared"), newStartedWithSecret(t, "shared")
 	in := qr.QRData{Data: "cross", Type: "node"}
 	out, err := b.Decode(context.Background(), mustEncode(t, a, &in))
@@ -79,6 +85,7 @@ func TestHappyPath_SameSecretInteroperates(t *testing.T) {
 }
 
 func TestHappyPath_RestartKeepsWorking(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := qr.NewQRServices(testSecret, nil)
 	for i := range 3 {
@@ -100,6 +107,7 @@ func TestHappyPath_RestartKeepsWorking(t *testing.T) {
 }
 
 func TestHappyPath_InputNotMutated(t *testing.T) {
+	t.Parallel()
 	in := &qr.QRData{Data: "keep", Type: "me"}
 	mustEncode(t, newStarted(t), in)
 	if in.Data != "keep" || in.Type != "me" {

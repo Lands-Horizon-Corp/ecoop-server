@@ -15,6 +15,7 @@ import (
 // loop forever, or lose jobs.
 
 func TestPoisonPill_UndecodablePayloadIsNotRetried(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var calls atomic.Int64
 	typ := taskType(t, "typed")
@@ -29,6 +30,7 @@ func TestPoisonPill_UndecodablePayloadIsNotRetried(t *testing.T) {
 }
 
 func TestPoisonPill_PanickingHandlerDoesNotKillTheWorker(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	bad, good := taskType(t, "panics"), taskType(t, "fine")
 	q.Handle(bad, func(context.Context, []byte) error { panic("handler bug") })
@@ -45,6 +47,7 @@ func TestPoisonPill_PanickingHandlerDoesNotKillTheWorker(t *testing.T) {
 }
 
 func TestPoisonPill_HostileTaskTypesAndPayloads(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	cases := map[string]any{
 		"spaces and colons": "a:b c:d",
@@ -70,6 +73,7 @@ func TestPoisonPill_HostileTaskTypesAndPayloads(t *testing.T) {
 }
 
 func TestPoisonPill_JobTypeWithNoHandlerWaitsForOne(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	typ := taskType(t, "late-handler")
 	if _, err := q.Enqueue(ctxT(t), typ, nil); err != nil {
@@ -85,6 +89,7 @@ func TestPoisonPill_JobTypeWithNoHandlerWaitsForOne(t *testing.T) {
 }
 
 func TestPoisonPill_RetryAfterIsNotLostWithoutRetriesLeft(t *testing.T) {
+	t.Parallel()
 	// A job with no retries left (MaxRetry(0)) that is rate limited must wait
 	// for the next window, not be archived.
 	q := newQueue(t)
@@ -100,6 +105,7 @@ func TestPoisonPill_RetryAfterIsNotLostWithoutRetriesLeft(t *testing.T) {
 }
 
 func TestPoisonPill_DegenerateRateLimits(t *testing.T) {
+	t.Parallel()
 	// A misconfigured limit must not stop the job type from running.
 	cases := map[string]queue.Option{
 		"zero count":      queue.RateLimit(0, time.Second),
@@ -122,6 +128,7 @@ func TestPoisonPill_DegenerateRateLimits(t *testing.T) {
 }
 
 func TestPoisonPill_HandlerErrorsAreKeptForErrorsIs(t *testing.T) {
+	t.Parallel()
 	sentinel := errors.New("sentinel")
 	err := queue.RetryAfter(time.Second, sentinel)
 	if !errors.Is(err, sentinel) || err.Error() != "sentinel" {

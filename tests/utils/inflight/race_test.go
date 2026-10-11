@@ -12,6 +12,7 @@ import (
 // Sync & race: concurrent Track/done/Count/Wait. Run with `go test -race`.
 
 func TestRace_ConcurrentTrackDoneCountWait(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	var wg sync.WaitGroup
 	for range 64 {
@@ -39,6 +40,7 @@ func TestRace_ConcurrentTrackDoneCountWait(t *testing.T) {
 }
 
 func TestRace_WaitReleasedOnlyByTheLastDone(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	const n = 100
 	dones := make([]func(), n)
@@ -62,6 +64,7 @@ func TestRace_WaitReleasedOnlyByTheLastDone(t *testing.T) {
 }
 
 func TestRace_TrackDuringWait(t *testing.T) {
+	t.Parallel()
 	// New operations starting while someone waits must not corrupt state
 	// (the classic sync.WaitGroup reuse hazard).
 	f := utils.NewInflight()

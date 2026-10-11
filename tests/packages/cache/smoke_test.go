@@ -10,6 +10,7 @@ import (
 
 // Smoke: the lifecycle and one basic round trip.
 func TestSmoke(t *testing.T) {
+	t.Parallel()
 	requireServer(t)
 	ctx := ctxT(t)
 	svc := cache.NewCacheService([]string{testAddr}, testPassword, nil)

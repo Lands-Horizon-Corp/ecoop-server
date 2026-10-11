@@ -18,6 +18,7 @@ import (
 // under outages, restarts, slow networks and several instances.
 
 func TestIntegrationChaos_RateLimitHolds(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	to := inbox(t)
@@ -35,6 +36,7 @@ func TestIntegrationChaos_RateLimitHolds(t *testing.T) {
 }
 
 func TestIntegrationChaos_RateLimitIsSharedAcrossInstances(t *testing.T) {
+	t.Parallel()
 	// Two instances model two app replicas behind a load balancer: they share
 	// the queue and the rate limit counter, so together they respect it.
 	ctx := ctxT(t)
@@ -65,6 +67,7 @@ func TestIntegrationChaos_RateLimitIsSharedAcrossInstances(t *testing.T) {
 }
 
 func TestIntegrationChaos_RetriesAfterOutage(t *testing.T) {
+	t.Parallel()
 	p := newProxy(t)
 	before := failedDeliveries(t)
 	svc := newSMTP(t, serviceOpts{smtpAddr: p.Addr()})
@@ -88,6 +91,7 @@ func TestIntegrationChaos_RetriesAfterOutage(t *testing.T) {
 }
 
 func TestIntegrationChaos_NoEmailLostAcrossStop(t *testing.T) {
+	t.Parallel()
 	// Emails still queued, or mid-delivery, when Stop runs stay in the queue
 	// and go out after the next Start.
 	p := newProxy(t)
@@ -123,6 +127,7 @@ func TestIntegrationChaos_NoEmailLostAcrossStop(t *testing.T) {
 }
 
 func TestIntegrationChaos_StopRespectsItsDeadline(t *testing.T) {
+	t.Parallel()
 	// A delivery stuck on a stalled server must not hold Stop past its ctx.
 	svc := newSMTP(t, serviceOpts{smtpAddr: stalledServer(t)})
 	if err := svc.Start(context.Background()); err != nil {
@@ -144,6 +149,7 @@ func TestIntegrationChaos_StopRespectsItsDeadline(t *testing.T) {
 }
 
 func TestIntegrationChaos_RestartChurnUnderLoad(t *testing.T) {
+	t.Parallel()
 	svc := newSMTP(t, serviceOpts{})
 	if err := svc.Start(context.Background()); err != nil {
 		t.Fatal(err)
@@ -188,6 +194,7 @@ func TestIntegrationChaos_RestartChurnUnderLoad(t *testing.T) {
 }
 
 func TestIntegrationChaos_SharedTrackerDrainsWithOtherServices(t *testing.T) {
+	t.Parallel()
 	shared := utils.NewInflight()
 	svc := newSMTP(t, serviceOpts{inflight: shared})
 	if err := svc.Start(context.Background()); err != nil {
@@ -213,6 +220,7 @@ func TestIntegrationChaos_SharedTrackerDrainsWithOtherServices(t *testing.T) {
 }
 
 func TestIntegrationChaos_XSSUnderConcurrentLoad(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	to := inbox(t)

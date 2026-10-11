@@ -12,6 +12,7 @@ import (
 )
 
 func TestStartsClosed(t *testing.T) {
+	t.Parallel()
 	g := utils.NewGate(nil)
 	if g.IsOpen() {
 		t.Fatal("new gate is open")
@@ -22,6 +23,7 @@ func TestStartsClosed(t *testing.T) {
 }
 
 func TestOpenEnterDone(t *testing.T) {
+	t.Parallel()
 	g := utils.NewGate(nil)
 	g.Open()
 	done, ok := g.Enter()
@@ -38,6 +40,7 @@ func TestOpenEnterDone(t *testing.T) {
 }
 
 func TestCloseWaitsForWork(t *testing.T) {
+	t.Parallel()
 	g := utils.NewGate(nil)
 	g.Open()
 	done, _ := g.Enter()
@@ -59,6 +62,7 @@ func TestCloseWaitsForWork(t *testing.T) {
 }
 
 func TestCloseRespectsDeadline(t *testing.T) {
+	t.Parallel()
 	g := utils.NewGate(nil)
 	g.Open()
 	done, _ := g.Enter()
@@ -71,6 +75,7 @@ func TestCloseRespectsDeadline(t *testing.T) {
 }
 
 func TestCloseIsIdempotent(t *testing.T) {
+	t.Parallel()
 	g := utils.NewGate(nil)
 	for range 3 {
 		if err := g.Close(context.Background()); err != nil {
@@ -80,6 +85,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 }
 
 func TestReopen(t *testing.T) {
+	t.Parallel()
 	g := utils.NewGate(nil)
 	for range 3 {
 		g.Open()
@@ -95,6 +101,7 @@ func TestReopen(t *testing.T) {
 }
 
 func TestDoneTwiceIsHarmless(t *testing.T) {
+	t.Parallel()
 	inflight := utils.NewInflight()
 	g := utils.NewGate(inflight)
 	g.Open()
@@ -107,6 +114,7 @@ func TestDoneTwiceIsHarmless(t *testing.T) {
 }
 
 func TestSharedInflight(t *testing.T) {
+	t.Parallel()
 	// Two services sharing one tracker: closing one waits for the other's work.
 	shared := utils.NewInflight()
 	a, b := utils.NewGate(shared), utils.NewGate(shared)
@@ -125,6 +133,7 @@ func TestSharedInflight(t *testing.T) {
 }
 
 func TestNilGateActsClosed(t *testing.T) {
+	t.Parallel()
 	var g *utils.Gate
 	if g.IsOpen() {
 		t.Fatal("nil gate is open")
@@ -138,6 +147,7 @@ func TestNilGateActsClosed(t *testing.T) {
 }
 
 func TestConcurrentEnterAndClose(t *testing.T) {
+	t.Parallel()
 	// Run with -race. No work may be running once Close returns.
 	g := utils.NewGate(nil)
 	var running atomic.Int64

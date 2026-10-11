@@ -15,6 +15,7 @@ import (
 // contexts, nil receivers, and slices that must not alias each other.
 
 func TestZeroValue_ZeroConfigMustNotPanic(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cases := map[string]security.SecurityServices{
 		"all zero":        security.NewSecurityService("", 0, 0, 0, 0, 0),
@@ -35,6 +36,7 @@ func TestZeroValue_ZeroConfigMustNotPanic(t *testing.T) {
 }
 
 func TestZeroValue_ZeroSaltLengthStillSalts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := security.NewSecurityService(testSecret, testMemory, testIterations, testParallelism, 0, testKey)
 	var a, b string
@@ -52,6 +54,7 @@ func TestZeroValue_ZeroSaltLengthStillSalts(t *testing.T) {
 }
 
 func TestZeroValue_ZeroMemoryIsClampedNotCrashed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := security.NewSecurityService(testSecret, 0, testIterations, testParallelism, testSalt, testKey)
 	mustNotPanic(t, "zero memory", func() {
@@ -66,6 +69,7 @@ func TestZeroValue_ZeroMemoryIsClampedNotCrashed(t *testing.T) {
 }
 
 func TestZeroValue_EmptySecretStillWorks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newServiceWithSecret(t, "")
 	tok, err := svc.Encrypt(ctx, "x", time.Minute)
@@ -81,6 +85,7 @@ func TestZeroValue_EmptySecretStillWorks(t *testing.T) {
 }
 
 func TestZeroValue_EmptyPassword(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	hash, err := svc.GeneratePassword(ctx, "")
@@ -96,6 +101,7 @@ func TestZeroValue_EmptyPassword(t *testing.T) {
 }
 
 func TestZeroValue_EmptyHash(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	for _, h := range []string{"", "$", "$$$$$", "$argon2id$v=19$m=8192,t=1,p=2$$"} {
 		if ok, _ := svc.VerifyPassword(context.Background(), h, ""); ok {
@@ -105,6 +111,7 @@ func TestZeroValue_EmptyHash(t *testing.T) {
 }
 
 func TestZeroValue_EmptyPayloadAndToken(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	tok, err := svc.Encrypt(ctx, "", time.Minute)
@@ -120,6 +127,7 @@ func TestZeroValue_EmptyPayloadAndToken(t *testing.T) {
 }
 
 func TestZeroValue_ZeroAndNegativeTTL(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	for _, ttl := range []time.Duration{0, -time.Nanosecond, -time.Hour} {
@@ -134,6 +142,7 @@ func TestZeroValue_ZeroAndNegativeTTL(t *testing.T) {
 }
 
 func TestZeroValue_NilAndEmptyData(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	for name, in := range map[string][]byte{"nil": nil, "empty": {}} {
@@ -154,6 +163,7 @@ func TestZeroValue_NilAndEmptyData(t *testing.T) {
 }
 
 func TestZeroValue_NilAndEmptyCiphertext(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	for name, in := range map[string][]byte{"nil": nil, "empty": {}} {
 		t.Run(name, func(t *testing.T) {
@@ -166,6 +176,7 @@ func TestZeroValue_NilAndEmptyCiphertext(t *testing.T) {
 }
 
 func TestZeroValue_NilContext(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	var nilCtx context.Context // absent context
 	mustNotPanic(t, "nil ctx", func() {
@@ -187,6 +198,7 @@ func TestZeroValue_NilContext(t *testing.T) {
 // Dangling pointers: a nil *SecurityService (or nil interface) is a programming
 // error; these pin down that it fails loudly rather than silently using zero keys.
 func TestZeroValue_NilReceiverFailsLoudly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var ptr *security.SecurityService
 	var iface security.SecurityServices
@@ -208,6 +220,7 @@ func TestZeroValue_NilReceiverFailsLoudly(t *testing.T) {
 }
 
 func TestZeroValue_OutputsDoNotAliasInputs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 

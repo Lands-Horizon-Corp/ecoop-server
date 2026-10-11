@@ -10,9 +10,10 @@ import (
 
 // Smoke: start, ping, queue one typed job, see it run, stop.
 func TestSmoke(t *testing.T) {
+	t.Parallel()
 	requireValkey(t)
 	ctx := ctxT(t)
-	q := queue.NewQueueService(newCache(t, valkeyAddr))
+	q := queue.NewQueueService(newCache(t, valkeyAddr), queue.Namespace(ns(t)))
 	if err := q.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

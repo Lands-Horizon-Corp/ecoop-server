@@ -11,6 +11,7 @@ import (
 // secrets, nil contexts and nil receivers.
 
 func TestZeroValue_UnstartedServiceReturnsErrors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cases := map[string]qr.QRServices{
 		"constructed only": qr.NewQRServices(testSecret, nil),
@@ -38,6 +39,7 @@ func TestZeroValue_UnstartedServiceReturnsErrors(t *testing.T) {
 }
 
 func TestZeroValue_StoppedServiceReturnsErrors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := qr.NewQRServices(testSecret, nil)
 	if err := svc.Start(ctx); err != nil {
@@ -72,6 +74,7 @@ func TestZeroValue_StoppedServiceReturnsErrors(t *testing.T) {
 }
 
 func TestZeroValue_NilData(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	var enc string
 	var err error
@@ -82,6 +85,7 @@ func TestZeroValue_NilData(t *testing.T) {
 }
 
 func TestZeroValue_EmptyData(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newStarted(t)
 	enc := mustEncode(t, svc, &qr.QRData{})
@@ -92,6 +96,7 @@ func TestZeroValue_EmptyData(t *testing.T) {
 }
 
 func TestZeroValue_DecodeFailuresReturnZeroValue(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	for _, in := range []string{"", "!!", "AAAA", forge(t, testSecret, []byte(`{"data":1}`), true)} {
 		out, err := svc.Decode(context.Background(), in)
@@ -105,6 +110,7 @@ func TestZeroValue_DecodeFailuresReturnZeroValue(t *testing.T) {
 }
 
 func TestZeroValue_EmptySecretIsIsolated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	empty := newStartedWithSecret(t, "")
 	in := qr.QRData{Data: "x"}
@@ -118,6 +124,7 @@ func TestZeroValue_EmptySecretIsIsolated(t *testing.T) {
 }
 
 func TestZeroValue_NilContext(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	var nilCtx context.Context
 	mustNotPanic(t, "nil ctx", func() {
@@ -135,6 +142,7 @@ func TestZeroValue_NilContext(t *testing.T) {
 // Dangling pointers: a nil *QRService or nil interface is a programming
 // error and must fail loudly rather than silently produce output.
 func TestZeroValue_NilReceiverFailsLoudly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var ptr *qr.QRService
 	var iface qr.QRServices

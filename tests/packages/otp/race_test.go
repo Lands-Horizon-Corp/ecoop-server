@@ -13,6 +13,7 @@ import (
 // Sync & race: one service under concurrent use. Run with -race.
 
 func TestRace_ConcurrentRightGuessesOneWins(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	for round := range 20 {
 		k := key(t)
@@ -34,6 +35,7 @@ func TestRace_ConcurrentRightGuessesOneWins(t *testing.T) {
 }
 
 func TestRace_ConcurrentGenerateOneCodeSurvives(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	k := key(t)
 	const n = 4 // below MaxAttempts so every code can be tried
@@ -55,6 +57,7 @@ func TestRace_ConcurrentGenerateOneCodeSurvives(t *testing.T) {
 }
 
 func TestRace_ManyKeysInParallel(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	var wg sync.WaitGroup
 	for range 32 {
@@ -78,6 +81,7 @@ func TestRace_ManyKeysInParallel(t *testing.T) {
 }
 
 func TestRace_StopDuringTraffic(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	stop := make(chan struct{})
 	var wg sync.WaitGroup

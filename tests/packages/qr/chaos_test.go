@@ -33,6 +33,7 @@ func randString(r *rand.Rand, n int) string {
 }
 
 func TestChaos_EveryBitFlipIsDetected(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	raw, _ := base64.StdEncoding.DecodeString(mustEncode(t, svc, &qr.QRData{Data: "loan:7", Type: "ledger"}))
 	for i := range raw {
@@ -47,6 +48,7 @@ func TestChaos_EveryBitFlipIsDetected(t *testing.T) {
 }
 
 func TestChaos_RandomGarbageNeverPanics(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	r := chaosRand(t)
 	for range 3000 {
@@ -65,6 +67,7 @@ func TestChaos_RandomGarbageNeverPanics(t *testing.T) {
 }
 
 func TestChaos_RandomDataRoundTrips(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newStarted(t)
 	r := chaosRand(t)
@@ -79,6 +82,7 @@ func TestChaos_RandomDataRoundTrips(t *testing.T) {
 }
 
 func TestChaos_RandomTransportDamage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newStarted(t)
 	r := chaosRand(t)
@@ -104,6 +108,7 @@ func TestChaos_RandomTransportDamage(t *testing.T) {
 }
 
 func TestChaos_DeadContexts(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()

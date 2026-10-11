@@ -40,6 +40,7 @@ func allOps(ctx context.Context, k string) []op {
 }
 
 func TestZeroValue_NotRunningReturnsErrNotRunning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	services := map[string]cache.CacheServices{
 		"constructed only": cache.NewCacheService([]string{"127.0.0.1:1"}, "pw", nil),
@@ -62,6 +63,7 @@ func TestZeroValue_NotRunningReturnsErrNotRunning(t *testing.T) {
 }
 
 func TestZeroValue_StoppedReturnsErrNotRunning(t *testing.T) {
+	t.Parallel()
 	svc := newRunning(t)
 	ctx := context.Background()
 	_ = svc.Stop(ctx)
@@ -78,6 +80,7 @@ func TestZeroValue_StoppedReturnsErrNotRunning(t *testing.T) {
 }
 
 func TestZeroValue_StopIsIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for name, svc := range map[string]cache.CacheServices{
 		"never run":   cache.NewCacheService(nil, "", nil),
@@ -94,6 +97,7 @@ func TestZeroValue_StopIsIdempotent(t *testing.T) {
 }
 
 func TestZeroValue_ConfigIsACopy(t *testing.T) {
+	t.Parallel()
 	addrs := []string{"127.0.0.1:1"}
 	svc := cache.NewCacheService(addrs, "pw", nil)
 	cfg := svc.Config()
@@ -110,6 +114,7 @@ func TestZeroValue_ConfigIsACopy(t *testing.T) {
 }
 
 func TestZeroValue_NoAddresses(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for name, svc := range map[string]cache.CacheServices{
 		"nil slice":   cache.NewCacheService(nil, "", nil),
@@ -123,6 +128,7 @@ func TestZeroValue_NoAddresses(t *testing.T) {
 }
 
 func TestZeroValue_NilValues(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	var typedNil *struct{ A int }
@@ -151,6 +157,7 @@ func TestZeroValue_NilValues(t *testing.T) {
 }
 
 func TestZeroValue_EmptyValuesAreStored(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	for name, v := range map[string]any{"empty string": "", "empty bytes": []byte{}, "nil bytes": []byte(nil), "zero int": 0, "false": false} {
@@ -171,6 +178,7 @@ func TestZeroValue_EmptyValuesAreStored(t *testing.T) {
 }
 
 func TestZeroValue_EmptyKey(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	if err := svc.Set(ctx, "", "v", time.Minute); err != nil {
@@ -183,6 +191,7 @@ func TestZeroValue_EmptyKey(t *testing.T) {
 }
 
 func TestZeroValue_MissingKeysGiveEmptyResults(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -205,6 +214,7 @@ func TestZeroValue_MissingKeysGiveEmptyResults(t *testing.T) {
 }
 
 func TestZeroValue_TTLBoundaries(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 
@@ -243,6 +253,7 @@ func TestZeroValue_TTLBoundaries(t *testing.T) {
 }
 
 func TestZeroValue_NilContextIsAProgrammingError(t *testing.T) {
+	t.Parallel()
 	// Documents behaviour: a nil ctx reaches the valkey client, which panics.
 	svc := newRunning(t)
 	var nilCtx context.Context
@@ -252,6 +263,7 @@ func TestZeroValue_NilContextIsAProgrammingError(t *testing.T) {
 // Dangling pointers.
 
 func TestZeroValue_NilReceiverFailsLoudly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var ptr *cache.CacheService
 	var iface cache.CacheServices
@@ -267,6 +279,7 @@ func TestZeroValue_NilReceiverFailsLoudly(t *testing.T) {
 }
 
 func TestZeroValue_StaleClientHandleAfterStop(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	stale := svc.Client()

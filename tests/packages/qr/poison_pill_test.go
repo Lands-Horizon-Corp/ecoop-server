@@ -14,6 +14,7 @@ import (
 // Poison pill: inputs shaped to crash, stall, or corrupt the service.
 
 func TestPoisonPill_HostileEncodedStrings(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	cases := map[string]string{
 		"8MiB garbage":   strings.Repeat("A", 8<<20),
@@ -36,6 +37,7 @@ func TestPoisonPill_HostileEncodedStrings(t *testing.T) {
 }
 
 func TestPoisonPill_HostileFieldContentRoundTrips(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newStarted(t)
 	cases := map[string]qr.QRData{
@@ -61,6 +63,7 @@ func TestPoisonPill_HostileFieldContentRoundTrips(t *testing.T) {
 }
 
 func TestPoisonPill_ForgedJSONIsHandledSafely(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	cases := map[string]string{
 		"deep nesting":   `{"data":` + strings.Repeat(`[`, 10000) + strings.Repeat(`]`, 10000) + `}`,
@@ -81,6 +84,7 @@ func TestPoisonPill_ForgedJSONIsHandledSafely(t *testing.T) {
 // Even with a leaked secret, a tiny QR must not be able to expand into a
 // huge allocation (decompression bomb).
 func TestPoisonPill_DecompressionBomb(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	// Valid JSON, so the only thing that can stop it is a size limit on
 	// decompression (a JSON error would mask the 64MiB expansion).
@@ -98,6 +102,7 @@ func TestPoisonPill_DecompressionBomb(t *testing.T) {
 }
 
 func TestPoisonPill_ReplayIsNotDetected(t *testing.T) {
+	t.Parallel()
 	// Documents current behaviour: QR codes carry no expiry or nonce
 	// tracking, so the same code decodes forever. Callers must enforce
 	// freshness themselves (e.g. a timestamp inside Data).

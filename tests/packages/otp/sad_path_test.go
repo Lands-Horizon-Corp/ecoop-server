@@ -13,6 +13,7 @@ import (
 )
 
 func TestSadPath_StartMissingEverything(t *testing.T) {
+	t.Parallel()
 	err := otp.NewOTPService("", nil, nil, nil, nil, nil).Start(context.Background())
 	for _, want := range []error{otp.ErrNoSecret, otp.ErrNoSecurity, otp.ErrNoCache, otp.ErrNoSMTP, otp.ErrNoSMS} {
 		if !errors.Is(err, want) {
@@ -22,6 +23,7 @@ func TestSadPath_StartMissingEverything(t *testing.T) {
 }
 
 func TestSadPath_StartUnreachableDependencies(t *testing.T) {
+	t.Parallel()
 	requireInfra(t)
 	stopped := cache.NewCacheService([]string{valkeyAddr}, valkeyPassword, nil) // never Run
 	unstartedSMTP := smtp.NewSMTPService("h", 25, "", "", "a@ecoop.test", "", true, nil, nil)
@@ -35,6 +37,7 @@ func TestSadPath_StartUnreachableDependencies(t *testing.T) {
 }
 
 func TestSadPath_NotStarted(t *testing.T) {
+	t.Parallel()
 	requireInfra(t)
 	o := otp.NewOTPService(secret, newSecurity(), newCache(t), mockSMTP(t), mockSMS(t), nil)
 	ctx := ctxT(t)
@@ -61,6 +64,7 @@ func TestSadPath_NotStarted(t *testing.T) {
 }
 
 func TestSadPath_EmptyKey(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx := ctxT(t)
 	if _, err := o.Generate(ctx, ""); !errors.Is(err, otp.ErrEmptyKey) {
@@ -75,6 +79,7 @@ func TestSadPath_EmptyKey(t *testing.T) {
 }
 
 func TestSadPath_WrongMissingAndExpired(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx := ctxT(t)
 
@@ -101,6 +106,7 @@ func TestSadPath_WrongMissingAndExpired(t *testing.T) {
 }
 
 func TestSadPath_TooManyAttempts(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx, k := ctxT(t), key(t)
 	code, _ := o.Generate(ctx, k)
@@ -118,6 +124,7 @@ func TestSadPath_TooManyAttempts(t *testing.T) {
 }
 
 func TestSadPath_SendFailureRevokesTheCode(t *testing.T) {
+	t.Parallel()
 	ch := newCache(t)
 	o := startOTP(t, secret, ch, mockSMTP(t), mockSMS(t))
 	ctx := ctxT(t)
@@ -149,6 +156,7 @@ func TestSadPath_SendFailureRevokesTheCode(t *testing.T) {
 }
 
 func TestSadPath_CacheGoesAway(t *testing.T) {
+	t.Parallel()
 	ch := newCache(t)
 	o := startOTP(t, secret, ch, mockSMTP(t), mockSMS(t))
 	ctx, k := ctxT(t), key(t)

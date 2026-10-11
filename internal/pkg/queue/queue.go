@@ -22,6 +22,7 @@ import (
 
 type QueueService struct {
 	cache    cache.CacheServices
+	ns       string // prefixes queue names, the leader lock and rate counters
 	inflight *utils.Inflight
 	id       string   // this instance, for scheduler leadership
 	routes   sync.Map // task type -> route
@@ -45,6 +46,7 @@ type route struct {
 
 // settings is what a list of Options adds up to.
 type settings struct {
+	queue   string // base queue name (Critical, Default, Low); Default if empty
 	enqueue []asynq.Option
 	limit   int64
 	per     time.Duration
@@ -59,16 +61,41 @@ type retryAfterError struct {
 func (e *retryAfterError) Error() string { return e.err.Error() }
 func (e *retryAfterError) Unwrap() error { return e.err }
 
-func NewQueueService(cache cache.CacheServices) QueueServices {
+func NewQueueService(cache cache.CacheServices, opts ...ServiceOption) QueueServices {
 	id := make([]byte, 16)
 	_, _ = rand.Read(id)
-	return &QueueService{
+	q := &QueueService{
 		cache:    cache,
 		inflight: utils.NewInflight(),
 		id:       hex.EncodeToString(id),
 		cron:     cron.New(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(q)
+		}
+	}
+	return q
 }
+
+// Namespace isolates this service's jobs from every service with another
+// namespace on the same Valkey: its queue names, scheduler leader lock and
+// rate-limit counters are prefixed with ns. Instances that should share work
+// (the replicas of one app) use the same namespace; the default is none.
+func Namespace(ns string) ServiceOption {
+	return func(q *QueueService) { q.ns = ns }
+}
+
+// QueueName is the full name of a base queue (Critical, Default, Low) in
+// namespace ns, as asynq and its inspector see it.
+func QueueName(ns, base string) string {
+	if ns == "" {
+		return base
+	}
+	return ns + ":" + base
+}
+
+func (q *QueueService) name(base string) string { return QueueName(q.ns, base) }
 
 // Lifecycle
 
@@ -90,7 +117,7 @@ func (q *QueueService) Start(ctx context.Context) error {
 	client := asynq.NewClient(conn)
 	worker := asynq.NewServer(conn, asynq.Config{
 		Concurrency:              Concurrency,
-		Queues:                   map[string]int{Critical: 6, Default: 3, Low: 1},
+		Queues:                   map[string]int{q.name(Critical): 6, q.name(Default): 3, q.name(Low): 1},
 		RetryDelayFunc:           retryDelay,
 		IsFailure:                func(err error) bool { _, later := errors.AsType[*retryAfterError](err); return !later },
 		ShutdownTimeout:          ShutdownTimeout,
@@ -187,7 +214,12 @@ func (q *QueueService) Enqueue(ctx context.Context, taskType string, payload any
 	if err != nil {
 		return "", err
 	}
-	info, err := q.client.EnqueueContext(ctx, asynq.NewTask(taskType, data), apply(opts).enqueue...)
+	set := apply(opts)
+	base := set.queue
+	if base == "" {
+		base = Default
+	}
+	info, err := q.client.EnqueueContext(ctx, asynq.NewTask(taskType, data), append(set.enqueue, asynq.Queue(q.name(base)))...)
 	if err != nil {
 		return "", err
 	}
@@ -222,7 +254,7 @@ func (q *QueueService) run(ctx context.Context, t *asynq.Task) error {
 	if r.limit > 0 {
 		now := time.Now()
 		window := now.UnixNano() / int64(r.per)
-		n, err := q.cache.Incr(ctx, RateLimitKeyPrefix+t.Type()+":"+strconv.FormatInt(window, 10), 2*r.per)
+		n, err := q.cache.Incr(ctx, q.name(RateLimitKeyPrefix)+t.Type()+":"+strconv.FormatInt(window, 10), 2*r.per)
 		if err != nil {
 			return err
 		}
@@ -338,7 +370,7 @@ func (q *QueueService) lead(ctx context.Context) {
 		client := q.cache.Client()
 		leads := false
 		if client != nil {
-			n, err := leadScript.Exec(ctx, client, []string{LeaderKey}, []string{q.id, ttl}).AsInt64()
+			n, err := leadScript.Exec(ctx, client, []string{q.name(LeaderKey)}, []string{q.id, ttl}).AsInt64()
 			leads = err == nil && n == 1
 		}
 		q.leader.Store(leads)
@@ -348,7 +380,7 @@ func (q *QueueService) lead(ctx context.Context) {
 			q.leader.Store(false)
 			if client := q.cache.Client(); client != nil {
 				resign, cancel := context.WithTimeout(context.Background(), time.Second)
-				_ = resignScript.Exec(resign, client, []string{LeaderKey}, []string{q.id}).Error()
+				_ = resignScript.Exec(resign, client, []string{q.name(LeaderKey)}, []string{q.id}).Error()
 				cancel()
 			}
 			return
@@ -358,7 +390,9 @@ func (q *QueueService) lead(ctx context.Context) {
 
 // Options
 
-func Priority(queue string) Option    { return enqueueOption(asynq.Queue(queue)) }
+// Priority puts the job on a base queue: Critical, Default or Low.
+func Priority(queue string) Option { return func(s *settings) { s.queue = queue } }
+
 func MaxRetry(n int) Option           { return enqueueOption(asynq.MaxRetry(n)) }
 func Timeout(d time.Duration) Option  { return enqueueOption(asynq.Timeout(d)) }
 func Delay(d time.Duration) Option    { return enqueueOption(asynq.ProcessIn(d)) }

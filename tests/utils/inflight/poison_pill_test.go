@@ -12,6 +12,7 @@ import (
 // Poison pill: misuse that would corrupt the count or deadlock a naive tracker.
 
 func TestPoisonPill_DoneCalledManyTimes(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	keep := f.Track()
 	done := f.Track()
@@ -32,6 +33,7 @@ func TestPoisonPill_DoneCalledManyTimes(t *testing.T) {
 }
 
 func TestPoisonPill_DoneCalledConcurrently(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	keep := f.Track()
 	done := f.Track()
@@ -47,6 +49,7 @@ func TestPoisonPill_DoneCalledConcurrently(t *testing.T) {
 }
 
 func TestPoisonPill_StaleDoneFromEarlierCycle(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	stale := f.Track()
 	stale()
@@ -61,6 +64,7 @@ func TestPoisonPill_StaleDoneFromEarlierCycle(t *testing.T) {
 }
 
 func TestPoisonPill_DoneOnAnotherGoroutine(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	done := f.Track()
 	go func() {
@@ -73,6 +77,7 @@ func TestPoisonPill_DoneOnAnotherGoroutine(t *testing.T) {
 }
 
 func TestPoisonPill_ManyOperations(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	const n = 200_000
 	dones := make([]func(), n)
@@ -91,6 +96,7 @@ func TestPoisonPill_ManyOperations(t *testing.T) {
 }
 
 func TestPoisonPill_DoneNeverCalledDoesNotHangWithDeadline(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	_ = f.Track() // leaked: caller forgot done
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)

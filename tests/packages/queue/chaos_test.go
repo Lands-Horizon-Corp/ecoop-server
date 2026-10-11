@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
+	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/qns"
 )
 
 // Chaos: random handler outcomes, dropped connections and lifecycle churn.
@@ -21,6 +22,7 @@ func seed(t *testing.T) uint64 {
 }
 
 func TestChaos_RandomOutcomesAllSettle(t *testing.T) {
+	t.Parallel()
 	// Every job either succeeds (eventually) or is archived; none is lost
 	// or stuck.
 	q := newQueue(t)
@@ -62,6 +64,7 @@ func TestChaos_RandomOutcomesAllSettle(t *testing.T) {
 }
 
 func TestChaos_ConnectionDropsLoseNoQueuedJob(t *testing.T) {
+	t.Parallel()
 	// A connection cut mid-job leaves it "active" until asynq's recoverer
 	// reclaims it (lease expiry, up to ~90s). So every acknowledged job must
 	// have run or still be in the queue to be retried, never vanish.
@@ -88,7 +91,7 @@ func TestChaos_ConnectionDropsLoseNoQueuedJob(t *testing.T) {
 	}
 	t.Logf("%d of 40 enqueues acknowledged across drops", len(queued))
 	time.Sleep(3 * time.Second)
-	in := inspector()
+	in := qns.Inspector(valkeyAddr, valkeyPassword)
 	defer in.Close()
 	mu.Lock()
 	defer mu.Unlock()
@@ -97,7 +100,7 @@ func TestChaos_ConnectionDropsLoseNoQueuedJob(t *testing.T) {
 		if ran[key] {
 			continue
 		}
-		if _, err := in.GetTaskInfo(queue.Default, id); err != nil {
+		if _, err := in.GetTaskInfo(queue.QueueName(ns(t), queue.Default), id); err != nil {
 			t.Errorf("job %s (%s) neither ran nor is in the queue: %v", key, id, err)
 		}
 		pending++
@@ -106,6 +109,7 @@ func TestChaos_ConnectionDropsLoseNoQueuedJob(t *testing.T) {
 }
 
 func TestChaos_LifecycleChurnUnderLoad(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	typ := taskType(t, "churn")
 	var mu sync.Mutex

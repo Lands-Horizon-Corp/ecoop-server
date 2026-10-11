@@ -11,6 +11,7 @@ import (
 )
 
 func TestSadPath_StartFailures(t *testing.T) {
+	t.Parallel()
 	requireValkey(t)
 	ctx := ctxT(t)
 	if err := queue.NewQueueService(nil).Start(ctx); !errors.Is(err, queue.ErrNoCache) {
@@ -28,9 +29,10 @@ func TestSadPath_StartFailures(t *testing.T) {
 }
 
 func TestSadPath_NotStarted(t *testing.T) {
+	t.Parallel()
 	requireValkey(t)
 	ctx := ctxT(t)
-	q := queue.NewQueueService(newCache(t, valkeyAddr))
+	q := queue.NewQueueService(newCache(t, valkeyAddr), queue.Namespace(ns(t)))
 	if _, err := q.Enqueue(ctx, "t", nil); !errors.Is(err, queue.ErrNotStarted) {
 		t.Errorf("Enqueue before Start = %v", err)
 	}
@@ -40,7 +42,6 @@ func TestSadPath_NotStarted(t *testing.T) {
 	if err := q.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(purgeQueues)
 	_ = q.Stop(context.Background())
 	if _, err := q.Enqueue(ctx, "t", nil); !errors.Is(err, queue.ErrNotStarted) {
 		t.Errorf("Enqueue after Stop = %v", err)
@@ -48,6 +49,7 @@ func TestSadPath_NotStarted(t *testing.T) {
 }
 
 func TestSadPath_UnencodablePayload(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	for name, p := range map[string]any{"chan": make(chan int), "func": func() {}, "complex": complex(1, 2)} {
 		if _, err := q.Enqueue(ctxT(t), taskType(t, name), p); err == nil {
@@ -60,6 +62,7 @@ func TestSadPath_UnencodablePayload(t *testing.T) {
 }
 
 func TestSadPath_BadSchedules(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	for _, spec := range []string{"", "not a spec", "* * *", "61 * * * *", "@every nope"} {
 		if _, err := q.Schedule(spec, taskType(t, "bad"), nil); err == nil {
@@ -74,6 +77,7 @@ func TestSadPath_BadSchedules(t *testing.T) {
 }
 
 func TestSadPath_FailuresAreRetriedThenArchived(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "failing")
@@ -88,6 +92,7 @@ func TestSadPath_FailuresAreRetriedThenArchived(t *testing.T) {
 }
 
 func TestSadPath_SkipRetryGivesUpAtOnce(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "skip")
@@ -100,6 +105,7 @@ func TestSadPath_SkipRetryGivesUpAtOnce(t *testing.T) {
 }
 
 func TestSadPath_DeadContext(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -109,6 +115,7 @@ func TestSadPath_DeadContext(t *testing.T) {
 }
 
 func TestSadPath_StopRespectsDeadline(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	typ := taskType(t, "slow")
 	started := make(chan struct{})

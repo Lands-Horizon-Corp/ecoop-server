@@ -10,6 +10,7 @@ import (
 )
 
 func TestSadPath_WaitDeadlineWhileBusy(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	done := f.Track()
 	defer done()
@@ -30,6 +31,7 @@ func TestSadPath_WaitDeadlineWhileBusy(t *testing.T) {
 }
 
 func TestSadPath_WaitCancelledWhileBusy(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	defer f.Track()()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -41,6 +43,7 @@ func TestSadPath_WaitCancelledWhileBusy(t *testing.T) {
 }
 
 func TestSadPath_DeadCtxButIdleSucceeds(t *testing.T) {
+	t.Parallel()
 	// Nothing to wait for, so a dead ctx is irrelevant: idle wins.
 	f := utils.NewInflight()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -51,6 +54,7 @@ func TestSadPath_DeadCtxButIdleSucceeds(t *testing.T) {
 }
 
 func TestSadPath_TimedOutWaitThenDrain(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	done := f.Track()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)

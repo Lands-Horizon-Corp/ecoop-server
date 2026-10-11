@@ -16,6 +16,7 @@ import (
 // Valkey, and real email delivery under a burst.
 
 func TestIntegrationChaos_GenerateOnOneVerifyOnAnother(t *testing.T) {
+	t.Parallel()
 	a := startOTP(t, secret, newCache(t), mockSMTP(t), mockSMS(t))
 	b := startOTP(t, secret, newCache(t), mockSMTP(t), mockSMS(t))
 	ctx, k := ctxT(t), key(t)
@@ -29,6 +30,7 @@ func TestIntegrationChaos_GenerateOnOneVerifyOnAnother(t *testing.T) {
 }
 
 func TestIntegrationChaos_OneWinnerAcrossInstances(t *testing.T) {
+	t.Parallel()
 	var instances []otp.OTPServices
 	for range otp.MaxAttempts {
 		instances = append(instances, startOTP(t, secret, newCache(t), mockSMTP(t), mockSMS(t)))
@@ -53,6 +55,7 @@ func TestIntegrationChaos_OneWinnerAcrossInstances(t *testing.T) {
 }
 
 func TestIntegrationChaos_AttemptsSharedAcrossInstances(t *testing.T) {
+	t.Parallel()
 	a := startOTP(t, secret, newCache(t), mockSMTP(t), mockSMS(t))
 	b := startOTP(t, secret, newCache(t), mockSMTP(t), mockSMS(t))
 	ctx, k := ctxT(t), key(t)
@@ -70,6 +73,7 @@ func TestIntegrationChaos_AttemptsSharedAcrossInstances(t *testing.T) {
 }
 
 func TestIntegrationChaos_EmailBurst(t *testing.T) {
+	t.Parallel()
 	ch := newCache(t)
 	q := newQueue(t, ch)
 	o := startOTP(t, secret, ch, realSMTP(t, q), mockSMS(t))

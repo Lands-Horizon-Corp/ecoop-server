@@ -17,6 +17,7 @@ import (
 // inputs, nil contexts and nil receivers.
 
 func TestZeroValue_ZeroStruct(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	o := &otp.OTPService{}
 	mustNotPanic(t, "zero struct", func() {
@@ -39,6 +40,7 @@ func TestZeroValue_ZeroStruct(t *testing.T) {
 }
 
 func TestZeroValue_StopIsIdempotent(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	for range 3 {
 		if err := o.Stop(context.Background()); err != nil {
@@ -48,6 +50,7 @@ func TestZeroValue_StopIsIdempotent(t *testing.T) {
 }
 
 func TestZeroValue_TypedNilDependencies(t *testing.T) {
+	t.Parallel()
 	// A nil *CacheService (etc.) stored in an interface is not == nil. Start
 	// must report it as missing, not crash calling Ping on it.
 	var ch *cache.CacheService
@@ -63,6 +66,7 @@ func TestZeroValue_TypedNilDependencies(t *testing.T) {
 }
 
 func TestZeroValue_EmptyInputs(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx, k := ctxT(t), key(t)
 	_, _ = o.Generate(ctx, k)
@@ -78,6 +82,7 @@ func TestZeroValue_EmptyInputs(t *testing.T) {
 }
 
 func TestZeroValue_NilContext(t *testing.T) {
+	t.Parallel()
 	// A nil ctx is a programming error: it must fail fast, not hang.
 	o := newOTP(t)
 	var nilCtx context.Context
@@ -96,6 +101,7 @@ func TestZeroValue_NilContext(t *testing.T) {
 // Dangling pointers: a nil *OTPService or nil interface is a wiring bug and
 // must fail loudly.
 func TestZeroValue_NilReceiver(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var ptr *otp.OTPService
 	var iface otp.OTPServices

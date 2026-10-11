@@ -21,6 +21,7 @@ func seed(t *testing.T) uint64 {
 }
 
 func TestChaos_RandomOpsMatchModel(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx := ctxT(t)
 	r := rand.New(rand.NewPCG(seed(t), 1))
@@ -81,6 +82,7 @@ func TestChaos_RandomOpsMatchModel(t *testing.T) {
 }
 
 func TestChaos_RandomDeadlines(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	r := rand.New(rand.NewPCG(seed(t), 2))
 	for i := range 100 {
@@ -101,6 +103,7 @@ func TestChaos_RandomDeadlines(t *testing.T) {
 }
 
 func TestChaos_ConnectionDrops(t *testing.T) {
+	t.Parallel()
 	p := newProxy(t)
 	o := startOTP(t, secret, newCache(t, p.Addr()), mockSMTP(t), mockSMS(t))
 	ctx := ctxT(t)

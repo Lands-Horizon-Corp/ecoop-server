@@ -9,6 +9,7 @@ import (
 
 // Smoke: every public operation works once with sane config.
 func TestSmoke(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 

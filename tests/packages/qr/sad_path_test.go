@@ -10,6 +10,7 @@ import (
 )
 
 func TestSadPath_WrongSecret(t *testing.T) {
+	t.Parallel()
 	enc := mustEncode(t, newStartedWithSecret(t, "secret-a"), &qr.QRData{Data: "x"})
 	out, err := newStartedWithSecret(t, "secret-b").Decode(context.Background(), enc)
 	if err == nil {
@@ -21,6 +22,7 @@ func TestSadPath_WrongSecret(t *testing.T) {
 }
 
 func TestSadPath_MalformedInput(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	valid := mustEncode(t, svc, &qr.QRData{Data: "x", Type: "y"})
 	raw, _ := base64.StdEncoding.DecodeString(valid)
@@ -51,6 +53,7 @@ func TestSadPath_MalformedInput(t *testing.T) {
 }
 
 func TestSadPath_TamperedPayload(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	raw, _ := base64.StdEncoding.DecodeString(mustEncode(t, svc, &qr.QRData{Data: "amount:100"}))
 	for _, i := range []int{0, 23, 24, len(raw) / 2, len(raw) - 1} {
@@ -63,6 +66,7 @@ func TestSadPath_TamperedPayload(t *testing.T) {
 }
 
 func TestSadPath_AuthenticButNotZstd(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	enc := forge(t, testSecret, []byte(`{"data":"x","type":"y"}`), false)
 	if _, err := svc.Decode(context.Background(), enc); err == nil {
@@ -71,6 +75,7 @@ func TestSadPath_AuthenticButNotZstd(t *testing.T) {
 }
 
 func TestSadPath_AuthenticButNotJSON(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	for name, body := range map[string]string{
 		"text":        "hello",

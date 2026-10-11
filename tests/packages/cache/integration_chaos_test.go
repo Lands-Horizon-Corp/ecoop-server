@@ -18,6 +18,7 @@ import (
 // drops and restarts.
 
 func TestIntegrationChaos_RateLimiterNeverExceedsLimit(t *testing.T) {
+	t.Parallel()
 	p := newProxy(t)
 	nodes := []interface {
 		Incr(context.Context, string, time.Duration) (int64, error)
@@ -56,6 +57,7 @@ end
 return 0`)
 
 func TestIntegrationChaos_DistributedLockMutualExclusion(t *testing.T) {
+	t.Parallel()
 	p := newProxy(t)
 	nodes := []cache.CacheServices{newRunning(t), newRunning(t), newRunningAt(t, p.Addr())}
 	lock := key(t, "lock")
@@ -115,6 +117,7 @@ func TestIntegrationChaos_DistributedLockMutualExclusion(t *testing.T) {
 }
 
 func TestIntegrationChaos_SlidingWindowAcrossRestarts(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -149,6 +152,7 @@ func TestIntegrationChaos_SlidingWindowAcrossRestarts(t *testing.T) {
 }
 
 func TestIntegrationChaos_CacheAsideUnderDrops(t *testing.T) {
+	t.Parallel()
 	p := newProxy(t)
 	svc := newRunningAt(t, p.Addr())
 	var loads atomic.Int64

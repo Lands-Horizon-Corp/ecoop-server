@@ -11,6 +11,7 @@ import (
 )
 
 func TestHappyPath_TypedJob(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	type invoice struct {
 		ID     int     `json:"id"`
@@ -37,6 +38,7 @@ func TestHappyPath_TypedJob(t *testing.T) {
 }
 
 func TestHappyPath_RawBytesPayload(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "raw")
@@ -52,6 +54,7 @@ func TestHappyPath_RawBytesPayload(t *testing.T) {
 }
 
 func TestHappyPath_EnqueueReturnsDistinctIDs(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	typ := taskType(t, "ids")
 	q.Handle(typ, (&recorder{}).handler(nil))
@@ -66,6 +69,7 @@ func TestHappyPath_EnqueueReturnsDistinctIDs(t *testing.T) {
 }
 
 func TestHappyPath_AllPriorities(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "prio")
@@ -79,6 +83,7 @@ func TestHappyPath_AllPriorities(t *testing.T) {
 }
 
 func TestHappyPath_HandlerReplaced(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var first, second recorder
 	typ := taskType(t, "replace")
@@ -94,6 +99,7 @@ func TestHappyPath_HandlerReplaced(t *testing.T) {
 }
 
 func TestHappyPath_Delay(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "delay")
@@ -111,6 +117,7 @@ func TestHappyPath_Delay(t *testing.T) {
 }
 
 func TestHappyPath_UniqueRejectsDuplicate(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	typ := taskType(t, "unique")
 	q.Handle(typ, (&recorder{}).handler(nil))
@@ -127,6 +134,7 @@ func TestHappyPath_UniqueRejectsDuplicate(t *testing.T) {
 }
 
 func TestHappyPath_RetriesUntilSuccess(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var calls int
 	done := make(chan struct{})
@@ -150,6 +158,7 @@ func TestHappyPath_RetriesUntilSuccess(t *testing.T) {
 }
 
 func TestHappyPath_RetryAfterDelaysWithoutFailing(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "later")
@@ -177,6 +186,7 @@ func TestHappyPath_RetryAfterDelaysWithoutFailing(t *testing.T) {
 }
 
 func TestHappyPath_RateLimit(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "limited")
@@ -196,6 +206,7 @@ func TestHappyPath_RateLimit(t *testing.T) {
 }
 
 func TestHappyPath_ScheduleAndUnschedule(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "cron")
@@ -218,6 +229,7 @@ func TestHappyPath_ScheduleAndUnschedule(t *testing.T) {
 }
 
 func TestHappyPath_RestartKeepsWorking(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "restart")

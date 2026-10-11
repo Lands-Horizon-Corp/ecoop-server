@@ -9,6 +9,7 @@ import (
 
 // Smoke: track one operation, finish it, drain.
 func TestSmoke(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	done := f.Track()
 	if f.Count() != 1 {

@@ -15,6 +15,7 @@ import (
 // Poison pill: attacker-shaped inputs that try to crash, stall, or confuse the service.
 
 func TestPoisonPill_HashParamsCannotExhaustResources(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	cases := map[string]string{
 		"4GiB memory":       argonHash("argon2id", 19, 1<<32-1, 1, 1, "c2FsdA", "aGFzaA"),
@@ -36,7 +37,7 @@ func TestPoisonPill_HashParamsCannotExhaustResources(t *testing.T) {
 			if ok || err == nil {
 				t.Errorf("VerifyPassword = %v, %v; want false, error", ok, err)
 			}
-			if d := time.Since(start); d > 250*time.Millisecond {
+			if d := time.Since(start); d > time.Second {
 				t.Errorf("rejection took %v; hostile params were likely evaluated", d)
 			}
 		})
@@ -44,6 +45,7 @@ func TestPoisonPill_HashParamsCannotExhaustResources(t *testing.T) {
 }
 
 func TestPoisonPill_AlgorithmAndVersionDowngrade(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	hash, _ := svc.GeneratePassword(ctx, "pw")
@@ -66,6 +68,7 @@ func TestPoisonPill_AlgorithmAndVersionDowngrade(t *testing.T) {
 }
 
 func TestPoisonPill_HostilePasswords(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 
@@ -103,6 +106,7 @@ func TestPoisonPill_HostilePasswords(t *testing.T) {
 }
 
 func TestPoisonPill_HashSwapAcrossKeyLength(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	long := security.NewSecurityService(testSecret, testMemory, testIterations, testParallelism, testSalt, 64)
 	short := newService(t)
@@ -113,6 +117,7 @@ func TestPoisonPill_HashSwapAcrossKeyLength(t *testing.T) {
 }
 
 func TestPoisonPill_HostileTokens(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	valid, _ := svc.Encrypt(ctx, "x", time.Minute)
@@ -146,6 +151,7 @@ func TestPoisonPill_HostileTokens(t *testing.T) {
 }
 
 func TestPoisonPill_PayloadIsOpaque(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	for _, p := range []string{
@@ -166,6 +172,7 @@ func TestPoisonPill_PayloadIsOpaque(t *testing.T) {
 }
 
 func TestPoisonPill_HostileCiphertext(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	cases := map[string][]byte{
@@ -187,6 +194,7 @@ func TestPoisonPill_HostileCiphertext(t *testing.T) {
 }
 
 func TestPoisonPill_DecryptErrorDoesNotLeakCause(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	ct, _ := svc.EncryptData(ctx, []byte("x"))

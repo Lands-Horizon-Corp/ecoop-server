@@ -20,6 +20,7 @@ import (
 const workers = 32
 
 func TestRace_SharedEncodeDecode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newStarted(t)
 	start := make(chan struct{})
@@ -47,6 +48,7 @@ func TestRace_SharedEncodeDecode(t *testing.T) {
 }
 
 func TestRace_NoncesUniqueUnderConcurrency(t *testing.T) {
+	t.Parallel()
 	svc := newStarted(t)
 	var mu sync.Mutex
 	seen := make(map[string]struct{})
@@ -70,6 +72,7 @@ func TestRace_NoncesUniqueUnderConcurrency(t *testing.T) {
 }
 
 func TestRace_SharedPayloadScannedConcurrently(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newStarted(t)
 	in := qr.QRData{Data: "shared", Type: "scan"}
@@ -87,6 +90,7 @@ func TestRace_SharedPayloadScannedConcurrently(t *testing.T) {
 }
 
 func TestRace_IndependentInstancesInParallel(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	for w := range 8 {
@@ -135,6 +139,7 @@ func TestRace_RepeatedStartDoesNotLeakGoroutines(t *testing.T) {
 // Stop arriving mid-traffic (e.g. on SIGTERM) must let in-flight calls
 // finish; calls that arrive after it must get ErrNotStarted, never a panic.
 func TestRace_StopDuringTraffic(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := qr.NewQRServices(testSecret, nil)
 	if err := svc.Start(ctx); err != nil {
@@ -170,6 +175,7 @@ func TestRace_StopDuringTraffic(t *testing.T) {
 // Decode are too quick to catch mid-flight, so a shared tracker holds an
 // operation open the same way a slow call would.
 func TestRace_StopWaitsForInFlight(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	shared := utils.NewInflight()
 	svc := qr.NewQRServices(testSecret, shared)
@@ -202,6 +208,7 @@ func TestRace_StopWaitsForInFlight(t *testing.T) {
 }
 
 func TestRace_StopGivesUpWhenCtxEnds(t *testing.T) {
+	t.Parallel()
 	shared := utils.NewInflight()
 	svc := qr.NewQRServices(testSecret, shared)
 	if err := svc.Start(context.Background()); err != nil {

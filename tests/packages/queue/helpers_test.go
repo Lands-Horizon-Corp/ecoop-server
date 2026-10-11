@@ -16,11 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hibiken/asynq"
-
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
-	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/valkeylock"
+	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/qns"
 )
 
 // Tests run against the valkey service in docker-compose.yml, using
@@ -40,12 +38,6 @@ func TestMain(m *testing.M) {
 }
 
 func runMain(m *testing.M) int {
-	release, err := valkeylock.Acquire()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "queue tests: lock:", err)
-		return 1
-	}
-	defer release()
 	if err := startValkey(); err != nil {
 		skipReason = "no Valkey: " + err.Error()
 		fmt.Fprintln(os.Stderr, "queue tests:", skipReason)
@@ -121,22 +113,20 @@ func newCache(t testing.TB, addr string) cache.CacheServices {
 	return ch
 }
 
-var purgeOnce sync.Map // testing.TB -> struct{}
+// ns is t's queue namespace: every queue a test starts shares it, and no
+// other test sees it.
+func ns(t testing.TB) string { return qns.For(t, valkeyAddr, valkeyPassword) }
 
-// newQueue returns a started queue on its own cache connection. When the test
-// ends it is stopped and the shared queues are cleared, so no job from this
-// test reaches the next one.
+// newQueue returns a started queue in t's namespace on its own cache
+// connection, stopped when the test ends.
 func newQueue(t testing.TB, addr ...string) queue.QueueServices {
 	t.Helper()
 	requireValkey(t)
-	if _, done := purgeOnce.LoadOrStore(t, struct{}{}); !done {
-		t.Cleanup(purgeQueues)
-	}
 	target := valkeyAddr
 	if len(addr) > 0 {
 		target = addr[0]
 	}
-	q := queue.NewQueueService(newCache(t, target))
+	q := queue.NewQueueService(newCache(t, target), queue.Namespace(ns(t)))
 	if err := q.Start(context.Background()); err != nil {
 		t.Fatalf("queue Start: %v", err)
 	}
@@ -144,33 +134,12 @@ func newQueue(t testing.TB, addr ...string) queue.QueueServices {
 	return q
 }
 
-func inspector() *asynq.Inspector {
-	return asynq.NewInspector(asynq.RedisClientOpt{Addr: valkeyAddr, Password: valkeyPassword, DB: queue.DB})
-}
-
-// purgeQueues deletes the three queues, retrying while a worker that is
-// still shutting down holds an active job.
-func purgeQueues() {
-	in := inspector()
-	defer in.Close()
-	deadline := time.Now().Add(queue.ShutdownTimeout + 5*time.Second)
-	for _, name := range []string{queue.Critical, queue.Default, queue.Low} {
-		for {
-			err := in.DeleteQueue(name, true)
-			if err == nil || errors.Is(err, asynq.ErrQueueNotFound) || time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-}
-
 // archived is how many jobs on name gave up (ErrSkipRetry or out of retries).
-func archived(t testing.TB, name string) int {
+func archived(t testing.TB, base string) int {
 	t.Helper()
-	in := inspector()
+	in := qns.Inspector(valkeyAddr, valkeyPassword)
 	defer in.Close()
-	info, err := in.GetQueueInfo(name)
+	info, err := in.GetQueueInfo(queue.QueueName(ns(t), base))
 	if err != nil {
 		return 0
 	}

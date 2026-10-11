@@ -22,13 +22,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hibiken/asynq"
-
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/smtp"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
-	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/valkeylock"
+	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/qns"
 )
 
 // Delivery tests run against the mailpit and valkey services in
@@ -54,12 +52,6 @@ func TestMain(m *testing.M) {
 }
 
 func runMain(m *testing.M) int {
-	release, err := valkeylock.Acquire()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "smtp tests: lock:", err)
-		return 1
-	}
-	defer release()
 	if err := startMailpit(); err != nil {
 		skipReason = "no Mailpit: " + err.Error()
 		fmt.Fprintln(os.Stderr, "smtp tests:", skipReason)
@@ -194,7 +186,6 @@ func newSMTP(t testing.TB, opts serviceOpts) smtp.SMTPServices {
 	if opts.noName {
 		name = ""
 	}
-	t.Cleanup(func() { deleteQueue(smtp.QueueName) })
 	q := newQueue(t)
 	return smtp.NewSMTPService(host, port, "", "", sender, name, true, q, opts.inflight)
 }
@@ -239,7 +230,7 @@ func newQueue(t testing.TB) queue.QueueServices {
 		t.Fatalf("cache Run: %v", err)
 	}
 	t.Cleanup(func() { _ = ch.Stop(context.Background()) })
-	q := queue.NewQueueService(ch)
+	q := queue.NewQueueService(ch, queue.Namespace(qns.For(t, queueAddr, queuePassword)))
 	if err := q.Start(context.Background()); err != nil {
 		t.Fatalf("queue Start: %v", err)
 	}
@@ -247,33 +238,13 @@ func newQueue(t testing.TB) queue.QueueServices {
 	return q
 }
 
-func inspector() *asynq.Inspector {
-	return asynq.NewInspector(asynq.RedisClientOpt{Addr: queueAddr, Password: queuePassword, DB: queue.DB})
-}
-
-// deleteQueue clears the email queue between tests. asynq refuses while a
-// delivery is still active (e.g. a worker finishing a timed-out Stop in the
-// background), so it retries until the worker has let go.
-func deleteQueue(name string) {
-	in := inspector()
-	defer in.Close()
-	deadline := time.Now().Add(queue.ShutdownTimeout + 5*time.Second)
-	for {
-		err := in.DeleteQueue(name, true)
-		if err == nil || errors.Is(err, asynq.ErrQueueNotFound) || time.Now().After(deadline) {
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-}
-
 // failedDeliveries is how many delivery attempts have failed today on the
 // email queue. Tests compare it with a count taken before they act.
 func failedDeliveries(t testing.TB) int {
 	t.Helper()
-	in := inspector()
+	in := qns.Inspector(queueAddr, queuePassword)
 	defer in.Close()
-	info, err := in.GetQueueInfo(smtp.QueueName)
+	info, err := in.GetQueueInfo(queue.QueueName(qns.For(t, queueAddr, queuePassword), smtp.QueueName))
 	if err != nil {
 		return 0 // queue not created yet
 	}

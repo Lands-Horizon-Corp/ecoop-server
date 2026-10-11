@@ -26,6 +26,7 @@ func chaosRand(t *testing.T) *rand.Rand {
 }
 
 func TestChaos_StalledServerIsBoundedByCtx(t *testing.T) {
+	t.Parallel()
 	svc := newService(t, stalledServer(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
@@ -47,6 +48,7 @@ func TestChaos_StalledServerIsBoundedByCtx(t *testing.T) {
 }
 
 func TestChaos_GarbageServers(t *testing.T) {
+	t.Parallel()
 	r := chaosRand(t)
 	var mu sync.Mutex
 	garbage := func() []byte {
@@ -103,6 +105,7 @@ func TestChaos_GarbageServers(t *testing.T) {
 }
 
 func TestChaos_ConnectionDropsMidDelivery(t *testing.T) {
+	t.Parallel()
 	p := newProxy(t)
 	svc := newService(t, p.Addr())
 	to := inbox(t)
@@ -134,6 +137,7 @@ func TestChaos_ConnectionDropsMidDelivery(t *testing.T) {
 }
 
 func TestChaos_RandomDeadlines(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	to := inbox(t)
 	r := chaosRand(t)
@@ -151,6 +155,7 @@ func TestChaos_RandomDeadlines(t *testing.T) {
 // Randomly assembled markup around XSS vectors, run through the same
 // sanitizer Send uses. CSS-only vectors are covered by their own test.
 func TestChaos_RandomXSSIsAlwaysNeutralised(t *testing.T) {
+	t.Parallel()
 	r := chaosRand(t)
 	fragments := []string{
 		"<p>", "</p>", "<div>", "</div>", "<table><tr><td>", "</td></tr></table>", "text ", `"`, "'", ">", "<",
@@ -182,6 +187,7 @@ func TestChaos_RandomXSSIsAlwaysNeutralised(t *testing.T) {
 }
 
 func TestChaos_RandomXSSEndToEnd(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	r := chaosRand(t)

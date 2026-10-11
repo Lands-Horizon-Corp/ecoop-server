@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hibiken/asynq"
 	twilioclient "github.com/twilio/twilio-go/client"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
@@ -31,7 +30,7 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/security"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sms"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/smtp"
-	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/valkeylock"
+	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/qns"
 )
 
 // Tests use the valkey and mailpit services in docker-compose.yml, with
@@ -43,6 +42,7 @@ var (
 	smtpHost, mailpitAPI       string
 	smtpPort                   int
 	skipReason                 string
+	cleaner                    cache.CacheServices // one connection for all test cleanup
 )
 
 const secret = "otp-test-pepper"
@@ -52,16 +52,17 @@ var _ otp.OTPServices = (*otp.OTPService)(nil)
 func TestMain(m *testing.M) { os.Exit(runMain(m)) }
 
 func runMain(m *testing.M) int {
-	release, err := valkeylock.Acquire()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "otp tests: lock:", err)
-		return 1
-	}
-	defer release()
 	if err := setup(); err != nil {
 		skipReason = "no Valkey/Mailpit: " + err.Error()
 		fmt.Fprintln(os.Stderr, "otp tests:", skipReason)
+		return m.Run()
 	}
+	cleaner = cache.NewCacheService([]string{valkeyAddr}, valkeyPassword, nil)
+	if err := cleaner.Run(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, "otp tests: cleanup connection:", err)
+		return 1
+	}
+	defer cleaner.Stop(context.Background())
 	return m.Run()
 }
 
@@ -154,26 +155,12 @@ func newSecurity() security.SecurityServices {
 
 func newQueue(t testing.TB, ch cache.CacheServices) queue.QueueServices {
 	t.Helper()
-	q := queue.NewQueueService(ch)
+	q := queue.NewQueueService(ch, queue.Namespace(qns.For(t, valkeyAddr, valkeyPassword)))
 	if err := q.Start(context.Background()); err != nil {
 		t.Fatalf("queue Start: %v", err)
 	}
-	t.Cleanup(purgeQueue)
 	t.Cleanup(func() { _ = q.Stop(context.Background()) })
 	return q
-}
-
-func purgeQueue() {
-	in := asynq.NewInspector(asynq.RedisClientOpt{Addr: valkeyAddr, Password: valkeyPassword, DB: queue.DB})
-	defer in.Close()
-	deadline := time.Now().Add(queue.ShutdownTimeout + 5*time.Second)
-	for {
-		err := in.DeleteQueue(queue.Critical, true)
-		if err == nil || errors.Is(err, asynq.ErrQueueNotFound) || time.Now().After(deadline) {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
 }
 
 func mockSMTP(t testing.TB) smtp.SMTPServices {
@@ -273,24 +260,53 @@ func startOTP(t testing.TB, pepper string, ch cache.CacheServices, mail smtp.SMT
 var seq atomic.Int64
 var runID = time.Now().UnixNano()
 
+// testKeys collects each test's OTP keys so one cleanup per test deletes
+// them all over the shared connection.
+var testKeys sync.Map // testing.TB -> *keyList
+
+type keyList struct {
+	mu   sync.Mutex
+	keys []string
+}
+
 // key returns an OTP key unique to this test and run; its cache entries are
 // deleted when the test ends.
 func key(t testing.TB) string {
 	t.Helper()
 	k := fmt.Sprintf("test:%d:%d", runID, seq.Add(1))
-	t.Cleanup(func() {
-		if skipReason != "" {
-			return
-		}
-		ch := cache.NewCacheService([]string{valkeyAddr}, valkeyPassword, nil)
-		if ch.Run(context.Background()) != nil {
-			return
-		}
-		defer ch.Stop(context.Background())
-		_, _ = ch.Delete(context.Background(), otp.KeyPrefix+k)
-		_, _ = ch.Delete(context.Background(), otp.AttemptsPrefix+k)
-	})
+	v, loaded := testKeys.LoadOrStore(t, &keyList{})
+	list := v.(*keyList)
+	if !loaded {
+		t.Cleanup(func() {
+			testKeys.Delete(t)
+			list.mu.Lock()
+			defer list.mu.Unlock()
+			deleteKeys(list.keys)
+		})
+	}
+	list.mu.Lock()
+	list.keys = append(list.keys, k)
+	list.mu.Unlock()
 	return k
+}
+
+// deleteKeys removes the code and guess counter of each key, in batches.
+func deleteKeys(keys []string) {
+	client := cleaner.Client()
+	if client == nil || len(keys) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cache := make([]string, 0, 2*len(keys))
+	for _, k := range keys {
+		cache = append(cache, otp.KeyPrefix+k, otp.AttemptsPrefix+k)
+	}
+	for len(cache) > 0 {
+		n := min(len(cache), 1000)
+		_ = client.Do(ctx, client.B().Del().Key(cache[:n]...).Build()).Error()
+		cache = cache[n:]
+	}
 }
 
 // otherCode returns a code guaranteed not to equal code.

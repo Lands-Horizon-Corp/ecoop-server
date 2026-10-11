@@ -34,6 +34,7 @@ func isTimeout(err error) bool {
 }
 
 func TestChaos_ConnectionDropsMidTraffic(t *testing.T) {
+	t.Parallel()
 	p := newProxy(t)
 	svc := newRunningAt(t, p.Addr())
 	ctx := ctxT(t)
@@ -82,6 +83,7 @@ func TestChaos_ConnectionDropsMidTraffic(t *testing.T) {
 }
 
 func TestChaos_OutageAndRecovery(t *testing.T) {
+	t.Parallel()
 	p := newProxy(t)
 	svc := newRunningAt(t, p.Addr())
 	ctx := ctxT(t)
@@ -108,6 +110,7 @@ func TestChaos_OutageAndRecovery(t *testing.T) {
 }
 
 func TestChaos_RandomCancellation(t *testing.T) {
+	t.Parallel()
 	svc := newRunning(t)
 	r := chaosRand(t)
 	k := key(t)
@@ -132,6 +135,7 @@ func TestChaos_RandomCancellation(t *testing.T) {
 }
 
 func TestChaos_RandomOpsMatchModel(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	r := chaosRand(t)

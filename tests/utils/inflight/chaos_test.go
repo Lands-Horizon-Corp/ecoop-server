@@ -22,6 +22,7 @@ func chaosRand(t *testing.T) (*rand.Rand, uint64) {
 }
 
 func TestChaos_RandomOperationsAndWaiters(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	_, seed := chaosRand(t)
 	var ops, waiters sync.WaitGroup
@@ -58,6 +59,7 @@ func TestChaos_RandomOperationsAndWaiters(t *testing.T) {
 }
 
 func TestChaos_CountNeverNegative(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	r, _ := chaosRand(t)
 	var live []func()

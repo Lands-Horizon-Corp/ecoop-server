@@ -13,6 +13,7 @@ import (
 // nil errors, nil receivers.
 
 func TestZeroValue_ZeroStruct(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	q := &queue.QueueService{}
 	mustNotPanic(t, "zero struct", func() {
@@ -39,6 +40,7 @@ func TestZeroValue_ZeroStruct(t *testing.T) {
 }
 
 func TestZeroValue_StopIsIdempotent(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	for range 3 {
 		if err := q.Stop(context.Background()); err != nil {
@@ -48,6 +50,7 @@ func TestZeroValue_StopIsIdempotent(t *testing.T) {
 }
 
 func TestZeroValue_NilAndEmptyPayloads(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var r recorder
 	typ := taskType(t, "empty")
@@ -61,6 +64,7 @@ func TestZeroValue_NilAndEmptyPayloads(t *testing.T) {
 }
 
 func TestZeroValue_TypedJobGetsZeroValueForNull(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	type data struct{ N int }
 	got := make(chan data, 1)
@@ -79,6 +83,7 @@ func TestZeroValue_TypedJobGetsZeroValueForNull(t *testing.T) {
 }
 
 func TestZeroValue_EmptyTaskType(t *testing.T) {
+	t.Parallel()
 	q := newQueue(t)
 	var err error
 	mustNotPanic(t, "Enqueue(\"\")", func() { _, err = q.Enqueue(ctxT(t), "", nil) })
@@ -88,6 +93,7 @@ func TestZeroValue_EmptyTaskType(t *testing.T) {
 }
 
 func TestZeroValue_NilOptionIsIgnored(t *testing.T) {
+	t.Parallel()
 	// A conditional option left unset (var opt queue.Option) must not crash
 	// the caller.
 	q := newQueue(t)
@@ -99,11 +105,13 @@ func TestZeroValue_NilOptionIsIgnored(t *testing.T) {
 }
 
 func TestZeroValue_RetryAfterWithNilError(t *testing.T) {
+	t.Parallel()
 	err := queue.RetryAfter(time.Second, nil)
 	mustNotPanic(t, "Error() on RetryAfter(nil)", func() { _ = err.Error() })
 }
 
 func TestZeroValue_NilContext(t *testing.T) {
+	t.Parallel()
 	// A nil ctx is a programming error: it must fail fast, not hang.
 	q := newQueue(t)
 	var nilCtx context.Context
@@ -122,6 +130,7 @@ func TestZeroValue_NilContext(t *testing.T) {
 // Dangling pointers: a nil *QueueService or nil interface is a wiring bug
 // and must fail loudly.
 func TestZeroValue_NilReceiver(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var ptr *queue.QueueService
 	var iface queue.QueueServices

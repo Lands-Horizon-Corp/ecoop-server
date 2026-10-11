@@ -7,6 +7,7 @@ import (
 
 // Smoke: start, generate, verify, stop.
 func TestSmoke(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx := ctxT(t)
 	k := key(t)

@@ -16,6 +16,7 @@ import (
 const workers = 32
 
 func TestRace_SharedServiceAllOperations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	start := make(chan struct{})
@@ -54,6 +55,7 @@ func TestRace_SharedServiceAllOperations(t *testing.T) {
 }
 
 func TestRace_SaltsUniqueUnderConcurrency(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	var mu sync.Mutex
@@ -82,6 +84,7 @@ func TestRace_SaltsUniqueUnderConcurrency(t *testing.T) {
 }
 
 func TestRace_NoncesUniqueUnderConcurrency(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	var mu sync.Mutex
@@ -110,6 +113,7 @@ func TestRace_NoncesUniqueUnderConcurrency(t *testing.T) {
 }
 
 func TestRace_SharedCiphertextReadConcurrently(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	ct, _ := svc.EncryptData(ctx, []byte("shared"))
@@ -135,6 +139,7 @@ func TestRace_SharedCiphertextReadConcurrently(t *testing.T) {
 }
 
 func TestRace_ManyServicesConstructedConcurrently(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	for w := range workers {

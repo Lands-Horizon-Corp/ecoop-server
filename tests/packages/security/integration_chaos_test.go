@@ -86,6 +86,7 @@ func runPipeline(ctx context.Context, issuer, reader security.SecurityServices, 
 }
 
 func TestIntegrationChaos_PipelineWithRandomFaults(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	primary := newServiceWithSecret(t, "primary")
 	replica := newServiceWithSecret(t, "primary")
@@ -121,6 +122,7 @@ func TestIntegrationChaos_PipelineWithRandomFaults(t *testing.T) {
 }
 
 func TestIntegrationChaos_SecretRotation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	oldSvc := newServiceWithSecret(t, "secret-v1")
 	newSvc := newServiceWithSecret(t, "secret-v2")
@@ -143,6 +145,7 @@ func TestIntegrationChaos_SecretRotation(t *testing.T) {
 }
 
 func TestIntegrationChaos_ParamUpgradeKeepsOldHashesValid(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	weak := security.NewSecurityService(testSecret, 4*1024, 1, 1, 16, testKey)
 	strong := security.NewSecurityService(testSecret, 16*1024, 3, 4, 32, testKey)
@@ -158,6 +161,7 @@ func TestIntegrationChaos_ParamUpgradeKeepsOldHashesValid(t *testing.T) {
 }
 
 func TestIntegrationChaos_TokenAndDataKeysAreSeparated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 
@@ -172,6 +176,7 @@ func TestIntegrationChaos_TokenAndDataKeysAreSeparated(t *testing.T) {
 }
 
 func TestIntegrationChaos_MixedExpiryUnderLoad(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 

@@ -11,6 +11,7 @@ import (
 )
 
 func TestSadPath_RunFailures(t *testing.T) {
+	t.Parallel()
 	requireServer(t)
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -43,6 +44,7 @@ func TestSadPath_RunFailures(t *testing.T) {
 }
 
 func TestSadPath_RunWithDeadCtxWhileRunningKeepsClient(t *testing.T) {
+	t.Parallel()
 	// Run on a running service does nothing, so even a dead ctx cannot tear
 	// down the client already serving traffic.
 	ctx := ctxT(t)
@@ -56,6 +58,7 @@ func TestSadPath_RunWithDeadCtxWhileRunningKeepsClient(t *testing.T) {
 }
 
 func TestSadPath_GetMissing(t *testing.T) {
+	t.Parallel()
 	svc := newRunning(t)
 	v, err := svc.Get(ctxT(t), key(t))
 	if !errors.Is(err, cache.ErrNotFound) || v != nil {
@@ -64,6 +67,7 @@ func TestSadPath_GetMissing(t *testing.T) {
 }
 
 func TestSadPath_WrongType(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	str, zset := key(t, "str"), key(t, "zset")
@@ -88,6 +92,7 @@ func TestSadPath_WrongType(t *testing.T) {
 }
 
 func TestSadPath_IncrOverflow(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -101,6 +106,7 @@ func TestSadPath_IncrOverflow(t *testing.T) {
 }
 
 func TestSadPath_BadScores(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -120,6 +126,7 @@ func TestSadPath_BadScores(t *testing.T) {
 }
 
 func TestSadPath_UnencodableValues(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -149,6 +156,7 @@ func TestSadPath_UnencodableValues(t *testing.T) {
 }
 
 func TestSadPath_DeadContexts(t *testing.T) {
+	t.Parallel()
 	svc := newRunning(t)
 	k := key(t)
 	cancelled, cancel := context.WithCancel(context.Background())

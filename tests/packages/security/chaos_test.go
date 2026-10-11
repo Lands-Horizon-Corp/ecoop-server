@@ -30,6 +30,7 @@ func randBytes(r *rand.Rand, n int) []byte {
 }
 
 func TestChaos_EveryBitFlipInCiphertextIsDetected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	plain := []byte("ledger entry: +1,000.00")
@@ -47,6 +48,7 @@ func TestChaos_EveryBitFlipInCiphertextIsDetected(t *testing.T) {
 }
 
 func TestChaos_RandomTokenCorruptionIsDetected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	r := chaosRand(t)
@@ -67,6 +69,7 @@ func TestChaos_RandomTokenCorruptionIsDetected(t *testing.T) {
 }
 
 func TestChaos_RandomGarbageNeverPanics(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	r := chaosRand(t)
@@ -85,6 +88,7 @@ func TestChaos_RandomGarbageNeverPanics(t *testing.T) {
 }
 
 func TestChaos_StructuredGarbageHashes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	r := chaosRand(t)
@@ -109,6 +113,7 @@ func TestChaos_StructuredGarbageHashes(t *testing.T) {
 }
 
 func TestChaos_RandomPayloadsRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	r := chaosRand(t)
@@ -136,6 +141,7 @@ func TestChaos_RandomPayloadsRoundTrip(t *testing.T) {
 }
 
 func TestChaos_CancelledAndExpiredContexts(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 
 	cancelled, cancel := context.WithCancel(context.Background())

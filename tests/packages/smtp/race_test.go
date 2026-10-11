@@ -15,6 +15,7 @@ import (
 const workers = 32
 
 func TestRace_ConcurrentSendsAllDelivered(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	to := inbox(t)
@@ -37,6 +38,7 @@ func TestRace_ConcurrentSendsAllDelivered(t *testing.T) {
 }
 
 func TestRace_ConcurrentFormatWithOwnVars(t *testing.T) {
+	t.Parallel()
 	svc := mockService(t)
 	var wg sync.WaitGroup
 	for w := range workers {
@@ -57,6 +59,7 @@ func TestRace_ConcurrentFormatWithOwnVars(t *testing.T) {
 }
 
 func TestRace_StartStopSendChurn(t *testing.T) {
+	t.Parallel()
 	svc := newSMTP(t, serviceOpts{})
 	_ = svc.Start(context.Background())
 	to := inbox(t)
@@ -89,6 +92,7 @@ func TestRace_StartStopSendChurn(t *testing.T) {
 }
 
 func TestRace_ConcurrentStops(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	var wg sync.WaitGroup
 	for range workers {

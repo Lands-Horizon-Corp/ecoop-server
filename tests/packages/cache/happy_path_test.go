@@ -11,6 +11,7 @@ import (
 )
 
 func TestHappyPath_SetGetEncodings(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	type member struct {
@@ -50,6 +51,7 @@ func TestHappyPath_SetGetEncodings(t *testing.T) {
 }
 
 func TestHappyPath_SetOverwritesAndTTL(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -72,6 +74,7 @@ func TestHappyPath_SetOverwritesAndTTL(t *testing.T) {
 }
 
 func TestHappyPath_SetNX(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -91,6 +94,7 @@ func TestHappyPath_SetNX(t *testing.T) {
 }
 
 func TestHappyPath_ExistsDelete(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -114,6 +118,7 @@ func TestHappyPath_ExistsDelete(t *testing.T) {
 }
 
 func TestHappyPath_KeysScansPastOnePage(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	const n = 2500 // more than one SCAN page
@@ -140,6 +145,7 @@ func TestHappyPath_KeysScansPastOnePage(t *testing.T) {
 }
 
 func TestHappyPath_SortedSet(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -176,6 +182,7 @@ func TestHappyPath_SortedSet(t *testing.T) {
 }
 
 func TestHappyPath_IncrCounterAndWindow(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 
@@ -203,6 +210,7 @@ func TestHappyPath_IncrCounterAndWindow(t *testing.T) {
 }
 
 func TestHappyPath_Expire(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -221,6 +229,7 @@ func TestHappyPath_Expire(t *testing.T) {
 }
 
 func TestHappyPath_ClientIsUsable(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	cl := svc.Client()
@@ -237,6 +246,7 @@ func TestHappyPath_ClientIsUsable(t *testing.T) {
 }
 
 func TestHappyPath_RunWhileRunningIsNoop(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	before := svc.Client()
@@ -252,6 +262,7 @@ func TestHappyPath_RunWhileRunningIsNoop(t *testing.T) {
 }
 
 func TestHappyPath_Flush(t *testing.T) {
+	t.Parallel()
 	requireFlush(t)
 	ctx := ctxT(t)
 	svc := newRunning(t)
@@ -267,6 +278,7 @@ func TestHappyPath_Flush(t *testing.T) {
 }
 
 func TestHappyPath_StopThenRunAgain(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)

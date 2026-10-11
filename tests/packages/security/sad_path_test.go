@@ -11,6 +11,7 @@ import (
 )
 
 func TestSadPath_WrongPassword(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	hash, _ := svc.GeneratePassword(ctx, "right")
@@ -27,6 +28,7 @@ func TestSadPath_WrongPassword(t *testing.T) {
 }
 
 func TestSadPath_MalformedHash(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	cases := map[string]string{
 		"empty":           "",
@@ -54,6 +56,7 @@ func TestSadPath_MalformedHash(t *testing.T) {
 }
 
 func TestSadPath_HashParamsOverLimits(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	cases := map[string]string{
 		"memory":      argonHash("argon2id", 19, 256*1024+1, 1, 1, "c2FsdA", "aGFzaA"),
@@ -70,6 +73,7 @@ func TestSadPath_HashParamsOverLimits(t *testing.T) {
 }
 
 func TestSadPath_ExpiredToken(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	tok, err := svc.Encrypt(ctx, "x", time.Second)
@@ -83,6 +87,7 @@ func TestSadPath_ExpiredToken(t *testing.T) {
 }
 
 func TestSadPath_TokenFromOtherSecret(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	tok, _ := newServiceWithSecret(t, "secret-a").Encrypt(ctx, "x", time.Minute)
 	if _, err := newServiceWithSecret(t, "secret-b").Decrypt(ctx, tok); err == nil {
@@ -91,6 +96,7 @@ func TestSadPath_TokenFromOtherSecret(t *testing.T) {
 }
 
 func TestSadPath_TamperedToken(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	tok, _ := svc.Encrypt(ctx, "x", time.Minute)
@@ -114,6 +120,7 @@ func TestSadPath_TamperedToken(t *testing.T) {
 }
 
 func TestSadPath_DataWrongSecret(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	ct, _ := newServiceWithSecret(t, "secret-a").EncryptData(ctx, []byte("x"))
 	_, err := newServiceWithSecret(t, "secret-b").DecryptData(ctx, ct)
@@ -123,6 +130,7 @@ func TestSadPath_DataWrongSecret(t *testing.T) {
 }
 
 func TestSadPath_DataTamperedOrShort(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newService(t)
 	ct, _ := svc.EncryptData(ctx, []byte("payload"))

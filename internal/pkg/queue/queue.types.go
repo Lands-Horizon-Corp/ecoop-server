@@ -65,6 +65,9 @@ type (
 	// call takes all of them and uses the ones that apply to it.
 	Option func(*settings)
 
+	// ServiceOption configures a QueueService: Namespace.
+	ServiceOption func(*QueueService)
+
 	// Job is a typed job: its type, handler and options set up once with
 	// NewJob, then queued with Deliver.
 	Job[T any] struct {

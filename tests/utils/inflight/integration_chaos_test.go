@@ -71,6 +71,7 @@ func (s *fakeService) Start() {
 }
 
 func TestIntegrationChaos_StopNeverReleasesUnderAnOperation(t *testing.T) {
+	t.Parallel()
 	seed := uint64(time.Now().UnixNano())
 	t.Logf("seed: %d", seed)
 	for round := range 20 {
@@ -98,6 +99,7 @@ func TestIntegrationChaos_StopNeverReleasesUnderAnOperation(t *testing.T) {
 }
 
 func TestIntegrationChaos_SharedTrackerDrainsAllServices(t *testing.T) {
+	t.Parallel()
 	shared := utils.NewInflight()
 	a, b := newFakeService(shared), newFakeService(shared)
 
@@ -118,6 +120,7 @@ func TestIntegrationChaos_SharedTrackerDrainsAllServices(t *testing.T) {
 }
 
 func TestIntegrationChaos_SeparateTrackersDrainIndependently(t *testing.T) {
+	t.Parallel()
 	a, b := newFakeService(utils.NewInflight()), newFakeService(utils.NewInflight())
 	go func() { _ = b.Do(300 * time.Millisecond) }()
 	time.Sleep(20 * time.Millisecond)
@@ -133,6 +136,7 @@ func TestIntegrationChaos_SeparateTrackersDrainIndependently(t *testing.T) {
 }
 
 func TestIntegrationChaos_StartStopChurn(t *testing.T) {
+	t.Parallel()
 	svc := newFakeService(utils.NewInflight())
 	stop := make(chan struct{})
 	var wg sync.WaitGroup

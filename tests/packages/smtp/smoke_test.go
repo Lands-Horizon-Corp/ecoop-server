@@ -9,6 +9,7 @@ import (
 
 // Smoke: start, ping, queue one email, see it arrive, stop.
 func TestSmoke(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newSMTP(t, serviceOpts{})
 	if err := svc.Start(ctx); err != nil {

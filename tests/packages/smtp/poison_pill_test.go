@@ -14,6 +14,7 @@ import (
 // fill, checked on the email Mailpit actually received.
 
 func TestPoisonPill_XSSInBody(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	for name, payload := range xssPayloads {
@@ -34,6 +35,7 @@ func TestPoisonPill_XSSInBody(t *testing.T) {
 }
 
 func TestPoisonPill_XSSThroughTemplateVars(t *testing.T) {
+	t.Parallel()
 	// Vars are filled in after the template is parsed, so this is the path
 	// where user-supplied values (a member's name, a remark) reach the body.
 	ctx := ctxT(t)
@@ -56,6 +58,7 @@ func TestPoisonPill_XSSThroughTemplateVars(t *testing.T) {
 }
 
 func TestPoisonPill_XSSInTemplateFile(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	path := filepath.Join(t.TempDir(), "evil.html")
@@ -74,6 +77,7 @@ func TestPoisonPill_XSSInTemplateFile(t *testing.T) {
 }
 
 func TestPoisonPill_XSSThroughCSS(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	for name, payload := range cssXSSPayloads {
@@ -88,6 +92,7 @@ func TestPoisonPill_XSSThroughCSS(t *testing.T) {
 }
 
 func TestPoisonPill_XSSInSubjectAndFromNameStaysText(t *testing.T) {
+	t.Parallel()
 	// Headers are never HTML. The payload must arrive verbatim as text, and
 	// must not break out into extra headers.
 	ctx := ctxT(t)
@@ -107,6 +112,7 @@ func TestPoisonPill_XSSInSubjectAndFromNameStaysText(t *testing.T) {
 }
 
 func TestPoisonPill_HeaderInjection(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	attacker := inbox(t)
@@ -132,6 +138,7 @@ func TestPoisonPill_HeaderInjection(t *testing.T) {
 }
 
 func TestPoisonPill_RecipientInjectionRejected(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
 	attacker := inbox(t)
 	for _, to := range []string{
@@ -147,6 +154,7 @@ func TestPoisonPill_RecipientInjectionRejected(t *testing.T) {
 }
 
 func TestPoisonPill_TemplateValuesAreNotReEvaluated(t *testing.T) {
+	t.Parallel()
 	out, err := mockService(t).Format(ctxT(t), smtp.SMTPRequest{
 		Name: "{{.Secret}}",
 		Body: "<p>{{.Name}}</p>",
@@ -165,6 +173,7 @@ func TestPoisonPill_TemplateValuesAreNotReEvaluated(t *testing.T) {
 // input could read any file the process can see. This pins the behaviour so
 // it stays a conscious choice: never pass user input as Body.
 func TestPoisonPill_BodyThatIsAFilePathIsReadAsTemplate(t *testing.T) {
+	t.Parallel()
 	secret := filepath.Join(t.TempDir(), "secret.txt")
 	if err := os.WriteFile(secret, []byte("DB_PASSWORD=hunter2"), 0o600); err != nil {
 		t.Fatal(err)
@@ -180,6 +189,7 @@ func TestPoisonPill_BodyThatIsAFilePathIsReadAsTemplate(t *testing.T) {
 }
 
 func TestPoisonPill_HostileBodies(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	cases := map[string]string{

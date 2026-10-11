@@ -14,6 +14,7 @@ import (
 // nil receivers and caller data that must not be aliased.
 
 func TestZeroValue_ZeroStruct(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var svc smtp.SMTPServices = &smtp.SMTPService{}
 	mustNotPanic(t, "zero struct", func() {
@@ -33,6 +34,7 @@ func TestZeroValue_ZeroStruct(t *testing.T) {
 }
 
 func TestZeroValue_StopIsIdempotent(t *testing.T) {
+	t.Parallel()
 	svc := smtp.NewSMTPService("h", 25, "", "", "a@b.co", "", true, nil, nil)
 	for range 3 {
 		if err := svc.Stop(context.Background()); err != nil {
@@ -42,6 +44,7 @@ func TestZeroValue_StopIsIdempotent(t *testing.T) {
 }
 
 func TestZeroValue_EmptyRequiredFields(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	if err := smtp.NewSMTPService("h", 25, "", "", "", "", true, nil, nil).Start(ctx); !errors.Is(err, smtp.ErrInvalidSender) {
 		t.Errorf("empty from: Start = %v, want ErrInvalidSender", err)
@@ -52,6 +55,7 @@ func TestZeroValue_EmptyRequiredFields(t *testing.T) {
 }
 
 func TestZeroValue_EmptyOptionalFields(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := startService(t, serviceOpts{noName: true}) // no default display name
 	to := inbox(t)
@@ -65,6 +69,7 @@ func TestZeroValue_EmptyOptionalFields(t *testing.T) {
 }
 
 func TestZeroValue_NilVarsAndMissingKeys(t *testing.T) {
+	t.Parallel()
 	out, err := mockService(t).Format(context.Background(), smtp.SMTPRequest{Body: "[{{.Name}}][{{.Missing}}]"})
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +80,7 @@ func TestZeroValue_NilVarsAndMissingKeys(t *testing.T) {
 }
 
 func TestZeroValue_FormatDoesNotMutateCallerVars(t *testing.T) {
+	t.Parallel()
 	// Format must not write into the caller's map: callers reuse Vars across
 	// recipients, and a shared map written concurrently crashes the process.
 	vars := map[string]string{"Code": "123"}
@@ -89,6 +95,7 @@ func TestZeroValue_FormatDoesNotMutateCallerVars(t *testing.T) {
 }
 
 func TestZeroValue_FormatDoesNotAliasRequest(t *testing.T) {
+	t.Parallel()
 	req := smtp.SMTPRequest{Body: "orig"}
 	out, err := mockService(t).Format(context.Background(), req)
 	if err != nil {
@@ -101,6 +108,7 @@ func TestZeroValue_FormatDoesNotAliasRequest(t *testing.T) {
 }
 
 func TestZeroValue_MockModeDeliversNothing(t *testing.T) {
+	t.Parallel()
 	requireMailpit(t)
 	svc := mockService(t)
 	to := inbox(t)
@@ -111,6 +119,7 @@ func TestZeroValue_MockModeDeliversNothing(t *testing.T) {
 }
 
 func TestZeroValue_NilContext(t *testing.T) {
+	t.Parallel()
 	var nilCtx context.Context
 	t.Run("mock mode", func(t *testing.T) {
 		mustNotPanic(t, "Send(nil ctx)", func() {
@@ -147,6 +156,7 @@ func TestZeroValue_NilContext(t *testing.T) {
 // Dangling pointers: a nil *SMTPService or nil interface is a wiring bug and
 // must fail loudly. Format is the exception: it never touches the receiver.
 func TestZeroValue_NilReceiver(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var ptr *smtp.SMTPService
 	var iface smtp.SMTPServices

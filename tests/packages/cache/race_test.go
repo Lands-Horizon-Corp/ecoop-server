@@ -18,6 +18,7 @@ import (
 const workers = 32
 
 func TestRace_IncrIsAtomic(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -39,6 +40,7 @@ func TestRace_IncrIsAtomic(t *testing.T) {
 }
 
 func TestRace_SetNXHasOneWinner(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	for round := range 20 {
@@ -65,6 +67,7 @@ func TestRace_SetNXHasOneWinner(t *testing.T) {
 }
 
 func TestRace_ConcurrentZAddDistinctMembers(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newRunning(t)
 	k := key(t)
@@ -83,6 +86,7 @@ func TestRace_ConcurrentZAddDistinctMembers(t *testing.T) {
 }
 
 func TestRace_StopDuringTraffic(t *testing.T) {
+	t.Parallel()
 	requireServer(t)
 	svc := cache.NewCacheService([]string{testAddr}, testPassword, nil)
 	ctx := context.Background()
@@ -110,6 +114,7 @@ func TestRace_StopDuringTraffic(t *testing.T) {
 }
 
 func TestRace_LifecycleChurnWithTraffic(t *testing.T) {
+	t.Parallel()
 	requireServer(t)
 	svc := cache.NewCacheService([]string{testAddr}, testPassword, nil)
 	ctx := context.Background()
@@ -154,6 +159,7 @@ func TestRace_LifecycleChurnWithTraffic(t *testing.T) {
 }
 
 func TestRace_ConcurrentRunCallsLeaveOneClient(t *testing.T) {
+	t.Parallel()
 	requireServer(t)
 	svc := cache.NewCacheService([]string{testAddr}, testPassword, nil)
 	ctx := context.Background()
@@ -175,6 +181,7 @@ func TestRace_ConcurrentRunCallsLeaveOneClient(t *testing.T) {
 // Stop must wait for operations already in flight: they complete
 // successfully, Stop returns only after them, and later calls are refused.
 func TestRace_StopWaitsForInFlightCommands(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	p := newProxy(t)
 	svc := cache.NewCacheService([]string{p.Addr()}, testPassword, nil)
@@ -216,6 +223,7 @@ func TestRace_StopWaitsForInFlightCommands(t *testing.T) {
 }
 
 func TestRace_StopGivesUpWhenCtxEnds(t *testing.T) {
+	t.Parallel()
 	p := newProxy(t)
 	svc := cache.NewCacheService([]string{p.Addr()}, testPassword, nil)
 	if err := svc.Run(context.Background()); err != nil {

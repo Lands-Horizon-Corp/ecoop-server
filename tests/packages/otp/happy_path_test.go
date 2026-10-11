@@ -13,6 +13,7 @@ import (
 )
 
 func TestHappyPath_CodeShape(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	seen := map[string]bool{}
 	for range 50 {
@@ -31,6 +32,7 @@ func TestHappyPath_CodeShape(t *testing.T) {
 }
 
 func TestHappyPath_VerifyOnce(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx, k := ctxT(t), key(t)
 	code, _ := o.Generate(ctx, k)
@@ -43,6 +45,7 @@ func TestHappyPath_VerifyOnce(t *testing.T) {
 }
 
 func TestHappyPath_RegenerateReplacesOldCode(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx, k := ctxT(t), key(t)
 	old, _ := o.Generate(ctx, k)
@@ -58,6 +61,7 @@ func TestHappyPath_RegenerateReplacesOldCode(t *testing.T) {
 }
 
 func TestHappyPath_RegenerateResetsAttempts(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx, k := ctxT(t), key(t)
 	code, _ := o.Generate(ctx, k)
@@ -74,6 +78,7 @@ func TestHappyPath_RegenerateResetsAttempts(t *testing.T) {
 }
 
 func TestHappyPath_Revoke(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	ctx, k := ctxT(t), key(t)
 	code, _ := o.Generate(ctx, k)
@@ -89,6 +94,7 @@ func TestHappyPath_Revoke(t *testing.T) {
 }
 
 func TestHappyPath_EmailCarriesTheRawCode(t *testing.T) {
+	t.Parallel()
 	ch := newCache(t)
 	q := newQueue(t, ch)
 	o := startOTP(t, secret, ch, realSMTP(t, q), mockSMS(t))
@@ -113,6 +119,7 @@ func TestHappyPath_EmailCarriesTheRawCode(t *testing.T) {
 }
 
 func TestHappyPath_SMSCarriesTheRawCode(t *testing.T) {
+	t.Parallel()
 	ch := newCache(t)
 	q := newQueue(t, ch)
 	text, twilio := realSMS(t, q)
@@ -133,6 +140,7 @@ func TestHappyPath_SMSCarriesTheRawCode(t *testing.T) {
 }
 
 func TestHappyPath_CallerVarsUntouched(t *testing.T) {
+	t.Parallel()
 	o := newOTP(t)
 	vars := map[string]string{"Branch": "Cebu"}
 	before := maps.Clone(vars)
@@ -148,6 +156,7 @@ func TestHappyPath_CallerVarsUntouched(t *testing.T) {
 }
 
 func TestHappyPath_RestartKeepsCodes(t *testing.T) {
+	t.Parallel()
 	// Codes live in the cache, not the process.
 	o := newOTP(t)
 	ctx, k := ctxT(t), key(t)

@@ -11,6 +11,7 @@ import (
 // Zero value & absence: the zero Inflight, nil receivers, nil contexts.
 
 func TestZeroValue_ZeroInflightIsUsable(t *testing.T) {
+	t.Parallel()
 	var f utils.Inflight
 	if f.Count() != 0 {
 		t.Fatalf("Count = %d", f.Count())
@@ -30,6 +31,7 @@ func TestZeroValue_ZeroInflightIsUsable(t *testing.T) {
 }
 
 func TestZeroValue_NewInflightStartsIdle(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	if f == nil {
 		t.Fatal("NewInflight returned nil")
@@ -40,6 +42,7 @@ func TestZeroValue_NewInflightStartsIdle(t *testing.T) {
 }
 
 func TestZeroValue_NilContextWhenIdle(t *testing.T) {
+	t.Parallel()
 	f := utils.NewInflight()
 	var nilCtx context.Context
 	mustNotPanic(t, "Wait(nil) idle", func() {
@@ -50,6 +53,7 @@ func TestZeroValue_NilContextWhenIdle(t *testing.T) {
 }
 
 func TestZeroValue_NilContextWhenBusyIsAProgrammingError(t *testing.T) {
+	t.Parallel()
 	// Documents behaviour: with work in flight Wait needs ctx.Done(), so a
 	// nil ctx panics rather than blocking forever unnoticed.
 	f := utils.NewInflight()
@@ -61,6 +65,7 @@ func TestZeroValue_NilContextWhenBusyIsAProgrammingError(t *testing.T) {
 // Dangling pointer: a nil *Inflight is a wiring bug (a service constructed
 // without its tracker) and must fail loudly.
 func TestZeroValue_NilReceiverFailsLoudly(t *testing.T) {
+	t.Parallel()
 	var f *utils.Inflight
 	mustPanic(t, "Track", func() { f.Track() })
 	mustPanic(t, "Count", func() { f.Count() })

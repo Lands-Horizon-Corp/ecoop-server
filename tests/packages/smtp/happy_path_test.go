@@ -11,6 +11,7 @@ import (
 )
 
 func TestHappyPath_FormatInlineBody(t *testing.T) {
+	t.Parallel()
 	svc := mockService(t)
 	out, err := svc.Format(ctxT(t), smtp.SMTPRequest{
 		Name: "Ana",
@@ -26,6 +27,7 @@ func TestHappyPath_FormatInlineBody(t *testing.T) {
 }
 
 func TestHappyPath_FormatTemplateFile(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "welcome.html")
 	if err := os.WriteFile(path, []byte("<h1>Welcome {{.Name}}</h1><p>{{.Branch}}</p>"), 0o600); err != nil {
 		t.Fatal(err)
@@ -42,6 +44,7 @@ func TestHappyPath_FormatTemplateFile(t *testing.T) {
 }
 
 func TestHappyPath_SendDelivers(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	to := inbox(t)
@@ -76,6 +79,7 @@ func TestHappyPath_SendDelivers(t *testing.T) {
 }
 
 func TestHappyPath_FromNameOverridesDefault(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	to := inbox(t)
@@ -88,6 +92,7 @@ func TestHappyPath_FromNameOverridesDefault(t *testing.T) {
 }
 
 func TestHappyPath_UnicodeAndLongLines(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	to := inbox(t)
@@ -106,6 +111,7 @@ func TestHappyPath_UnicodeAndLongLines(t *testing.T) {
 }
 
 func TestHappyPath_SeveralSends(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	to := inbox(t)
@@ -118,6 +124,7 @@ func TestHappyPath_SeveralSends(t *testing.T) {
 }
 
 func TestHappyPath_RestartKeepsSending(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	svc := newService(t)
 	to := inbox(t)
@@ -136,6 +143,7 @@ func TestHappyPath_RestartKeepsSending(t *testing.T) {
 }
 
 func TestHappyPath_PingAgainstServer(t *testing.T) {
+	t.Parallel()
 	ctx := ctxT(t)
 	start := time.Now()
 	if err := newService(t).Ping(ctx); err != nil {
