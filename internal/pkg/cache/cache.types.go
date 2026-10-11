@@ -9,8 +9,18 @@ import (
 )
 
 var (
-	ErrNotFound   = errors.New("cache: key not found")
-	ErrNotRunning = errors.New("cache: service not running; call Run first")
+	ErrNotFound    = errors.New("cache: key not found")
+	ErrNotRunning  = errors.New("cache: service not running; call Run first")
+	ErrNoAddresses = errors.New("cache: no addresses configured")
+	ErrNilValue    = errors.New("cache: value is nil")
+)
+
+const (
+	ScanCount = 1000
+
+	// ReplaceDrainTimeout bounds how long a re-Run waits for operations on the
+	// previous client before closing it.
+	ReplaceDrainTimeout = 30 * time.Second
 )
 
 type CacheServices interface {

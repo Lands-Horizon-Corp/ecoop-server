@@ -143,9 +143,7 @@ func TestRace_StopDuringTraffic(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 200 {
 				mustNotPanic(t, "Encode/Decode during Stop", func() {
 					if _, err := svc.Encode(ctx, &qr.QRData{Data: "x"}); err != nil && !errors.Is(err, qr.ErrNotStarted) {
@@ -158,7 +156,7 @@ func TestRace_StopDuringTraffic(t *testing.T) {
 					}
 				})
 			}
-		}()
+		})
 	}
 	time.Sleep(time.Millisecond)
 	if err := svc.Stop(ctx); err != nil {

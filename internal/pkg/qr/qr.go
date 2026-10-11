@@ -72,7 +72,6 @@ func (q *QRService) Stop(ctx context.Context) error {
 	return nil
 }
 
-// closeCodecs releases the current codecs; callers must hold q.mu.
 func (q *QRService) closeCodecs() {
 	if q.encoder != nil {
 		_ = q.encoder.Close()

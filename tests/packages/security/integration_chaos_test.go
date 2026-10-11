@@ -33,7 +33,11 @@ func runPipeline(ctx context.Context, issuer, reader security.SecurityServices, 
 		return fmt.Errorf("hash: %w", err)
 	}
 	if fault == stageHash {
-		hash = hash[:len(hash)-2] + "AA"
+		last := "A"
+		if hash[len(hash)-1] == 'A' {
+			last = "B"
+		}
+		hash = hash[:len(hash)-1] + last
 	}
 
 	sealed, err := issuer.EncryptData(ctx, []byte(hash))
