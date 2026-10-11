@@ -37,26 +37,6 @@ func NewSecurityService(
 	}
 }
 
-func (s *SecurityService) pasetoKey() paseto.V4SymmetricKey {
-	hash := sha256.Sum256([]byte(s.secret))
-	key, _ := paseto.V4SymmetricKeyFromBytes(hash[:])
-	return key
-}
-
-func (s *SecurityService) validateHashConfig() error {
-	switch {
-	case s.iterations < 1:
-		return fmt.Errorf("%w: iterations must be at least 1", ErrInvalidConfig)
-	case s.parallelism < 1:
-		return fmt.Errorf("%w: parallelism must be at least 1", ErrInvalidConfig)
-	case s.salt < minSaltLength:
-		return fmt.Errorf("%w: salt length must be at least %d bytes", ErrInvalidConfig, minSaltLength)
-	case s.key < minKeyLength:
-		return fmt.Errorf("%w: key length must be at least %d bytes", ErrInvalidConfig, minKeyLength)
-	}
-	return nil
-}
-
 func (s *SecurityService) GeneratePassword(ctx context.Context, password string) (string, error) {
 	if err := s.validateHashConfig(); err != nil {
 		return "", err
@@ -131,15 +111,6 @@ func (s *SecurityService) Decrypt(ctx context.Context, tokenString string) (stri
 	return payload, nil
 }
 
-func (s *SecurityService) aead() (cipher.AEAD, error) {
-	key := sha256.Sum256([]byte("ecoop/security/data/v1:" + s.secret))
-	block, err := aes.NewCipher(key[:])
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(block)
-}
-
 func (s *SecurityService) EncryptData(ctx context.Context, data []byte) ([]byte, error) {
 	gcm, err := s.aead()
 	if err != nil {
@@ -166,4 +137,33 @@ func (s *SecurityService) DecryptData(ctx context.Context, ciphertext []byte) ([
 		return nil, ErrDecrypt
 	}
 	return plain, nil
+}
+
+func (s *SecurityService) aead() (cipher.AEAD, error) {
+	key := sha256.Sum256([]byte("ecoop/security/data/v1:" + s.secret))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
+}
+
+func (s *SecurityService) pasetoKey() paseto.V4SymmetricKey {
+	hash := sha256.Sum256([]byte(s.secret))
+	key, _ := paseto.V4SymmetricKeyFromBytes(hash[:])
+	return key
+}
+
+func (s *SecurityService) validateHashConfig() error {
+	switch {
+	case s.iterations < 1:
+		return fmt.Errorf("%w: iterations must be at least 1", ErrInvalidConfig)
+	case s.parallelism < 1:
+		return fmt.Errorf("%w: parallelism must be at least 1", ErrInvalidConfig)
+	case s.salt < minSaltLength:
+		return fmt.Errorf("%w: salt length must be at least %d bytes", ErrInvalidConfig, minSaltLength)
+	case s.key < minKeyLength:
+		return fmt.Errorf("%w: key length must be at least %d bytes", ErrInvalidConfig, minKeyLength)
+	}
+	return nil
 }
