@@ -44,17 +44,6 @@ var _ ecsql.SQLServices = (*ecsql.SQLService)(nil)
 func TestMain(m *testing.M) { os.Exit(runMain(m)) }
 
 func runMain(m *testing.M) (code int) {
-	scratch := filepath.Join(os.TempDir(), "bun-auto-*")
-	before, _ := filepath.Glob(scratch)
-	defer func() { // Migrate's scratch folders must never be left behind
-		after, _ := filepath.Glob(scratch)
-		for _, d := range after {
-			if !slices.Contains(before, d) {
-				fmt.Fprintln(os.Stderr, "sql tests: leaked scratch folder", d)
-				code = 1
-			}
-		}
-	}()
 	stop, err := startPostgres()
 	if err != nil {
 		skipReason = "no Postgres: " + err.Error()
@@ -62,7 +51,23 @@ func runMain(m *testing.M) (code int) {
 		return m.Run()
 	}
 	defer stop()
-	return m.Run()
+	code = m.Run()
+	// Migrate's scratch databases must never be left behind, failures included.
+	var left []string
+	rows, err := admin.Query("SELECT datname FROM pg_database WHERE datname LIKE 'sql_scratch_%'")
+	if err == nil {
+		for rows.Next() {
+			var name string
+			_ = rows.Scan(&name)
+			left = append(left, name)
+		}
+		rows.Close()
+	}
+	if len(left) > 0 {
+		fmt.Fprintln(os.Stderr, "sql tests: leaked scratch databases:", left)
+		code = 1
+	}
+	return code
 }
 
 func startPostgres() (stop func(), err error) {

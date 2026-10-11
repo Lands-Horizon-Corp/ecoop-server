@@ -122,7 +122,7 @@ func TestSQLDiff_ModelsOmittedFromDiffAreDropped(t *testing.T) {
 		t.Fatal(err)
 	}
 	review := e.files("*" + ecsql.ReviewSuffix)
-	if len(review) != 1 || !strings.Contains(readFile(t, review[0]), `DROP TABLE "public"."diff_accounts"`) {
+	if len(review) != 1 || !strings.Contains(readFile(t, review[0]), `DROP TABLE "diff_accounts"`) {
 		t.Fatalf("review files = %v", review)
 	}
 	if n := count(t, one, "SELECT count(*) FROM diff_accounts"); n != 1 {
@@ -130,6 +130,8 @@ func TestSQLDiff_ModelsOmittedFromDiffAreDropped(t *testing.T) {
 	}
 }
 
+// Hand-made changes to the database are reported, with what it would take
+// to undo them, and never planned into a migration.
 func TestSQLDiff_DetectsDriftFromManualChanges(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -138,30 +140,23 @@ func TestSQLDiff_DetectsDriftFromManualChanges(t *testing.T) {
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
+	files := e.files("*")
 	execSQL(t, s, "ALTER TABLE evo ADD COLUMN extra text")
 	execSQL(t, s, "ALTER TABLE evo ALTER COLUMN name DROP NOT NULL")
+	err := s.Migrate(ctx)
+	if !errors.Is(err, ecsql.ErrDrift) {
+		t.Fatalf("Migrate = %v, want ErrDrift", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, `DROP COLUMN "extra"`) || !strings.Contains(msg, "SET NOT NULL") {
+		t.Fatalf("drift report does not say how to undo it:\n%s", msg)
+	}
+	if !slices.Equal(e.files("*"), files) {
+		t.Fatalf("drift was planned into a migration: %v", e.files("*"))
+	}
+	execSQL(t, s, "ALTER TABLE evo DROP COLUMN extra")
+	execSQL(t, s, "ALTER TABLE evo ALTER COLUMN name SET NOT NULL")
 	if err := s.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	review := e.files("*" + ecsql.ReviewSuffix)
-	if len(review) != 1 {
-		t.Fatalf("drift not detected: files %v", e.files("*"))
-	}
-	body := readFile(t, review[0])
-	if !strings.Contains(body, `DROP COLUMN "extra"`) || !strings.Contains(body, `SET NOT NULL`) {
-		t.Fatalf("drift migration:\n%s", body)
-	}
-	if err := os.Rename(review[0], strings.TrimSuffix(review[0], ecsql.ReviewSuffix)); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if slices.Contains(columns(t, s, "evo"), "extra") {
-		t.Fatal("extra column not reverted")
-	}
-	if _, err := s.Client().ExecContext(ctx, "INSERT INTO evo (name) VALUES (NULL)"); err == nil {
-		t.Fatal("loosened NOT NULL not reverted")
+		t.Fatalf("after undoing the drift: %v", err)
 	}
 }
 

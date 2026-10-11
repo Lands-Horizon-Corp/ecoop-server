@@ -18,10 +18,9 @@ const (
 	// ReviewSuffix ends a generated migration that drops tables or columns.
 	// goose ignores it; renaming the file to .sql after review applies it.
 	ReviewSuffix = ".review"
-	// MigratePasses caps how many migrations one Migrate generates. Bun
-	// sometimes needs a second pass (a column added NOT NULL with a default
-	// comes out nullable first); models that still differ after this many
-	// cannot be expressed by the generator.
+	// MigratePasses caps how many migrations one Migrate generates. A rename
+	// can need a second pass for what it leaves behind (constraint names);
+	// models that still differ after this many cannot be expressed.
 	MigratePasses = 3
 )
 
@@ -37,6 +36,8 @@ var (
 	ErrEmptyName        = errors.New("sql: migration name is empty")
 	ErrInvalidSteps     = errors.New("sql: steps must be greater than zero")
 	ErrTooManySteps     = errors.New("sql: more steps than migrations to run")
+	ErrDrift            = errors.New("sql: the database differs from its migrations (changed by hand?)")
+	ErrScratchDatabase  = errors.New("sql: cannot create a scratch database to plan with (Migrate needs CREATEDB on the server)")
 	ErrInvalidMigration = errors.New("sql: the generated migration does not apply, so it was removed")
 	ErrNotConverged     = errors.New("sql: the schema still differs from the models after migrating")
 	ErrInvalidPool      = errors.New("sql: max open and max idle connections must be zero or more")

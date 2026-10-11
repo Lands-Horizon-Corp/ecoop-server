@@ -6,7 +6,8 @@ import (
 )
 
 // Schema evolution: a product's twelve releases, mixing migrations
-// generated from models with hand-written indexes, backfills and seed data.
+// generated from models (indexes declared on them) with hand-written data
+// backfills and seed data.
 
 // evoStep is one release: models to Migrate to, or a hand-written migration.
 type evoStep struct {
@@ -16,17 +17,17 @@ type evoStep struct {
 
 var evoReleases = []evoStep{
 	{models: []any{(*EvoV1)(nil)}},
-	{up: "CREATE INDEX evo_name_idx ON evo (name);", down: "DROP INDEX evo_name_idx;"},
 	{models: []any{(*EvoV2)(nil)}},
 	{up: "UPDATE evo SET email = lower(name) || '@evo.test' WHERE email IS NULL;", down: "SELECT 1;"},
 	{models: []any{(*EvoV3)(nil)}},
-	{up: "CREATE INDEX evo_joined_idx ON evo (joined_at) WHERE joined_at IS NOT NULL;", down: "DROP INDEX evo_joined_idx;"},
 	{models: []any{(*EvoV4)(nil)}},
 	{up: "UPDATE evo SET score = length(name);", down: "SELECT 1;"},
-	{up: "CREATE INDEX evo_score_idx ON evo (score DESC);", down: "DROP INDEX evo_score_idx;"},
-	{models: []any{(*EvoV4)(nil), (*DiffCustomer)(nil), (*DiffAccount)(nil)}},
+	{models: []any{(*EvoV4Idx)(nil)}},
+	{models: []any{(*EvoV4Idx)(nil), (*DiffCustomer)(nil), (*DiffAccount)(nil)}},
 	{up: "INSERT INTO diff_customers (name) SELECT name FROM evo;", down: "DELETE FROM diff_customers;"},
-	{up: "CREATE INDEX diff_accounts_customer_idx ON diff_accounts (customer_id);", down: "DROP INDEX diff_accounts_customer_idx;"},
+	{models: []any{(*EvoV4Idx)(nil), (*DiffCustomer)(nil), (*DiffAccountIdx)(nil)}},
+	{up: "INSERT INTO diff_accounts (customer_id) SELECT id FROM diff_customers;", down: "DELETE FROM diff_accounts;"},
+	{up: "UPDATE evo SET email = lower(email);", down: "SELECT 1;"},
 }
 
 var finalEvoModels = evoReleases[9].models
@@ -64,7 +65,7 @@ func nextFileVersion(e *env) int64 {
 	return v
 }
 
-func TestSQLEvolution_TwelveReleasesWithDataAndHandWrittenIndexes(t *testing.T) {
+func TestSQLEvolution_TwelveReleasesWithDataAndDeclaredIndexes(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	rows := evolve(t, e, 0, len(evoReleases))
@@ -73,10 +74,9 @@ func TestSQLEvolution_TwelveReleasesWithDataAndHandWrittenIndexes(t *testing.T) 
 		t.Fatalf("rows = %d, want %d", n, rows)
 	}
 	if n := count(t, s, "SELECT count(*) FROM pg_indexes WHERE indexname IN ('evo_name_idx','evo_joined_idx','evo_score_idx','diff_accounts_customer_idx')"); n != 4 {
-		t.Fatalf("hand-written indexes = %d, want 4", n)
+		t.Fatalf("declared indexes = %d, want 4", n)
 	}
-	// Converged: the models match, so Migrate writes nothing (and keeps the
-	// hand-written indexes).
+	// Converged: the models match, so Migrate writes nothing.
 	files := len(e.files("*"))
 	if err := s.Migrate(ctxT(t)); err != nil || len(e.files("*")) != files {
 		t.Fatalf("not converged: %v, files %d → %d", err, files, len(e.files("*")))

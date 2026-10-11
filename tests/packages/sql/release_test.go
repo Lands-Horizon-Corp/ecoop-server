@@ -126,18 +126,15 @@ func TestMigrationSanity_SadDriftAndPendingMigrationsAreCaught(t *testing.T) {
 	if !strings.Contains(e.out.String(), "pending") || !strings.Contains(e.out.String(), "200_customer_accounts_view.sql") {
 		t.Fatalf("pending migration not reported:\n%s", e.out.String())
 	}
-	// Drift: a hand-made change makes Migrate generate a migration.
+	// Drift: a hand-made change is reported, not planned.
 	d := newEnv(t)
 	m := d.started(t, (*EvoV2)(nil))
 	if err := m.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
 	execSQL(t, m, "ALTER TABLE evo ALTER COLUMN name DROP NOT NULL")
-	if err := m.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if n := len(d.files("*.sql")); n != 2 {
-		t.Fatalf("drift not caught: files %v", d.files("*"))
+	if err := m.Migrate(ctx); !errors.Is(err, ecsql.ErrDrift) {
+		t.Fatalf("drift not caught: %v", err)
 	}
 }
 

@@ -1,0 +1,542 @@
+package sql
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/url"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"ariga.io/atlas/sql/migrate"
+	"ariga.io/atlas/sql/postgres"
+	"ariga.io/atlas/sql/schema"
+	"ariga.io/atlas/sql/sqltool"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+)
+
+// planner plans migrations with Atlas from two scratch databases on the
+// target's server: folder, the migrations folder replayed by goose, and
+// models, the models' tables created by Bun (with whatever indexes and
+// checks their AfterCreateTable hooks add). Atlas diffs them, and the
+// difference is the next migration. Both are dropped by close.
+type planner struct {
+	s      *SQLService
+	dir    string
+	folder *sql.DB
+	drv    migrate.Driver // over folder
+	want   *schema.Schema // the models' schema
+	drops  []func()
+}
+
+// newPlanner builds both scratch databases and checks the live database
+// (mig) still matches its migrations: a change made by hand is reported as
+// ErrDrift rather than planned into a migration.
+func (s *SQLService) newPlanner(ctx context.Context, mig *sql.DB, dir string) (_ *planner, err error) {
+	p := &planner{s: s, dir: dir}
+	defer func() {
+		if err != nil {
+			p.close()
+		}
+	}()
+	if p.folder, err = p.scratch(ctx, mig); err != nil {
+		return nil, err
+	}
+	if err := upLocked(ctx, p.folder, dir); err != nil {
+		return nil, err
+	}
+	if p.drv, err = postgres.Open(p.folder); err != nil {
+		return nil, fmt.Errorf("sql: planning: %w", err)
+	}
+	if err := p.drift(ctx, mig); err != nil {
+		return nil, err
+	}
+	models, err := p.scratch(ctx, mig)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.createModels(ctx, models); err != nil {
+		return nil, err
+	}
+	if p.want, err = inspect(ctx, models, "public"); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (p *planner) close() {
+	for _, drop := range slices.Backward(p.drops) {
+		drop()
+	}
+}
+
+// scratch creates an empty database next to the target and returns a pool
+// on it; close drops it.
+func (p *planner) scratch(ctx context.Context, mig *sql.DB) (*sql.DB, error) {
+	name := "sql_scratch_" + strings.ToLower(rand.Text()[:16])
+	if _, err := mig.ExecContext(ctx, `CREATE DATABASE "`+name+`"`); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrScratchDatabase, err)
+	}
+	p.drops = append(p.drops, func() {
+		_, _ = mig.ExecContext(context.WithoutCancel(ctx), `DROP DATABASE IF EXISTS "`+name+`" WITH (FORCE)`)
+	})
+	u, err := url.Parse(p.s.dsn)
+	if err != nil {
+		return nil, ErrInvalidDSN
+	}
+	u.Path = "/" + name
+	c, err := connector(u.String(), pgdriver.WithReadTimeout(0))
+	if err != nil {
+		return nil, err
+	}
+	db := sql.OpenDB(c)
+	p.drops = append(p.drops, func() { _ = db.Close() })
+	return db, nil
+}
+
+// drift compares the live database with the replayed folder.
+func (p *planner) drift(ctx context.Context, mig *sql.DB) error {
+	var current string
+	if err := mig.QueryRowContext(ctx, "SELECT current_schema()").Scan(&current); err != nil {
+		return fmt.Errorf("sql: planning: %w", err)
+	}
+	live, err := inspect(ctx, mig, current)
+	if err != nil {
+		return err
+	}
+	folder, err := inspect(ctx, p.folder, "public")
+	if err != nil {
+		return err
+	}
+	live.Name = folder.Name
+	changes, err := p.drv.SchemaDiff(live, folder)
+	if err != nil || len(changes) == 0 {
+		return err
+	}
+	plan, err := p.plan(ctx, changes)
+	if err != nil {
+		return err
+	}
+	var fix []string
+	for _, c := range plan.Changes {
+		fix = append(fix, c.Cmd+";")
+	}
+	return fmt.Errorf("%w; to match them it would take:\n%s", ErrDrift, strings.Join(fix, "\n"))
+}
+
+// createModels creates every model's table with its foreign keys. A table
+// whose foreign key names a table not created yet waits for the next round.
+func (p *planner) createModels(ctx context.Context, db *sql.DB) error {
+	b := bun.NewDB(db, pgdialect.New()) // closed with db
+	if exts, err := extensions(ctx, p.folder); err != nil {
+		return err
+	} else {
+		for _, e := range exts {
+			if _, err := db.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS "`+e+`"`); err != nil {
+				return fmt.Errorf("sql: planning: extension %s: %w", e, err)
+			}
+		}
+	}
+	pending := slices.Clone(p.s.models)
+	for len(pending) > 0 {
+		var later []any
+		var last error
+		for _, m := range pending {
+			_, err := b.NewCreateTable().Model(m).WithForeignKeys().Exec(ctx)
+			if pg, ok := errors.AsType[pgdriver.Error](err); ok && pg.Field('C') == "42P01" {
+				later, last = append(later, m), err
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("%w: %T: %w", ErrInvalidModel, m, err)
+			}
+		}
+		if len(later) == len(pending) {
+			return fmt.Errorf("%w: foreign keys form a cycle or name a table no model has: %w", ErrInvalidModel, last)
+		}
+		pending = later
+	}
+	return nil
+}
+
+// extensions lists the extensions the migrations installed, which the
+// models may need.
+func extensions(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, "SELECT extname FROM pg_extension WHERE extname <> 'plpgsql' ORDER BY 1")
+	if err != nil {
+		return nil, fmt.Errorf("sql: planning: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// inspect reads one schema with Atlas, leaving out goose's table.
+func inspect(ctx context.Context, db *sql.DB, name string) (*schema.Schema, error) {
+	drv, err := postgres.Open(db)
+	if err != nil {
+		return nil, fmt.Errorf("sql: planning: %w", err)
+	}
+	sch, err := drv.InspectSchema(ctx, name, nil)
+	if err != nil {
+		return nil, fmt.Errorf("sql: planning: inspecting %s: %w", name, err)
+	}
+	sch.Tables = slices.DeleteFunc(sch.Tables, func(t *schema.Table) bool { return t.Name == GooseTable })
+	return sch, nil
+}
+
+func (p *planner) plan(ctx context.Context, changes []schema.Change) (*migrate.Plan, error) {
+	plan, err := p.drv.PlanChanges(ctx, "auto", changes, func(o *migrate.PlanOptions) {
+		none := "" // unqualified, so a file applies in whatever schema the database uses
+		o.SchemaQualifier = &none
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sql: planning: %w", err)
+	}
+	return plan, nil
+}
+
+// generate diffs the replayed folder against the models and writes the
+// difference as a goose migration. When it drops a table, a column, a check,
+// a foreign key or a unique index (without putting one back), the file gets
+// ReviewSuffix instead, which goose ignores, so nothing is lost until a
+// person reviews it and renames it to .sql. It returns the file to apply,
+// or "" when there is none.
+func (p *planner) generate(ctx context.Context) (string, error) {
+	have, err := inspect(ctx, p.folder, "public")
+	if err != nil {
+		return "", err
+	}
+	changes, err := p.drv.SchemaDiff(have, p.want)
+	if err != nil {
+		return "", fmt.Errorf("sql: planning: %w", err)
+	}
+	if len(changes) == 0 {
+		return "", nil
+	}
+	changes = explicitDrops(have, renames(changes))
+	plan, err := p.plan(ctx, changes)
+	if err != nil {
+		return "", err
+	}
+	if err := p.renameSequences(ctx, changes, plan); err != nil {
+		return "", err
+	}
+	files, err := sqltool.GooseFormatter.Format(plan)
+	if err != nil {
+		return "", fmt.Errorf("sql: planning: %w", err)
+	}
+	body := string(files[0].Bytes())
+	review := destructive(changes)
+	if review {
+		if pending, err := pendingReview(p.dir, body); err != nil || pending != "" {
+			if pending != "" {
+				fmt.Fprintf(p.s.output, "sql: destructive changes already waiting for review in %s\n", pending)
+			}
+			return "", err
+		}
+	}
+	version, err := nextVersion(p.dir)
+	if err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("%d_auto.sql", version)
+	header := "-- Generated by Migrate from the models. Review before committing.\n"
+	if review {
+		name += ReviewSuffix
+		header = "-- Generated by Migrate from the models. It drops data or a safeguard (a table,\n" +
+			"-- column, check, foreign key or index), so it is not applied: review it, then\n" +
+			"-- rename it to end in .sql to apply it.\n"
+	}
+	file := filepath.Join(p.dir, name)
+	if err := writeNew(file, header+body); err != nil {
+		return "", fmt.Errorf("sql: writing %s: %w", name, err)
+	}
+	if review {
+		fmt.Fprintf(p.s.output, "sql: destructive changes written to %s for review; not applied\n", name)
+		return "", nil
+	}
+	return file, nil
+}
+
+// explicitDrops drops the foreign keys and indexes on a dropped column in a
+// change of their own, before it. Postgres drops them with the column, and
+// Atlas leaves them out of that change, so its Down would restore the column
+// without them; as their own change, Down puts them back after the column.
+func explicitDrops(have *schema.Schema, changes []schema.Change) []schema.Change {
+	var out []schema.Change
+	for _, c := range changes {
+		m, ok := c.(*schema.ModifyTable)
+		t, found := have, false
+		var table *schema.Table
+		if ok {
+			table, found = t.Table(m.T.Name)
+		}
+		if !found {
+			out = append(out, c)
+			continue
+		}
+		dropped := map[string]bool{}
+		for _, ch := range m.Changes {
+			if d, ok := ch.(*schema.DropColumn); ok {
+				dropped[d.C.Name] = true
+			}
+		}
+		onDropped := func(ch schema.Change) bool {
+			switch ch := ch.(type) {
+			case *schema.DropForeignKey:
+				return slices.ContainsFunc(ch.F.Columns, func(c *schema.Column) bool { return dropped[c.Name] })
+			case *schema.DropIndex:
+				return slices.ContainsFunc(ch.I.Parts, func(p *schema.IndexPart) bool { return p.C != nil && dropped[p.C.Name] })
+			}
+			return false
+		}
+		var extra, rest []schema.Change
+		moved := map[string]bool{}
+		for _, ch := range m.Changes {
+			if onDropped(ch) {
+				extra = append(extra, ch)
+				if fk, ok := ch.(*schema.DropForeignKey); ok {
+					moved["fk:"+fk.F.Symbol] = true
+				} else {
+					moved["ix:"+ch.(*schema.DropIndex).I.Name] = true
+				}
+			} else {
+				rest = append(rest, ch)
+			}
+		}
+		for _, fk := range table.ForeignKeys {
+			if d := (&schema.DropForeignKey{F: fk}); !moved["fk:"+fk.Symbol] && onDropped(d) {
+				extra = append(extra, d)
+			}
+		}
+		for _, ix := range table.Indexes {
+			if d := (&schema.DropIndex{I: ix}); !moved["ix:"+ix.Name] && onDropped(d) {
+				extra = append(extra, d)
+			}
+		}
+		if len(extra) > 0 {
+			out = append(out, &schema.ModifyTable{T: m.T, Changes: extra})
+			m.Changes = rest
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// renames turns a dropped table or column and an added one of the same shape
+// into a rename, which Atlas's library leaves as a drop and an add: a column
+// dropped and a column added in one table with the same type, nullability
+// and default; a table dropped and a table added with the same columns.
+// Only one-to-one matches count; anything ambiguous stays a drop and an add,
+// and goes to review.
+func renames(changes []schema.Change) []schema.Change {
+	for _, c := range changes {
+		if m, ok := c.(*schema.ModifyTable); ok {
+			m.Changes = pair(m.Changes,
+				func(c schema.Change) (string, bool) {
+					if d, ok := c.(*schema.DropColumn); ok {
+						return columnShape(d.C), true
+					}
+					return "", false
+				},
+				func(c schema.Change) (string, bool) {
+					if a, ok := c.(*schema.AddColumn); ok {
+						return columnShape(a.C), true
+					}
+					return "", false
+				},
+				func(d, a schema.Change) schema.Change {
+					return &schema.RenameColumn{From: d.(*schema.DropColumn).C, To: a.(*schema.AddColumn).C}
+				})
+		}
+	}
+	changes = pair(changes,
+		func(c schema.Change) (string, bool) {
+			if d, ok := c.(*schema.DropTable); ok {
+				return tableShape(d.T), true
+			}
+			return "", false
+		},
+		func(c schema.Change) (string, bool) {
+			if a, ok := c.(*schema.AddTable); ok {
+				return tableShape(a.T), true
+			}
+			return "", false
+		},
+		func(d, a schema.Change) schema.Change {
+			return &schema.RenameTable{From: d.(*schema.DropTable).T, To: a.(*schema.AddTable).T}
+		})
+	return followRenames(changes)
+}
+
+// followRenames removes foreign key changes that only re-point a key at a
+// renamed table: Postgres keys follow the rename by themselves, and the
+// change's Down would name the table before it is renamed back.
+func followRenames(changes []schema.Change) []schema.Change {
+	renamed := map[string]string{}
+	for _, c := range changes {
+		if r, ok := c.(*schema.RenameTable); ok {
+			renamed[r.From.Name] = r.To.Name
+		}
+	}
+	if len(renamed) == 0 {
+		return changes
+	}
+	follows := func(c schema.Change) bool {
+		m, ok := c.(*schema.ModifyForeignKey)
+		return ok && m.From.RefTable != nil && m.To.RefTable != nil &&
+			renamed[m.From.RefTable.Name] == m.To.RefTable.Name && m.From.Symbol == m.To.Symbol
+	}
+	return slices.DeleteFunc(changes, func(c schema.Change) bool {
+		m, ok := c.(*schema.ModifyTable)
+		if !ok {
+			return false
+		}
+		m.Changes = slices.DeleteFunc(m.Changes, follows)
+		return len(m.Changes) == 0
+	})
+}
+
+// pair replaces each drop and add with the same shape, when that shape
+// matches exactly one of each, by rename(drop, add).
+func pair(changes []schema.Change, drop, add func(schema.Change) (string, bool), rename func(d, a schema.Change) schema.Change) []schema.Change {
+	shapes := func(match func(schema.Change) (string, bool)) map[string][]int {
+		out := map[string][]int{}
+		for i, c := range changes {
+			if shape, ok := match(c); ok {
+				out[shape] = append(out[shape], i)
+			}
+		}
+		return out
+	}
+	drops, adds := shapes(drop), shapes(add)
+	remove := map[int]bool{}
+	for shape, d := range drops {
+		if a := adds[shape]; len(d) == 1 && len(a) == 1 {
+			changes[d[0]] = rename(changes[d[0]], changes[a[0]])
+			remove[a[0]] = true
+		}
+	}
+	out := changes[:0]
+	for i, c := range changes {
+		if !remove[i] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func columnShape(c *schema.Column) string {
+	var def string
+	if x, ok := c.Default.(*schema.RawExpr); ok {
+		def = x.X
+	} else if x, ok := c.Default.(*schema.Literal); ok {
+		def = x.V
+	}
+	return fmt.Sprintf("%s|%v|%s", typeShape(c.Type), c.Type.Null, def)
+}
+
+// typeShape is a column type as SQL, which leaves out a serial's sequence
+// (named after its table; a renamed table's sequence is renamed with it).
+func typeShape(t *schema.ColumnType) string {
+	if t == nil {
+		return ""
+	}
+	if f, err := postgres.FormatType(t.Type); err == nil {
+		return f
+	}
+	return fmt.Sprintf("%T", t.Type)
+}
+
+// tableShape is a table's columns: names and shapes, in order.
+func tableShape(t *schema.Table) string {
+	var b strings.Builder
+	for _, c := range t.Columns {
+		fmt.Fprintf(&b, "%s:%s;", c.Name, columnShape(c))
+	}
+	return b.String()
+}
+
+// renameSequences renames a renamed table's serial sequences with it, in the
+// same migration. Atlas expects <table>_<column>_seq: left with the old name,
+// the next plan would give the column a new sequence starting from 1, and
+// every insert would collide with an existing id.
+func (p *planner) renameSequences(ctx context.Context, changes []schema.Change, plan *migrate.Plan) error {
+	for _, c := range changes {
+		r, ok := c.(*schema.RenameTable)
+		if !ok {
+			continue
+		}
+		rows, err := p.folder.QueryContext(ctx, `SELECT s.relname, a.attname
+  FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
+  JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+ WHERE d.refobjid = to_regclass($1) ORDER BY 1`, `"`+r.From.Name+`"`)
+		if err != nil {
+			return fmt.Errorf("sql: planning: sequences of %s: %w", r.From.Name, err)
+		}
+		for rows.Next() {
+			var seq, col string
+			if err := rows.Scan(&seq, &col); err != nil {
+				rows.Close()
+				return err
+			}
+			if seq != r.From.Name+"_"+col+"_seq" {
+				continue
+			}
+			renamed := r.To.Name + "_" + col + "_seq"
+			plan.Changes = append(plan.Changes, &migrate.Change{
+				Cmd:     fmt.Sprintf(`ALTER SEQUENCE "%s" RENAME TO "%s"`, seq, renamed),
+				Reverse: fmt.Sprintf(`ALTER SEQUENCE "%s" RENAME TO "%s"`, renamed, seq),
+				Comment: fmt.Sprintf("rename %q sequence with its table", seq),
+			})
+		}
+		rows.Close()
+	}
+	return nil
+}
+
+// destructive reports changes that drop data or a safeguard: a table, a
+// column, a check, or a foreign key or index not put back by the same change
+// (as a rename does). An index the models do not declare (one written by
+// hand) shows up here too, rather than being dropped unnoticed.
+func destructive(changes []schema.Change) bool {
+	for _, c := range changes {
+		switch c := c.(type) {
+		case *schema.DropTable:
+			return true
+		case *schema.ModifyTable:
+			var lostFK, lostIndex int
+			for _, m := range c.Changes {
+				switch m.(type) {
+				case *schema.DropColumn, *schema.DropCheck:
+					return true
+				case *schema.DropForeignKey:
+					lostFK++
+				case *schema.AddForeignKey:
+					lostFK--
+				case *schema.DropIndex:
+					lostIndex++
+				case *schema.AddIndex:
+					lostIndex--
+				}
+			}
+			if lostFK > 0 || lostIndex > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}

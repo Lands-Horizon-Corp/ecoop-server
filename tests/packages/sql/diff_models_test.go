@@ -1,6 +1,7 @@
 package sql_test
 
 import (
+	"context"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -154,3 +155,46 @@ type Chain8 struct {
 
 var chainModels = []any{(*Chain1)(nil), (*Chain2)(nil), (*Chain3)(nil), (*Chain4)(nil),
 	(*Chain5)(nil), (*Chain6)(nil), (*Chain7)(nil), (*Chain8)(nil)}
+
+// EvoV4 with its indexes declared, as Migrate needs them: Atlas diffs the
+// tables Bun creates, hooks included.
+type EvoV4Idx struct {
+	bun.BaseModel `bun:"table:evo"`
+	ID            int64     `bun:"id,pk,autoincrement"`
+	Name          string    `bun:"name,notnull"`
+	Email         string    `bun:"email,unique"`
+	JoinedAt      time.Time `bun:"joined_at,nullzero"`
+	Score         int64     `bun:"score,notnull,default:0"`
+}
+
+func (m *EvoV4Idx) AfterCreateTable(ctx context.Context, q *bun.CreateTableQuery) error {
+	for _, stmt := range []string{
+		"CREATE INDEX evo_name_idx ON evo (name)",
+		"CREATE INDEX evo_joined_idx ON evo (joined_at) WHERE joined_at IS NOT NULL",
+		"CREATE INDEX evo_score_idx ON evo (score DESC)",
+	} {
+		if _, err := q.DB().ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type DiffAccountIdx struct {
+	bun.BaseModel `bun:"table:diff_accounts"`
+	ID            int64         `bun:"id,pk,autoincrement"`
+	CustomerID    int64         `bun:"customer_id,notnull"`
+	Customer      *DiffCustomer `bun:"rel:belongs-to,join:customer_id=id"`
+}
+
+func (m *DiffAccountIdx) AfterCreateTable(ctx context.Context, q *bun.CreateTableQuery) error {
+	_, err := q.DB().NewCreateIndex().Model(m).Index("diff_accounts_customer_idx").Column("customer_id").Exec(ctx)
+	return err
+}
+
+// Broken names a column type Postgres does not have.
+type Broken struct {
+	bun.BaseModel `bun:"table:broken"`
+	ID            int64  `bun:"id,pk,autoincrement"`
+	Value         string `bun:"value,type:no_such_type"`
+}
