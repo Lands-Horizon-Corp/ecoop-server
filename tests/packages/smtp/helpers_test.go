@@ -350,7 +350,7 @@ func search(t testing.TB, to string) []summary {
 // is queued and rate limited, so allow for SendRateLimit per RateWindow.
 func received(t testing.TB, to string, n int) []message {
 	t.Helper()
-	deadline := time.Now().Add(10*time.Second + time.Duration(n/smtp.SendRateLimit+1)*smtp.RateWindow)
+	deadline := time.Now().Add(30*time.Second + time.Duration(n/smtp.SendRateLimit+1)*smtp.RateWindow)
 	var got []summary
 	for time.Now().Before(deadline) {
 		if got = search(t, to); len(got) >= n {

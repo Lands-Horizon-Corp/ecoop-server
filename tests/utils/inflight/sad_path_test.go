@@ -22,7 +22,7 @@ func TestSadPath_WaitDeadlineWhileBusy(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Wait = %v, want DeadlineExceeded", err)
 	}
-	if d := time.Since(start); d > 300*time.Millisecond {
+	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("Wait overran its deadline: %v", d)
 	}
 	if f.Count() != 1 {

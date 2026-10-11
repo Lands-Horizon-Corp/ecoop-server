@@ -93,7 +93,9 @@ func TestIntegrationChaos_JobFindsTheInstanceWithItsHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	eventually(t, 3*queue.UnhandledRetry, func() bool { return r.count() == 10 }, "jobs did not reach the instance with the handler")
+	// Each job lands on either instance at random and bounces UnhandledRetry
+	// when it hits the wrong one, so allow for several bounces.
+	eventually(t, 12*queue.UnhandledRetry, func() bool { return r.count() == 10 }, "jobs did not reach the instance with the handler")
 	if n := archived(t, queue.Default); n != 0 {
 		t.Fatalf("%d jobs archived while bouncing between instances", n)
 	}

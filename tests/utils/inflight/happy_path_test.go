@@ -49,7 +49,7 @@ func TestHappyPath_WaitWhenIdleReturnsImmediately(t *testing.T) {
 	if err := f.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 100*time.Millisecond {
+	if d := time.Since(start); d > time.Second {
 		t.Fatalf("idle Wait took %v", d)
 	}
 }

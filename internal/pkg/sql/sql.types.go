@@ -2,8 +2,33 @@ package sql
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/uptrace/bun"
+)
+
+const (
+	DefaultConnMaxLifetime = 30 * time.Minute // recycle connections before servers or proxies drop them
+	DefaultConnMaxIdleTime = 5 * time.Minute  // close idle connections beyond MaxIdleConns sooner
+	GooseTable             = "goose_db_version"
+	// MigrationLockID keys the Postgres advisory lock that keeps two
+	// instances from migrating at the same time.
+	MigrationLockID int64 = 7_419_220_311
+	// ReviewSuffix ends a generated migration that drops tables or columns.
+	// goose ignores it; renaming the file to .sql after review applies it.
+	ReviewSuffix = ".review"
+)
+
+var (
+	ErrNotStarted      = errors.New("sql: service not started")
+	ErrNoTracker       = errors.New("sql: service has no in-flight tracker; create it with NewSQLService")
+	ErrNoDSN           = errors.New("sql: dsn is empty")
+	ErrNoMigrationsDir = errors.New("sql: migrations directory is not set")
+	ErrNotADirectory   = errors.New("sql: migrations path is not a directory")
+	ErrEmptyName       = errors.New("sql: migration name is empty")
+	ErrInvalidSteps    = errors.New("sql: steps must be greater than zero")
+	ErrInvalidPool     = errors.New("sql: max open and max idle connections must be zero or more")
 )
 
 type (

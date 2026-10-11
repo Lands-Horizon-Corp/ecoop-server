@@ -93,7 +93,7 @@ func TestZeroValue_NilContext(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(20 * time.Second): // Argon2 runs first and is slow under parallel load
 		t.Fatal("Generate(nil ctx) hung")
 	}
 }

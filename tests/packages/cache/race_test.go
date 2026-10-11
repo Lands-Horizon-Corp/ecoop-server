@@ -229,7 +229,7 @@ func TestRace_StopGivesUpWhenCtxEnds(t *testing.T) {
 	if err := svc.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	p.SetDelay(500 * time.Millisecond)
+	p.SetDelay(5 * time.Second) // much longer than the limit below
 
 	inflight := make(chan error, 1)
 	go func() { inflight <- svc.Ping(context.Background()) }()
@@ -242,7 +242,7 @@ func TestRace_StopGivesUpWhenCtxEnds(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Stop = %v, want DeadlineExceeded", err)
 	}
-	if d := time.Since(start); d > 300*time.Millisecond {
+	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("Stop ignored its deadline and took %v", d)
 	}
 	if err := <-inflight; err == nil {

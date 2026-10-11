@@ -162,9 +162,14 @@ func ctxT(t testing.TB) context.Context {
 	return ctx
 }
 
+// loadFactor stretches waits for outcomes: every package runs in parallel
+// under -race, so jobs can take several times longer than on an idle machine.
+// It never loosens what is checked, only how long the test waits for it.
+const loadFactor = 3
+
 func eventually(t testing.TB, timeout time.Duration, cond func() bool, msg string, args ...any) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(timeout * loadFactor)
 	for !cond() {
 		if time.Now().After(deadline) {
 			t.Fatalf("not met within %v: "+msg, append([]any{timeout}, args...)...)

@@ -122,14 +122,14 @@ func TestIntegrationChaos_SharedTrackerDrainsAllServices(t *testing.T) {
 func TestIntegrationChaos_SeparateTrackersDrainIndependently(t *testing.T) {
 	t.Parallel()
 	a, b := newFakeService(utils.NewInflight()), newFakeService(utils.NewInflight())
-	go func() { _ = b.Do(300 * time.Millisecond) }()
+	go func() { _ = b.Do(3 * time.Second) }() // much longer than the limit below
 	time.Sleep(20 * time.Millisecond)
 
 	start := time.Now()
 	if err := a.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 100*time.Millisecond {
+	if d := time.Since(start); d > time.Second {
 		t.Fatalf("a.Stop waited %v on b's operation despite separate trackers", d)
 	}
 	_ = b.Stop(context.Background())

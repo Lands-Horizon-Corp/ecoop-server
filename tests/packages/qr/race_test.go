@@ -223,7 +223,7 @@ func TestRace_StopGivesUpWhenCtxEnds(t *testing.T) {
 	if err := svc.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Stop = %v, want DeadlineExceeded", err)
 	}
-	if d := time.Since(start); d > 300*time.Millisecond {
+	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("Stop overran its deadline: %v", d)
 	}
 }

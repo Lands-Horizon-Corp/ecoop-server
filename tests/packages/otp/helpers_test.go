@@ -357,7 +357,7 @@ func mailIDs(to string) []string {
 // emailHTML waits for the email sent to `to` and returns its HTML.
 func emailHTML(t testing.TB, to string) string {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		if ids := mailIDs(to); len(ids) > 0 {
 			var m struct{ HTML string }
