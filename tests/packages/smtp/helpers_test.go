@@ -28,6 +28,7 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/smtp"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
+	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/valkeylock"
 )
 
 // Delivery tests run against the mailpit and valkey services in
@@ -53,6 +54,12 @@ func TestMain(m *testing.M) {
 }
 
 func runMain(m *testing.M) int {
+	release, err := valkeylock.Acquire()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "smtp tests: lock:", err)
+		return 1
+	}
+	defer release()
 	if err := startMailpit(); err != nil {
 		skipReason = "no Mailpit: " + err.Error()
 		fmt.Fprintln(os.Stderr, "smtp tests:", skipReason)

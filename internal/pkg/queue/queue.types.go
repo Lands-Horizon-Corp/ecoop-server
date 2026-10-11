@@ -46,6 +46,7 @@ var (
 	ErrNoHandler   = errors.New("queue: no handler for this job type on this instance")
 	ErrNoSchedule  = errors.New("queue: no schedule with this id")
 	ErrRateLimited = errors.New("queue: rate limit reached")
+	ErrRetryLater  = errors.New("queue: retry later")
 	// ErrSkipRetry, wrapped in a handler's error, stops further attempts.
 	ErrSkipRetry = asynq.SkipRetry
 )

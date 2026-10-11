@@ -100,14 +100,16 @@ func (q *QueueService) Start(ctx context.Context) error {
 		_ = client.Close()
 		return fmt.Errorf("queue: starting: %w", err)
 	}
+	q.client = client // before the worker starts: dispatch may requeue with it
 	if err := worker.Start(asynq.HandlerFunc(q.dispatch)); err != nil {
+		q.client = nil
 		_ = client.Close()
 		return fmt.Errorf("queue: starting: %w", err)
 	}
 	leadCtx, stopLeads := context.WithCancel(context.Background())
 	go q.lead(leadCtx)
 	q.cron.Start()
-	q.client, q.worker, q.stopLeads = client, worker, stopLeads
+	q.worker, q.stopLeads = worker, stopLeads
 	q.started.Store(true)
 	return nil
 }
@@ -190,10 +192,19 @@ func (q *QueueService) Enqueue(ctx context.Context, taskType string, payload any
 	return info.ID, nil
 }
 
-// dispatch runs a job on this instance. A job type with no handler here goes
-// back for an instance that has one. A rate-limited type takes a slot in the
-// current window first; over the limit, the job waits for the next window.
+// dispatch runs a job on this instance and honours RetryAfter.
 func (q *QueueService) dispatch(ctx context.Context, t *asynq.Task) error {
+	err := q.run(ctx, t)
+	if later, ok := errors.AsType[*retryAfterError](err); ok {
+		return q.later(ctx, t, later)
+	}
+	return err
+}
+
+// run runs a job. A job type with no handler here goes back for an instance
+// that has one. A rate-limited type takes a slot in the current window
+// first; over the limit, the job waits for the next window.
+func (q *QueueService) run(ctx context.Context, t *asynq.Task) error {
 	v, ok := q.routes.Load(t.Type())
 	if !ok {
 		return RetryAfter(UnhandledRetry, ErrNoHandler)
@@ -213,17 +224,51 @@ func (q *QueueService) dispatch(ctx context.Context, t *asynq.Task) error {
 	return r.handler(ctx, t.Payload())
 }
 
+// later retries a RetryAfter job after its delay without counting a failure.
+// asynq archives a job whose retries are used up even then, so such a job is
+// queued again as a fresh copy (same queue and retry limit) instead.
+func (q *QueueService) later(ctx context.Context, t *asynq.Task, e *retryAfterError) error {
+	retried, _ := asynq.GetRetryCount(ctx)
+	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	if retried < maxRetry {
+		return e
+	}
+	name, _ := asynq.GetQueueName(ctx)
+	_, err := q.client.EnqueueContext(ctx, asynq.NewTask(t.Type(), t.Payload()),
+		asynq.Queue(name), asynq.MaxRetry(maxRetry), asynq.ProcessAt(runAt(e.after)))
+	if err != nil {
+		return e
+	}
+	return nil
+}
+
 // retryDelay honours RetryAfter, otherwise backs off exponentially.
 func retryDelay(n int, err error, _ *asynq.Task) time.Duration {
 	if later, ok := errors.AsType[*retryAfterError](err); ok {
-		return later.after
+		// asynq adds this to its own clock and stores whole seconds; the small
+		// margin keeps that from rounding down to the second before runAt.
+		return time.Until(runAt(later.after)) + 50*time.Millisecond
 	}
 	return min(RetryBaseDelay<<min(n, 20), RetryMaxDelay)
+}
+
+// runAt is the first whole second at least d from now. asynq stores run
+// times in whole seconds, so this keeps a RetryAfter job from running early;
+// it runs at most a second late.
+func runAt(d time.Duration) time.Time {
+	at := time.Now().Add(d)
+	if whole := at.Truncate(time.Second); !whole.Equal(at) {
+		at = whole.Add(time.Second)
+	}
+	return at
 }
 
 // Scheduling
 
 func (q *QueueService) Schedule(spec, taskType string, payload any, opts ...Option) (string, error) {
+	if q.cron == nil { // not built with NewQueueService
+		return "", ErrNoCache
+	}
 	data, err := encode(payload)
 	if err != nil {
 		return "", err
@@ -244,7 +289,7 @@ func (q *QueueService) Schedule(spec, taskType string, payload any, opts ...Opti
 
 func (q *QueueService) Unschedule(id string) error {
 	n, err := strconv.Atoi(id)
-	if err != nil || q.cron.Entry(cron.EntryID(n)).ID == 0 {
+	if err != nil || q.cron == nil || q.cron.Entry(cron.EntryID(n)).ID == 0 {
 		return ErrNoSchedule
 	}
 	q.cron.Remove(cron.EntryID(n))
@@ -311,9 +356,14 @@ func Delay(d time.Duration) Option    { return enqueueOption(asynq.ProcessIn(d))
 func Unique(ttl time.Duration) Option { return enqueueOption(asynq.Unique(ttl)) }
 
 // RateLimit runs at most n jobs of the type per window, across every
-// instance. Jobs over the limit wait for the next window.
+// instance. Jobs over the limit wait for the next window. A count or window
+// of zero or less means no limit.
 func RateLimit(n int, per time.Duration) Option {
-	return func(s *settings) { s.limit, s.per = int64(n), per }
+	return func(s *settings) {
+		if n > 0 && per > 0 {
+			s.limit, s.per = int64(n), per
+		}
+	}
 }
 
 func enqueueOption(o asynq.Option) Option {
@@ -323,7 +373,9 @@ func enqueueOption(o asynq.Option) Option {
 func apply(opts []Option) settings {
 	var set settings
 	for _, opt := range opts {
-		opt(&set)
+		if opt != nil {
+			opt(&set)
+		}
 	}
 	return set
 }
@@ -333,6 +385,9 @@ func apply(opts []Option) settings {
 // RetryAfter makes the queue run the job again after d without counting a
 // failed attempt; err is kept for errors.Is.
 func RetryAfter(d time.Duration, err error) error {
+	if err == nil {
+		err = ErrRetryLater
+	}
 	return &retryAfterError{after: d, err: err}
 }
 
