@@ -119,7 +119,7 @@ func TestSharedInflight(t *testing.T) {
 		t.Fatalf("a.Close = %v; want it to wait for b's work", err)
 	}
 	if !b.IsOpen() {
-		t.Fatal("closing a closed b")
+		t.Fatal("closing a also closed b")
 	}
 	done()
 }
