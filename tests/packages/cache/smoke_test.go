@@ -12,7 +12,7 @@ import (
 func TestSmoke(t *testing.T) {
 	requireServer(t)
 	ctx := ctxT(t)
-	svc := cache.NewCacheService(testPassword, []string{testAddr}, nil)
+	svc := cache.NewCacheService([]string{testAddr}, testPassword, nil)
 	if err := svc.Run(ctx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

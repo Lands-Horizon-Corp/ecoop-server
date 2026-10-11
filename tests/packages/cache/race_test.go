@@ -84,7 +84,7 @@ func TestRace_ConcurrentZAddDistinctMembers(t *testing.T) {
 
 func TestRace_StopDuringTraffic(t *testing.T) {
 	requireServer(t)
-	svc := cache.NewCacheService(testPassword, []string{testAddr}, nil)
+	svc := cache.NewCacheService([]string{testAddr}, testPassword, nil)
 	ctx := context.Background()
 	if err := svc.Run(ctx); err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestRace_StopDuringTraffic(t *testing.T) {
 
 func TestRace_LifecycleChurnWithTraffic(t *testing.T) {
 	requireServer(t)
-	svc := cache.NewCacheService(testPassword, []string{testAddr}, nil)
+	svc := cache.NewCacheService([]string{testAddr}, testPassword, nil)
 	ctx := context.Background()
 	if err := svc.Run(ctx); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestRace_LifecycleChurnWithTraffic(t *testing.T) {
 
 func TestRace_ConcurrentRunCallsLeaveOneClient(t *testing.T) {
 	requireServer(t)
-	svc := cache.NewCacheService(testPassword, []string{testAddr}, nil)
+	svc := cache.NewCacheService([]string{testAddr}, testPassword, nil)
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	for range 8 {
@@ -177,7 +177,7 @@ func TestRace_ConcurrentRunCallsLeaveOneClient(t *testing.T) {
 func TestRace_StopWaitsForInFlightCommands(t *testing.T) {
 	ctx := context.Background()
 	p := newProxy(t)
-	svc := cache.NewCacheService(testPassword, []string{p.Addr()}, nil)
+	svc := cache.NewCacheService([]string{p.Addr()}, testPassword, nil)
 	if err := svc.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestRace_StopWaitsForInFlightCommands(t *testing.T) {
 // closes the connection anyway and reports that it did not drain.
 func TestRace_StopGivesUpWhenCtxEnds(t *testing.T) {
 	p := newProxy(t)
-	svc := cache.NewCacheService(testPassword, []string{p.Addr()}, nil)
+	svc := cache.NewCacheService([]string{p.Addr()}, testPassword, nil)
 	if err := svc.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}

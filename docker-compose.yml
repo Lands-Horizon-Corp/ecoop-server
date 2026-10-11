@@ -1,0 +1,25 @@
+# Local stack. Every host, port and password comes from .env.
+#
+#   docker compose up -d --wait valkey   -> cache (go test starts it for you)
+
+name: ecoop
+
+services:
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    command: ["sh", "-c", "exec valkey-server --requirepass \"$$CACHE_PASSWORD\""]
+    environment:
+      CACHE_PASSWORD: ${CACHE_PASSWORD:?set CACHE_PASSWORD in .env}
+    ports:
+      - "${CACHE_HOST:?set CACHE_HOST in .env}:${CACHE_PORT:?set CACHE_PORT in .env}:6379"
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$$CACHE_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  valkey-data:

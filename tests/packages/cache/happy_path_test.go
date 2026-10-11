@@ -125,7 +125,9 @@ func TestHappyPath_KeysScansPastOnePage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_ = svc.Set(ctx, "other:"+t.Name(), "not mine", time.Minute)
+	other := "other:" + t.Name()
+	cleanupKey(t, other)
+	_ = svc.Set(ctx, other, "not mine", time.Minute)
 
 	got, err := svc.Keys(ctx, key(t, "*"))
 	if err != nil {
@@ -267,7 +269,7 @@ func TestHappyPath_Flush(t *testing.T) {
 	if err := svc.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if keys, _ := svc.Keys(ctx, "*"); len(keys) != 0 {
+	if keys, _ := svc.Keys(ctx, key(t, "*")); len(keys) != 0 {
 		t.Fatalf("%d keys left after Flush", len(keys))
 	}
 }

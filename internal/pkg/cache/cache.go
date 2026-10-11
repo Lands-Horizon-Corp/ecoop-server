@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,16 +18,16 @@ type CacheService struct {
 	mu        sync.RWMutex
 	client    valkey.Client
 	inflight  *utils.Inflight
-	secret    string
+	password  string
 	addresses []string
 }
 
-func NewCacheService(secret string, addresses []string, inflight *utils.Inflight) CacheServices {
+func NewCacheService(addresses []string, password string, inflight *utils.Inflight) CacheServices {
 	if inflight == nil {
 		inflight = utils.NewInflight()
 	}
 	return &CacheService{
-		secret:    secret,
+		password:  password,
 		addresses: addresses,
 		inflight:  inflight,
 	}
@@ -40,7 +39,7 @@ func (c *CacheService) Run(ctx context.Context) error {
 	}
 	client, err := valkey.NewClient(valkey.ClientOption{
 		InitAddress: c.addresses,
-		Password:    c.secret,
+		Password:    c.password,
 	})
 	if err != nil {
 		return fmt.Errorf("cache: connecting: %w", err)
@@ -54,7 +53,6 @@ func (c *CacheService) Run(ctx context.Context) error {
 	c.client = client
 	c.mu.Unlock()
 	if old != nil {
-		// Give operations still on the old client time to finish, then close it.
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), ReplaceDrainTimeout)
 			defer cancel()
@@ -65,9 +63,6 @@ func (c *CacheService) Run(ctx context.Context) error {
 	return nil
 }
 
-// Stop rejects new operations with ErrNotRunning, waits for in-flight ones to
-// finish, then closes the connection. If ctx ends first, the connection is
-// closed anyway, cutting off whatever is still running, and an error is returned.
 func (c *CacheService) Stop(ctx context.Context) error {
 	c.mu.Lock()
 	client := c.client
@@ -77,7 +72,6 @@ func (c *CacheService) Stop(ctx context.Context) error {
 		return nil
 	}
 	if err := c.inflight.Wait(ctx); err != nil {
-		// Close can block on unfinished I/O; don't hold the caller past its deadline.
 		go client.Close()
 		return fmt.Errorf("cache: stop: in-flight operations still running: %w", err)
 	}
@@ -148,7 +142,7 @@ func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.
 	}
 	cmd := client.B().Set().Key(key).Value(val)
 	if ttl > 0 {
-		return client.Do(ctx, cmd.PxMilliseconds(ttlMillis(ttl)).Build()).Error()
+		return client.Do(ctx, cmd.PxMilliseconds(utils.TTLMillis(ttl)).Build()).Error()
 	}
 	return client.Do(ctx, cmd.Build()).Error()
 }
@@ -165,7 +159,7 @@ func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl tim
 	}
 	cmd := client.B().Set().Key(key).Value(val).Nx()
 	if ttl > 0 {
-		err = client.Do(ctx, cmd.PxMilliseconds(ttlMillis(ttl)).Build()).Error()
+		err = client.Do(ctx, cmd.PxMilliseconds(utils.TTLMillis(ttl)).Build()).Error()
 	} else {
 		err = client.Do(ctx, cmd.Build()).Error()
 	}
@@ -291,7 +285,7 @@ func (c *CacheService) Incr(ctx context.Context, key string, ttl time.Duration) 
 	if ttl <= 0 {
 		return client.Do(ctx, client.B().Incr().Key(key).Build()).AsInt64()
 	}
-	return incrScript.Exec(ctx, client, []string{key}, []string{strconv.FormatInt(ttlMillis(ttl), 10)}).AsInt64()
+	return incrScript.Exec(ctx, client, []string{key}, []string{strconv.FormatInt(utils.TTLMillis(ttl), 10)}).AsInt64()
 }
 
 func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
@@ -300,7 +294,7 @@ func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration
 		return false, err
 	}
 	defer done()
-	return client.Do(ctx, client.B().Pexpire().Key(key).Milliseconds(ttlMillis(ttl)).Build()).AsBool()
+	return client.Do(ctx, client.B().Pexpire().Key(key).Milliseconds(utils.TTLMillis(ttl)).Build()).AsBool()
 }
 
 func encode(value any) (string, error) {
@@ -328,7 +322,7 @@ func encode(value any) (string, error) {
 	case nil:
 		return "", ErrNilValue
 	}
-	if isNil(value) {
+	if utils.IsNil(value) {
 		return "", ErrNilValue
 	}
 	b, err := sonic.Marshal(value)
@@ -341,36 +335,4 @@ func encode(value any) (string, error) {
 func isReadOnly(err error) bool {
 	verr, ok := valkey.IsValkeyErr(err)
 	return ok && strings.HasPrefix(verr.Error(), "READONLY")
-}
-
-// incrScript increments and, when a ttl is given, sets the expiry only if the
-// key has none. Running both in one script keeps them atomic: if INCR fails
-// (e.g. the value is not an integer) the script aborts before PEXPIRE.
-var incrScript = valkey.NewLuaScript(`
-local n = redis.call('INCR', KEYS[1])
-local ttl = tonumber(ARGV[1])
-if ttl > 0 then
-	redis.call('PEXPIRE', KEYS[1], ttl, 'NX')
-end
-return n
-`)
-
-// ttlMillis converts ttl to whole milliseconds, rounding positive values
-// below 1ms up to 1ms so they are not rejected or treated as "expire now".
-func ttlMillis(ttl time.Duration) int64 {
-	if ttl > 0 && ttl < time.Millisecond {
-		return 1
-	}
-	return ttl.Milliseconds()
-}
-
-// isNil reports typed nils (nil pointers, maps, slices, ...) that would
-// otherwise be stored as the JSON literal "null".
-func isNil(value any) bool {
-	v := reflect.ValueOf(value)
-	switch v.Kind() {
-	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Interface, reflect.Func, reflect.Chan:
-		return v.IsNil()
-	}
-	return false
 }

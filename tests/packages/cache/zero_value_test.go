@@ -42,7 +42,7 @@ func allOps(ctx context.Context, k string) []op {
 func TestZeroValue_NotRunningReturnsErrNotRunning(t *testing.T) {
 	ctx := context.Background()
 	services := map[string]cache.CacheServices{
-		"constructed only": cache.NewCacheService("pw", []string{"127.0.0.1:1"}, nil),
+		"constructed only": cache.NewCacheService([]string{"127.0.0.1:1"}, "pw", nil),
 		"zero struct":      &cache.CacheService{},
 	}
 	for name, svc := range services {
@@ -80,7 +80,7 @@ func TestZeroValue_StoppedReturnsErrNotRunning(t *testing.T) {
 func TestZeroValue_StopIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	for name, svc := range map[string]cache.CacheServices{
-		"never run":   cache.NewCacheService("", nil, nil),
+		"never run":   cache.NewCacheService(nil, "", nil),
 		"zero struct": &cache.CacheService{},
 	} {
 		mustNotPanic(t, name+" Stop", func() {
@@ -96,8 +96,8 @@ func TestZeroValue_StopIsIdempotent(t *testing.T) {
 func TestZeroValue_NoAddresses(t *testing.T) {
 	ctx := context.Background()
 	for name, svc := range map[string]cache.CacheServices{
-		"nil slice":   cache.NewCacheService("", nil, nil),
-		"empty slice": cache.NewCacheService("", []string{}, nil),
+		"nil slice":   cache.NewCacheService(nil, "", nil),
+		"empty slice": cache.NewCacheService([]string{}, "", nil),
 		"zero struct": &cache.CacheService{},
 	} {
 		if err := svc.Run(ctx); !errors.Is(err, cache.ErrNoAddresses) {

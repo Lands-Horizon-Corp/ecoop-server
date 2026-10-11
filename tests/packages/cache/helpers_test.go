@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -19,15 +20,15 @@ import (
 	valkey "github.com/valkey-io/valkey-go"
 )
 
-// Server-backed tests need a disposable Valkey/Redis. By default TestMain
-// starts one in Docker on a random port. To use your own instead, set
-// CACHE_TEST_ADDR (and CACHE_TEST_PASSWORD); Flush tests then only run when
-// CACHE_TEST_ALLOW_FLUSH=1 because they wipe the whole database.
+// Server-backed tests run against the valkey service in docker-compose.yml,
+// using CACHE_HOST, CACHE_PORT and CACHE_PASSWORD from the environment or the
+// repo's .env. TestMain starts the service if needed. Nothing is flushed:
+// every test deletes the keys it created when it finishes (see key).
 var (
 	testAddr     string
 	testPassword string
-	allowFlush   bool
 	skipReason   string
+	cleaner      cache.CacheServices // deletes each test's keys on cleanup
 )
 
 var _ cache.CacheServices = (*cache.CacheService)(nil)
@@ -37,57 +38,97 @@ func TestMain(m *testing.M) {
 }
 
 func runMain(m *testing.M) int {
-	if addr := os.Getenv("CACHE_TEST_ADDR"); addr != "" {
-		testAddr, testPassword = addr, os.Getenv("CACHE_TEST_PASSWORD")
-		allowFlush = os.Getenv("CACHE_TEST_ALLOW_FLUSH") == "1"
-		return m.Run()
-	}
-	stop, err := startContainer()
-	if err != nil {
-		skipReason = "no test server: " + err.Error()
+	if err := startValkey(); err != nil {
+		skipReason = "no Valkey: " + err.Error()
 		fmt.Fprintln(os.Stderr, "cache tests:", skipReason)
 		return m.Run()
 	}
-	defer stop()
-	allowFlush = true
+	defer cleaner.Stop(context.Background())
 	return m.Run()
 }
 
-func startContainer() (stop func(), err error) {
+func startValkey() error {
+	root, err := moduleRoot()
+	if err != nil {
+		return err
+	}
+	env, err := loadEnv(filepath.Join(root, ".env"))
+	if err != nil {
+		return err
+	}
+	var missing []string
+	get := func(k string) string {
+		v := env[k]
+		if v == "" {
+			missing = append(missing, k)
+		}
+		return v
+	}
+	host, port, password := get("CACHE_HOST"), get("CACHE_PORT"), get("CACHE_PASSWORD")
+	if len(missing) > 0 {
+		return fmt.Errorf("set %s in .env or the environment", strings.Join(missing, ", "))
+	}
+	testAddr, testPassword = net.JoinHostPort(host, port), password
+
 	if _, err := exec.LookPath("docker"); err != nil {
-		return nil, errors.New("docker not installed and CACHE_TEST_ADDR unset")
+		return errors.New("docker not installed")
 	}
-	testPassword = "cache-test-pw"
-	out, err := exec.Command("docker", "run", "-d", "--rm", "-p", "127.0.0.1::6379",
-		"redis:8-alpine", "redis-server", "--requirepass", testPassword, "--save", "", "--appendonly", "no").Output()
-	if err != nil {
-		return nil, fmt.Errorf("docker run: %w", err)
+	up := exec.Command("docker", "compose", "up", "-d", "--wait", "valkey")
+	up.Dir = root
+	if out, err := up.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker compose up valkey: %w\n%s", err, out)
 	}
-	id := strings.TrimSpace(string(out))
-	stop = func() { _ = exec.Command("docker", "rm", "-f", id).Run() }
 
-	port, err := exec.Command("docker", "port", id, "6379/tcp").Output()
-	if err != nil {
-		stop()
-		return nil, fmt.Errorf("docker port: %w", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cleaner = cache.NewCacheService([]string{testAddr}, testPassword, nil)
+	if err := cleaner.Run(ctx); err != nil {
+		return fmt.Errorf("connecting to %s: %w", testAddr, err)
 	}
-	testAddr = strings.TrimSpace(strings.Split(string(port), "\n")[0])
+	return nil
+}
 
-	deadline := time.Now().Add(20 * time.Second)
+// loadEnv reads KEY=VALUE lines from path (if it exists); variables already
+// set in the environment take precedence.
+func loadEnv(path string) (map[string]string, error) {
+	env := map[string]string{}
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		if !ok {
+			continue
+		}
+		env[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	for _, k := range []string{"CACHE_HOST", "CACHE_PORT", "CACHE_PASSWORD"} {
+		if v, ok := os.LookupEnv(k); ok {
+			env[k] = v
+		}
+	}
+	return env, nil
+}
+
+func moduleRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
 	for {
-		svc := cache.NewCacheService(testPassword, []string{testAddr}, nil)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		err := svc.Run(ctx)
-		cancel()
-		_ = svc.Stop(context.Background())
-		if err == nil {
-			return stop, nil
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
 		}
-		if time.Now().After(deadline) {
-			stop()
-			return nil, fmt.Errorf("server never became ready: %w", err)
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", errors.New("go.mod not found")
 		}
-		time.Sleep(100 * time.Millisecond)
+		dir = parent
 	}
 }
 
@@ -98,11 +139,13 @@ func requireServer(t testing.TB) {
 	}
 }
 
+// requireFlush guards tests that wipe the whole database. They share the
+// dev Valkey, so they only run when CACHE_TEST_ALLOW_FLUSH=1.
 func requireFlush(t testing.TB) {
 	t.Helper()
 	requireServer(t)
-	if !allowFlush {
-		t.Skip("set CACHE_TEST_ALLOW_FLUSH=1 to run tests that flush the database")
+	if os.Getenv("CACHE_TEST_ALLOW_FLUSH") != "1" {
+		t.Skip("wipes the whole database; set CACHE_TEST_ALLOW_FLUSH=1 to run")
 	}
 }
 
@@ -114,7 +157,7 @@ func newRunning(t testing.TB) cache.CacheServices {
 func newRunningAt(t testing.TB, addr string) cache.CacheServices {
 	t.Helper()
 	requireServer(t)
-	svc := cache.NewCacheService(testPassword, []string{addr}, nil)
+	svc := cache.NewCacheService([]string{addr}, testPassword, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := svc.Run(ctx); err != nil {
@@ -124,9 +167,61 @@ func newRunningAt(t testing.TB, addr string) cache.CacheServices {
 	return svc
 }
 
-// key namespaces every key by test name so tests never see each other's data.
+var (
+	keyPrefixes sync.Map // testing.TB -> prefix
+	keySeq      atomic.Int64
+)
+
+// key namespaces every key by test, and by run, so tests never see each
+// other's data and `go test -count=N` never sees an earlier pass's keys.
+// The first call for a test registers a cleanup that deletes every key under
+// its prefix, so tests leave nothing behind in the shared Valkey.
 func key(t testing.TB, parts ...string) string {
-	return "test:" + t.Name() + ":" + strings.Join(parts, ":")
+	p, loaded := keyPrefixes.LoadOrStore(t, fmt.Sprintf("test:%s#%d", t.Name(), keySeq.Add(1)))
+	prefix := p.(string)
+	if !loaded {
+		t.Cleanup(func() { deletePattern(t, globEscape(prefix)+":*") })
+	}
+	return prefix + ":" + strings.Join(parts, ":")
+}
+
+// cleanupKey deletes k when the test ends, for keys made outside key().
+func cleanupKey(t testing.TB, k string) {
+	t.Cleanup(func() { deletePattern(t, globEscape(k)) })
+}
+
+func deletePattern(t testing.TB, pattern string) {
+	if cleaner == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	keys, err := cleaner.Keys(ctx, pattern)
+	if err != nil {
+		t.Logf("cleanup: listing %q: %v", pattern, err)
+		return
+	}
+	cl := cleaner.Client()
+	for len(keys) > 0 {
+		n := min(len(keys), 500)
+		if err := cl.Do(ctx, cl.B().Del().Key(keys[:n]...).Build()).Error(); err != nil {
+			t.Logf("cleanup: deleting keys: %v", err)
+			return
+		}
+		keys = keys[n:]
+	}
+}
+
+// globEscape makes s match literally in a SCAN MATCH pattern.
+func globEscape(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if strings.ContainsRune(`*?[]\`, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func ctxT(t testing.TB) context.Context {

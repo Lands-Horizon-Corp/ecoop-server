@@ -77,6 +77,7 @@ func TestPoisonPill_PatternCannotEscapeNamespace(t *testing.T) {
 	svc := newRunning(t)
 	mine := key(t, "a")
 	other := "other:" + t.Name() + ":secret"
+	cleanupKey(t, other)
 	_ = svc.Set(ctx, mine, 1, time.Minute)
 	_ = svc.Set(ctx, other, 1, time.Minute)
 	defer svc.Delete(ctx, other)

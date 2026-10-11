@@ -9,6 +9,16 @@ import (
 )
 
 var (
+	incrScript = valkey.NewLuaScript(`
+	local n = redis.call('INCR', KEYS[1])
+	local ttl = tonumber(ARGV[1])
+	if ttl > 0 then
+		redis.call('PEXPIRE', KEYS[1], ttl, 'NX')
+	end
+	return n
+`)
+)
+var (
 	ErrNotFound    = errors.New("cache: key not found")
 	ErrNotRunning  = errors.New("cache: service not running; call Run first")
 	ErrNoAddresses = errors.New("cache: no addresses configured")

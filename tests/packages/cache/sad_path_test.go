@@ -19,12 +19,12 @@ func TestSadPath_RunFailures(t *testing.T) {
 		svc cache.CacheServices
 		ctx context.Context
 	}{
-		"wrong password":  {cache.NewCacheService("wrong-"+testPassword, []string{testAddr}, nil), ctxT(t)},
-		"unreachable":     {cache.NewCacheService(testPassword, []string{"127.0.0.1:1"}, nil), ctxT(t)},
-		"cancelled ctx":   {cache.NewCacheService(testPassword, []string{testAddr}, nil), cancelled},
-		"garbage address": {cache.NewCacheService(testPassword, []string{"not an address"}, nil), ctxT(t)},
-		"no addresses":    {cache.NewCacheService(testPassword, nil, nil), ctxT(t)},
-		"empty address":   {cache.NewCacheService(testPassword, []string{""}, nil), ctxT(t)},
+		"wrong password":  {cache.NewCacheService([]string{testAddr}, "wrong-"+testPassword, nil), ctxT(t)},
+		"unreachable":     {cache.NewCacheService([]string{"127.0.0.1:1"}, testPassword, nil), ctxT(t)},
+		"cancelled ctx":   {cache.NewCacheService([]string{testAddr}, testPassword, nil), cancelled},
+		"garbage address": {cache.NewCacheService([]string{"not an address"}, testPassword, nil), ctxT(t)},
+		"no addresses":    {cache.NewCacheService(nil, testPassword, nil), ctxT(t)},
+		"empty address":   {cache.NewCacheService([]string{""}, testPassword, nil), ctxT(t)},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
