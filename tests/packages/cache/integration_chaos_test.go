@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
+	valkey "github.com/valkey-io/valkey-go"
 )
 
 // Integration chaos: the patterns the app builds on the cache (rate limits,
@@ -43,13 +46,18 @@ func TestIntegrationChaos_RateLimiterNeverExceedsLimit(t *testing.T) {
 	}
 }
 
+// unlockScript deletes the lock only if it still holds the caller's token.
+// A plain DEL is unsafe: if the reply is lost and the DEL is retried, the
+// retry can delete a lock another holder has acquired in the meantime.
+var unlockScript = valkey.NewLuaScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+	return redis.call('DEL', KEYS[1])
+end
+return 0`)
+
 func TestIntegrationChaos_DistributedLockMutualExclusion(t *testing.T) {
 	p := newProxy(t)
-	type locker interface {
-		SetNX(context.Context, string, any, time.Duration) (bool, error)
-		Delete(context.Context, string) error
-	}
-	nodes := []locker{newRunning(t), newRunning(t), newRunningAt(t, p.Addr())}
+	nodes := []cache.CacheServices{newRunning(t), newRunning(t), newRunningAt(t, p.Addr())}
 	lock := key(t, "lock")
 
 	var holders, maxHolders, acquired atomic.Int64
@@ -69,9 +77,10 @@ func TestIntegrationChaos_DistributedLockMutualExclusion(t *testing.T) {
 	for w := range 24 {
 		wg.Go(func() {
 			node := nodes[w%len(nodes)]
-			for range 20 {
+			for i := range 20 {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				ok, err := node.SetNX(ctx, lock, w, 5*time.Second)
+				token := fmt.Sprintf("%d-%d", w, i)
+				ok, err := node.SetNX(ctx, lock, token, 5*time.Second)
 				if err == nil && ok {
 					acquired.Add(1)
 					h := holders.Add(1)
@@ -83,7 +92,10 @@ func TestIntegrationChaos_DistributedLockMutualExclusion(t *testing.T) {
 					}
 					time.Sleep(time.Millisecond)
 					holders.Add(-1)
-					for node.Delete(ctx, lock) != nil && ctx.Err() == nil {
+					unlock := func() error {
+						return unlockScript.Exec(ctx, node.Client(), []string{lock}, []string{token}).Error()
+					}
+					for unlock() != nil && ctx.Err() == nil {
 						time.Sleep(5 * time.Millisecond)
 					}
 				}
