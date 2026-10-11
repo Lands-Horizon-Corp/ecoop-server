@@ -322,3 +322,25 @@ func (p *proxy) DropAll() {
 	}
 	clear(p.conns)
 }
+
+func ctxShort(t testing.TB) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// dbName is the database name in a DSN built by dsnFor.
+func dbName(dsn string) string {
+	rest := dsn[strings.LastIndex(dsn, "/")+1:]
+	name, _, _ := strings.Cut(rest, "?")
+	return name
+}
+
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
