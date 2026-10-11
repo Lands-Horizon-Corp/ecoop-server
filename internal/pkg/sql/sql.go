@@ -249,6 +249,9 @@ func (s *SQLService) Migrate(ctx context.Context) error {
 					return err
 				}
 				if err := upLocked(ctx, mig, dir); err != nil {
+					if lockTimedOut(err) { // a valid migration that met traffic: keep it
+						return err
+					}
 					return errors.Join(ErrInvalidMigration, err, os.Remove(file))
 				}
 				if err := upLocked(ctx, p.folder, dir); err != nil {
@@ -497,10 +500,27 @@ func upLocked(ctx context.Context, mig *sql.DB, dir string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := p.Up(ctx); err != nil {
-		return fmt.Errorf("sql: applying migrations: %w", err)
+	for attempt := 1; ; attempt++ {
+		_, err := p.Up(ctx)
+		if err == nil {
+			return nil
+		}
+		if !lockTimedOut(err) || attempt == MigrationLockRetries {
+			return fmt.Errorf("sql: applying migrations: %w", err)
+		}
+		select { // the failed migration rolled back; try it again shortly
+		case <-time.After(time.Duration(attempt) * time.Second):
+		case <-ctx.Done():
+			return fmt.Errorf("sql: applying migrations: %w", errors.Join(err, ctx.Err()))
+		}
 	}
-	return nil
+}
+
+// lockTimedOut reports a migration that gave up waiting for a lock
+// (lock_timeout): it changed nothing and can simply run again.
+func lockTimedOut(err error) bool {
+	pg, ok := errors.AsType[pgdriver.Error](err)
+	return ok && pg.Field('C') == "55P03"
 }
 
 // withProvider runs fn with a goose provider while holding the migration

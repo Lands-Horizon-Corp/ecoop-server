@@ -1,3 +1,5 @@
+//go:build integration
+
 package otp_test
 
 import (

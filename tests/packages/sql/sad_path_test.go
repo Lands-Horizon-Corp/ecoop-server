@@ -1,8 +1,11 @@
+//go:build integration
+
 package sql_test
 
 import (
 	"context"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,7 +53,7 @@ func TestSad_UnreachableAndWrongPassword(t *testing.T) {
 		t.Fatal("Start on a closed port succeeded")
 	}
 	const secret = "definitely-wrong-pw"
-	wrong := ecsql.NewSQLService(strings.Replace(dsnFor("postgres"), pgPassword, secret, 1), 1, 1, nil, false, nil, nil, nil)
+	wrong := ecsql.NewSQLService(strings.Replace(dsnFor(pgAdminDB), url.UserPassword(pgUser, pgPassword).String(), url.UserPassword(pgUser, secret).String(), 1), 1, 1, nil, false, nil, nil, nil)
 	err := wrong.Start(ctx)
 	if err == nil {
 		t.Fatal("Start with a wrong password succeeded")

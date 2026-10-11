@@ -1,8 +1,11 @@
+//go:build integration
+
 package sql_test
 
 import (
 	"context"
 	"errors"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -72,7 +75,7 @@ func TestAtlas_PlanningNeedsCreateDB(t *testing.T) {
 	execAdmin(t, "CREATE ROLE "+role+" LOGIN PASSWORD 'pw'")
 	t.Cleanup(func() { _, _ = admin.Exec("DROP ROLE IF EXISTS " + role) })
 	execAdmin(t, "ALTER DATABASE "+dbName(e.dsn)+" OWNER TO "+role)
-	dsn := strings.Replace(e.dsn, "postgres:"+pgPassword, role+":pw", 1)
+	dsn := strings.Replace(e.dsn, url.UserPassword(pgUser, pgPassword).String(), role+":pw", 1)
 	s := ecsql.NewSQLService(dsn, 1, 2, e.dir, true, e.out, []any{(*MemberV1)(nil)}, nil)
 	ctx := ctxT(t)
 	if err := s.Start(ctx); err != nil {

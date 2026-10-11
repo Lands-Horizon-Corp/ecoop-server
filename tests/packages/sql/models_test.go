@@ -1,3 +1,5 @@
+//go:build integration
+
 package sql_test
 
 import "github.com/uptrace/bun"

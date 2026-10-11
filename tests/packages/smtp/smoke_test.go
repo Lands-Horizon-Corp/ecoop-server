@@ -1,3 +1,5 @@
+//go:build integration
+
 package smtp_test
 
 import (

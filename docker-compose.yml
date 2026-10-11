@@ -1,18 +1,40 @@
-# Local stack. Every host, port and password comes from .env.
+# Local stack. Every host, port, user and password comes from .env; the
+# values after ":-" are only defaults for a machine without one.
 #
-#   docker compose up -d --wait valkey    -> cache (go test starts it for you)
+#   docker compose up -d --wait postgres  -> database (integration tests start it)
+#   docker compose up -d --wait valkey    -> cache (integration tests start it)
 #   docker compose up -d --wait mailpit   -> SMTP catcher; web UI on MAILPIT_UI_PORT
 
 name: ecoop
 
 services:
+  postgres:
+    image: postgres:18-alpine
+    command: ["postgres", "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-200}"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ecoop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecoop}
+      POSTGRES_DB: ${POSTGRES_DB:-ecoop}
+    ports:
+      - "${POSTGRES_HOST:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    networks:
+      - app-network
+
   valkey:
     image: valkey/valkey:8.1-alpine
     command: ["sh", "-c", "exec valkey-server --requirepass \"$$CACHE_PASSWORD\""]
     environment:
-      CACHE_PASSWORD: ${CACHE_PASSWORD:?set CACHE_PASSWORD in .env}
+      CACHE_PASSWORD: ${CACHE_PASSWORD:-ecoop}
     ports:
-      - "${CACHE_HOST:?set CACHE_HOST in .env}:${CACHE_PORT:?set CACHE_PORT in .env}:6379"
+      - "${CACHE_HOST:-127.0.0.1}:${CACHE_PORT:-6379}:6379"
     volumes:
       - valkey-data:/data
     healthcheck:
@@ -29,8 +51,8 @@ services:
     image: axllent/mailpit:latest
     restart: always
     ports:
-      - "${SMTP_HOST:?set SMTP_HOST in .env}:${SMTP_PORT:?set SMTP_PORT in .env}:1025"
-      - "${SMTP_HOST:?set SMTP_HOST in .env}:${MAILPIT_UI_PORT:?set MAILPIT_UI_PORT in .env}:8025"
+      - "${SMTP_HOST:-127.0.0.1}:${SMTP_PORT:-1025}:1025"
+      - "${SMTP_HOST:-127.0.0.1}:${MAILPIT_UI_PORT:-8025}:8025"
     networks:
       - app-network
 
@@ -38,4 +60,5 @@ networks:
   app-network:
 
 volumes:
+  postgres-data:
   valkey-data:

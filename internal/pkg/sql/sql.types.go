@@ -21,7 +21,12 @@ const (
 	// MigratePasses caps how many migrations one Migrate generates. A rename
 	// can need a second pass for what it leaves behind (constraint names);
 	// models that still differ after this many cannot be expressed.
-	MigratePasses = 3
+	MigratePasses = 6
+	// MigrationLockTimeout bounds how long a generated migration waits for a
+	// lock before failing; the applier then retries it (MigrationLockRetries
+	// times), so a migration never queues live traffic behind it for long.
+	MigrationLockTimeout = 5 * time.Second
+	MigrationLockRetries = 5
 )
 
 var (

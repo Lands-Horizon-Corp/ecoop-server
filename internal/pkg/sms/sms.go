@@ -100,15 +100,9 @@ func (s *SMSService) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop rejects new messages with ErrNotStarted and waits for in-flight sends
-// and deliveries, or returns ctx.Err() if ctx ends first. Queued messages
-// stay in the queue: another instance, or this one after Start, sends them.
 func (s *SMSService) Stop(ctx context.Context) error {
 	return s.gate.Close(ctx)
 }
-
-// Ping checks the Twilio account and the queue. It returns when ctx ends even
-// if Twilio does not answer.
 func (s *SMSService) Ping(ctx context.Context) error {
 	if !s.secured {
 		return nil
@@ -132,15 +126,10 @@ func (s *SMSService) Ping(ctx context.Context) error {
 	return s.queue.Ping(ctx)
 }
 
-// Client returns the Twilio client, or nil before Start in secured mode.
 func (s *SMSService) Client() *twilio.RestClient {
 	return s.twilio
 }
 
-// Format fills the template in req.Body (inline, or a path to a template
-// file) with req.Vars. SMS is plain text, so nothing is HTML-escaped. A
-// missing variable renders as empty text, and the caller's Vars are not
-// changed.
 func (s *SMSService) Format(ctx context.Context, req SMSRequest) (*SMSRequest, error) {
 	req.Vars = maps.Clone(req.Vars)
 	tmplBody := req.Body
@@ -163,8 +152,6 @@ func (s *SMSService) Format(ctx context.Context, req SMSRequest) (*SMSRequest, e
 	return &req, nil
 }
 
-// Send validates and formats the message now, so bad input fails fast, then
-// queues it. Delivery happens on the queue worker, rate limited and retried.
 func (s *SMSService) Send(ctx context.Context, req SMSRequest) error {
 	done, ok := s.gate.Enter()
 	if !ok {
@@ -193,10 +180,6 @@ func (s *SMSService) Send(ctx context.Context, req SMSRequest) error {
 	return nil
 }
 
-// deliver sends one queued message through Twilio. The queue has already
-// applied the rate limit. While this instance is stopped, the message goes
-// back for another instance. Twilio rejecting the message itself (a 4xx
-// other than 429) is not retried; outages and throttling are.
 func (s *SMSService) deliver(ctx context.Context, p sendPayload) error {
 	params := &openapi.CreateMessageParams{}
 	params.SetTo(p.To)

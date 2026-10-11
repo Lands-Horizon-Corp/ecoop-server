@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -209,11 +210,21 @@ func (p *planner) plan(ctx context.Context, changes []schema.Change) (*migrate.P
 }
 
 // generate diffs the replayed folder against the models and writes the
-// difference as a goose migration. When it drops a table, a column, a check,
-// a foreign key or a unique index (without putting one back), the file gets
-// ReviewSuffix instead, which goose ignores, so nothing is lost until a
-// person reviews it and renames it to .sql. It returns the file to apply,
-// or "" when there is none.
+// next step as a goose migration, shaped for a live database:
+//
+//   - A new index on an existing table gets a file of its own, built with
+//     CREATE INDEX CONCURRENTLY outside a transaction, so writes go on while
+//     it builds. It comes before the rest of the change, so an index it
+//     replaces is dropped only once the new one exists; an index on a column
+//     this change adds waits for the next pass, after the column.
+//   - Every other file runs in one transaction that sets lock_timeout, so a
+//     lock it cannot get quickly makes it fail (and be retried) instead of
+//     queueing all traffic behind it.
+//   - When it drops a table, column, check, foreign key or index that the
+//     models do not replace, the file gets ReviewSuffix instead, which goose
+//     ignores, so nothing is lost until a person reviews it and renames it.
+//
+// It returns the file to apply, or "" when there is none.
 func (p *planner) generate(ctx context.Context) (string, error) {
 	have, err := inspect(ctx, p.folder, "public")
 	if err != nil {
@@ -227,6 +238,17 @@ func (p *planner) generate(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	changes = explicitDrops(have, renames(changes))
+	review := destructive(changes, p.want)
+	ready, rest, err := p.concurrentIndexes(ctx, have, changes)
+	if err != nil {
+		return "", err
+	}
+	concurrent := len(ready) > 0
+	if concurrent {
+		changes, review = ready, false
+	} else {
+		changes = rest
+	}
 	plan, err := p.plan(ctx, changes)
 	if err != nil {
 		return "", err
@@ -234,12 +256,26 @@ func (p *planner) generate(ctx context.Context) (string, error) {
 	if err := p.renameSequences(ctx, changes, plan); err != nil {
 		return "", err
 	}
+	if concurrent {
+		for _, c := range plan.Changes {
+			c.Cmd = concurrently(c.Cmd)
+			if r, ok := c.Reverse.(string); ok {
+				c.Reverse = concurrently(r)
+			}
+		}
+	}
 	files, err := sqltool.GooseFormatter.Format(plan)
 	if err != nil {
 		return "", fmt.Errorf("sql: planning: %w", err)
 	}
 	body := string(files[0].Bytes())
-	review := destructive(changes)
+	if concurrent {
+		body = "-- +goose NO TRANSACTION\n" + body
+	} else {
+		timeout := fmt.Sprintf("SET LOCAL lock_timeout = '%dms';\n", MigrationLockTimeout.Milliseconds())
+		body = strings.Replace(body, "-- +goose Up\n", "-- +goose Up\n"+timeout, 1)
+		body = strings.Replace(body, "-- +goose Down\n", "-- +goose Down\n"+timeout, 1)
+	}
 	if review {
 		if pending, err := pendingReview(p.dir, body); err != nil || pending != "" {
 			if pending != "" {
@@ -269,6 +305,69 @@ func (p *planner) generate(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	return file, nil
+}
+
+var createIndex = regexp.MustCompile(`^CREATE (UNIQUE )?INDEX `)
+
+// concurrently turns CREATE/DROP INDEX into their CONCURRENTLY forms.
+func concurrently(stmt string) string {
+	if m := createIndex.FindString(stmt); m != "" {
+		return m + "CONCURRENTLY " + stmt[len(m):]
+	}
+	if strings.HasPrefix(stmt, "DROP INDEX ") {
+		return "DROP INDEX CONCURRENTLY " + stmt[len("DROP INDEX "):]
+	}
+	return stmt
+}
+
+// concurrentIndexes splits out the new indexes on tables that already exist:
+// ready are those whose columns exist now, built CONCURRENTLY in a file of
+// their own; an index on a column this change adds is left out of rest too,
+// for the next pass. Indexes Postgres builds as a constraint (UNIQUE from a
+// model tag) stay in rest: a constraint cannot be added concurrently.
+func (p *planner) concurrentIndexes(ctx context.Context, have *schema.Schema, changes []schema.Change) (ready, rest []schema.Change, err error) {
+	for _, c := range changes {
+		m, ok := c.(*schema.ModifyTable)
+		if !ok {
+			rest = append(rest, c)
+			continue
+		}
+		table, _ := have.Table(m.T.Name)
+		var keep []schema.Change
+		for _, ch := range m.Changes {
+			add, ok := ch.(*schema.AddIndex)
+			if !ok || table == nil {
+				keep = append(keep, ch)
+				continue
+			}
+			plan, err := p.plan(ctx, []schema.Change{&schema.ModifyTable{T: m.T, Changes: []schema.Change{add}}})
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(plan.Changes) != 1 || !createIndex.MatchString(plan.Changes[0].Cmd) {
+				keep = append(keep, ch)
+				continue
+			}
+			exists := !slices.ContainsFunc(add.I.Parts, func(part *schema.IndexPart) bool {
+				_, found := table.Column(columnName(part))
+				return part.C != nil && !found
+			})
+			if exists {
+				ready = append(ready, &schema.ModifyTable{T: m.T, Changes: []schema.Change{add}})
+			} // else: the next pass, once the column exists
+		}
+		if len(keep) > 0 {
+			rest = append(rest, &schema.ModifyTable{T: m.T, Changes: keep})
+		}
+	}
+	return ready, rest, nil
+}
+
+func columnName(p *schema.IndexPart) string {
+	if p.C == nil {
+		return ""
+	}
+	return p.C.Name
 }
 
 // explicitDrops drops the foreign keys and indexes on a dropped column in a
@@ -470,72 +569,111 @@ func tableShape(t *schema.Table) string {
 	return b.String()
 }
 
-// renameSequences renames a renamed table's serial sequences with it, in the
-// same migration. Atlas expects <table>_<column>_seq: left with the old name,
-// the next plan would give the column a new sequence starting from 1, and
-// every insert would collide with an existing id.
 func (p *planner) renameSequences(ctx context.Context, changes []schema.Change, plan *migrate.Plan) error {
 	for _, c := range changes {
 		r, ok := c.(*schema.RenameTable)
 		if !ok {
 			continue
 		}
-		rows, err := p.folder.QueryContext(ctx, `SELECT s.relname, a.attname
-  FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
-  JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
- WHERE d.refobjid = to_regclass($1) ORDER BY 1`, `"`+r.From.Name+`"`)
-		if err != nil {
-			return fmt.Errorf("sql: planning: sequences of %s: %w", r.From.Name, err)
+		if err := p.renameSequenceForTable(ctx, r, plan); err != nil {
+			return err
 		}
-		for rows.Next() {
-			var seq, col string
-			if err := rows.Scan(&seq, &col); err != nil {
-				rows.Close()
-				return err
-			}
-			if seq != r.From.Name+"_"+col+"_seq" {
-				continue
-			}
-			renamed := r.To.Name + "_" + col + "_seq"
-			plan.Changes = append(plan.Changes, &migrate.Change{
-				Cmd:     fmt.Sprintf(`ALTER SEQUENCE "%s" RENAME TO "%s"`, seq, renamed),
-				Reverse: fmt.Sprintf(`ALTER SEQUENCE "%s" RENAME TO "%s"`, renamed, seq),
-				Comment: fmt.Sprintf("rename %q sequence with its table", seq),
-			})
-		}
-		rows.Close()
 	}
 	return nil
 }
 
-// destructive reports changes that drop data or a safeguard: a table, a
-// column, a check, or a foreign key or index not put back by the same change
-// (as a rename does). An index the models do not declare (one written by
-// hand) shows up here too, rather than being dropped unnoticed.
-func destructive(changes []schema.Change) bool {
+func (p *planner) renameSequenceForTable(ctx context.Context, r *schema.RenameTable, plan *migrate.Plan) error {
+	rows, err := p.folder.QueryContext(ctx, `SELECT s.relname, a.attname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid WHERE d.refobjid = to_regclass($1) ORDER BY 1`, `"`+r.From.Name+`"`)
+	if err != nil {
+		return fmt.Errorf("sql: planning: sequences of %s: %w", r.From.Name, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seq, col string
+		if err := rows.Scan(&seq, &col); err != nil {
+			return fmt.Errorf("sql: scanning sequence of %s: %w", r.From.Name, err)
+		}
+		if seq != r.From.Name+"_"+col+"_seq" {
+			continue
+		}
+		renamed := r.To.Name + "_" + col + "_seq"
+		plan.Changes = append(plan.Changes, &migrate.Change{
+			Cmd:     fmt.Sprintf(`ALTER SEQUENCE "%s" RENAME TO "%s"`, seq, renamed),
+			Reverse: fmt.Sprintf(`ALTER SEQUENCE "%s" RENAME TO "%s"`, renamed, seq),
+			Comment: fmt.Sprintf("rename %q sequence with its table", seq),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("sql: iterating sequences of %s: %w", r.From.Name, err)
+	}
+	return nil
+}
+
+// destructive reports changes that drop data or a safeguard: a table or a
+// column; a check or a foreign key not added back by the same change (as a
+// rename or a redefinition does); or an index the models no longer cover. An
+// index counts as covered when the models declare another on the same table
+// whose columns include all of its own (unique if it was unique), so
+// replacing an index with a wider or covering one needs no review. An index
+// the models do not declare at all (one written by hand) shows up here too,
+// rather than being dropped unnoticed.
+func destructive(changes []schema.Change, want *schema.Schema) bool {
 	for _, c := range changes {
 		switch c := c.(type) {
 		case *schema.DropTable:
 			return true
 		case *schema.ModifyTable:
-			var lostFK, lostIndex int
+			var lostFK, lostCheck int
 			for _, m := range c.Changes {
-				switch m.(type) {
-				case *schema.DropColumn, *schema.DropCheck:
+				switch m := m.(type) {
+				case *schema.DropColumn:
 					return true
+				case *schema.DropCheck:
+					lostCheck++
+				case *schema.AddCheck:
+					lostCheck--
 				case *schema.DropForeignKey:
 					lostFK++
 				case *schema.AddForeignKey:
 					lostFK--
 				case *schema.DropIndex:
-					lostIndex++
-				case *schema.AddIndex:
-					lostIndex--
+					if !covered(m.I, want, c.T.Name) {
+						return true
+					}
 				}
 			}
-			if lostFK > 0 || lostIndex > 0 {
+			if lostFK > 0 || lostCheck > 0 {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// covered reports whether the models declare another index on table whose
+// columns include all of ix's (and that is unique if ix was).
+func covered(ix *schema.Index, want *schema.Schema, table string) bool {
+	t, ok := want.Table(table)
+	if !ok {
+		return false
+	}
+	var cols []string
+	for _, p := range ix.Parts {
+		if p.C == nil {
+			return false // an expression index is only covered by itself
+		}
+		cols = append(cols, p.C.Name)
+	}
+	for _, other := range t.Indexes {
+		if other.Name == ix.Name || (ix.Unique && !other.Unique) {
+			continue
+		}
+		var has []string
+		for _, p := range other.Parts {
+			has = append(has, columnName(p))
+		}
+		if !slices.ContainsFunc(cols, func(c string) bool { return !slices.Contains(has, c) }) {
+			return true
 		}
 	}
 	return false

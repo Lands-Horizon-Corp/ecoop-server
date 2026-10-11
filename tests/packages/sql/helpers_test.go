@@ -1,3 +1,5 @@
+//go:build integration
+
 package sql_test
 
 import (
@@ -8,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,41 +30,40 @@ import (
 	ecsql "github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
 )
 
-// The suite runs against a throwaway Postgres 18 container that TestMain
-// starts and removes. Every test gets its own database and its own
-// migrations directory, so tests run in parallel without seeing each other
-// (Postgres advisory locks are per database too).
+// The suite runs against the compose Postgres (docker compose up postgres),
+// configured from .env like the rest of the stack. Every test gets its own
+// database, named for this run, and its own migrations directory, so tests
+// run in parallel without seeing each other (Postgres advisory locks are per
+// database too). The configured database itself is never touched.
 var (
-	pgAddr     string // host:port of the container
+	pgAddr     string // host:port
+	pgUser     string
+	pgPassword string
+	pgAdminDB  string // POSTGRES_DB: where the suite creates and drops its databases from
+	pgRun      = fmt.Sprintf("ecoop_test_%d_%d", time.Now().Unix(), os.Getpid())
 	admin      *sql.DB
 	skipReason string
 )
-
-const pgPassword = "sql-test-pw"
 
 var _ ecsql.SQLServices = (*ecsql.SQLService)(nil)
 
 func TestMain(m *testing.M) { os.Exit(runMain(m)) }
 
 func runMain(m *testing.M) (code int) {
-	stop, err := startPostgres()
-	if err != nil {
+	if err := startPostgres(); err != nil {
 		skipReason = "no Postgres: " + err.Error()
 		fmt.Fprintln(os.Stderr, "sql tests:", skipReason)
 		return m.Run()
 	}
-	defer stop()
+	defer admin.Close()
+	scratchBefore := scratchDatabases()
 	code = m.Run()
 	// Migrate's scratch databases must never be left behind, failures included.
 	var left []string
-	rows, err := admin.Query("SELECT datname FROM pg_database WHERE datname LIKE 'sql_scratch_%'")
-	if err == nil {
-		for rows.Next() {
-			var name string
-			_ = rows.Scan(&name)
+	for _, name := range scratchDatabases() {
+		if !slices.Contains(scratchBefore, name) {
 			left = append(left, name)
 		}
-		rows.Close()
 	}
 	if len(left) > 0 {
 		fmt.Fprintln(os.Stderr, "sql tests: leaked scratch databases:", left)
@@ -70,67 +72,135 @@ func runMain(m *testing.M) (code int) {
 	return code
 }
 
-func startPostgres() (stop func(), err error) {
+func startPostgres() error {
+	root, err := moduleRoot()
+	if err != nil {
+		return err
+	}
+	env, err := loadEnv(filepath.Join(root, ".env"))
+	if err != nil {
+		return err
+	}
+	var missing []string
+	get := func(k string) string {
+		v := env[k]
+		if v == "" {
+			missing = append(missing, k)
+		}
+		return v
+	}
+	host, port := get("POSTGRES_HOST"), get("POSTGRES_PORT")
+	pgUser, pgPassword, pgAdminDB = get("POSTGRES_USER"), get("POSTGRES_PASSWORD"), get("POSTGRES_DB")
+	if len(missing) > 0 {
+		return fmt.Errorf("set %s in .env or the environment", strings.Join(missing, ", "))
+	}
+	pgAddr = net.JoinHostPort(host, port)
 	if _, err := exec.LookPath("docker"); err != nil {
-		return nil, errors.New("docker not installed")
+		return errors.New("docker not installed")
 	}
-	removeStaleContainers()
-	out, err := exec.Command("docker", "run", "-d", "--rm", "--label", fmt.Sprintf("%s=%d", containerLabel, time.Now().Unix()),
-		"-e", "POSTGRES_PASSWORD="+pgPassword,
-		"-p", "127.0.0.1::5432", "postgres:18-alpine", "-c", "max_connections=500").Output()
+	up := exec.Command("docker", "compose", "up", "-d", "--wait", "postgres")
+	up.Dir = root
+	if out, err := up.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker compose up postgres: %w\n%s", err, out)
+	}
+	admin = sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsnFor(pgAdminDB))))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := admin.PingContext(ctx); err != nil {
+		return fmt.Errorf("connecting to %s: %w", pgAddr, err)
+	}
+	dropStaleDatabases()
+	return nil
+}
+
+// dropStaleDatabases drops test databases a killed run left behind, once
+// they are older than any run could last. Only names this suite creates
+// are touched.
+func dropStaleDatabases() {
+	rows, err := admin.Query("SELECT datname FROM pg_database WHERE datname LIKE 'ecoop\\_test\\_%'")
 	if err != nil {
-		return nil, fmt.Errorf("docker run: %w", err)
+		return
 	}
-	id := strings.TrimSpace(string(out))
-	stop = func() {
-		if admin != nil {
-			_ = admin.Close()
+	var stale []string
+	for rows.Next() {
+		var name string
+		_ = rows.Scan(&name)
+		parts := strings.Split(name, "_")
+		if len(parts) < 3 {
+			continue
 		}
-		_ = exec.Command("docker", "rm", "-f", id).Run()
+		if sec, err := strconv.ParseInt(parts[2], 10, 64); err == nil && time.Since(time.Unix(sec, 0)) > time.Hour {
+			stale = append(stale, name)
+		}
 	}
-	port, err := exec.Command("docker", "port", id, "5432/tcp").Output()
-	if err != nil {
-		stop()
-		return nil, fmt.Errorf("docker port: %w", err)
-	}
-	pgAddr = strings.TrimSpace(strings.Split(string(port), "\n")[0])
-	admin = sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsnFor("postgres"))))
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		err := admin.PingContext(ctx)
-		cancel()
-		if err == nil {
-			return stop, nil
-		}
-		if time.Now().After(deadline) {
-			stop()
-			return nil, fmt.Errorf("postgres never became ready: %w", err)
-		}
-		time.Sleep(200 * time.Millisecond)
+	rows.Close()
+	for _, name := range stale {
+		_, _ = admin.Exec(`DROP DATABASE IF EXISTS "` + name + `" WITH (FORCE)`)
 	}
 }
 
-// containerLabel marks the suite's containers with their start time, so a
-// run that was killed before cleaning up (a test timeout) is removed by the
-// next one. Only containers older than any run could last are touched, so
-// two runs at once do not remove each other's.
-const containerLabel = "ecoop-sql-test"
+func scratchDatabases() []string {
+	var out []string
+	rows, err := admin.Query("SELECT datname FROM pg_database WHERE datname LIKE 'sql\\_scratch\\_%'")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		_ = rows.Scan(&name)
+		out = append(out, name)
+	}
+	return out
+}
 
-func removeStaleContainers() {
-	out, _ := exec.Command("docker", "ps", "-q", "--filter", "label="+containerLabel,
-		"--format", `{{.ID}} {{.Label "`+containerLabel+`"}}`).Output()
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		id, started, ok := strings.Cut(line, " ")
-		sec, err := strconv.ParseInt(started, 10, 64)
-		if ok && err == nil && time.Since(time.Unix(sec, 0)) > time.Hour {
-			_ = exec.Command("docker", "rm", "-f", id).Run()
+// loadEnv reads KEY=VALUE lines from path (if it exists); variables already
+// set in the environment take precedence.
+func loadEnv(path string) (map[string]string, error) {
+	env := map[string]string{}
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
+		k, v, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		if !ok {
+			continue
+		}
+		env[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	for _, k := range []string{"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"} {
+		if v, ok := os.LookupEnv(k); ok {
+			env[k] = v
+		}
+	}
+	return env, nil
+}
+
+func moduleRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", errors.New("go.mod not found")
+		}
+		dir = parent
 	}
 }
 
 func dsnFor(db string) string {
-	return fmt.Sprintf("postgres://postgres:%s@%s/%s?sslmode=disable", pgPassword, pgAddr, db)
+	u := url.URL{Scheme: "postgres", User: url.UserPassword(pgUser, pgPassword), Host: pgAddr, Path: "/" + db, RawQuery: "sslmode=disable"}
+	return u.String()
 }
 
 func requirePG(t testing.TB) {
@@ -153,7 +223,7 @@ var dbSeq atomic.Int64
 func newDatabase(t testing.TB) string {
 	t.Helper()
 	requirePG(t)
-	name := fmt.Sprintf("t_%d", dbSeq.Add(1))
+	name := fmt.Sprintf("%s_%d", pgRun, dbSeq.Add(1))
 	if _, err := admin.ExecContext(context.Background(), "CREATE DATABASE "+name); err != nil {
 		t.Fatalf("create database: %v", err)
 	}
@@ -370,8 +440,11 @@ func dbName(dsn string) string {
 	return name
 }
 
-// snapshot describes the current schema: columns, indexes, constraints,
-// views, triggers, functions and types, goose's table excluded. Two
+// snapshot describes the current schema: columns, indexes, constraints
+// (NOT NULL ones are in the columns), views, triggers, functions, enum
+// types, partitions and partition keys, sequence owners, extended
+// statistics, storage options, invalid indexes and extensions, goose's
+// table excluded. Two
 // databases with the same snapshot have the same schema.
 func snapshot(t testing.TB, s ecsql.SQLServices) string {
 	t.Helper()
@@ -384,7 +457,7 @@ SELECT 'idx ' || indexdef FROM pg_indexes WHERE schemaname = current_schema() AN
 UNION ALL
 SELECT 'con ' || c.conrelid::regclass || ' ' || c.conname || ' ' || pg_get_constraintdef(c.oid)
   FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
- WHERE n.nspname = current_schema() AND c.conrelid::regclass::text <> 'goose_db_version'
+ WHERE n.nspname = current_schema() AND c.conrelid::regclass::text <> 'goose_db_version' AND c.contype <> 'n'
 UNION ALL
 SELECT 'view ' || viewname || ' ' || definition FROM pg_views WHERE schemaname = current_schema()
 UNION ALL
@@ -395,6 +468,30 @@ UNION ALL
 SELECT 'type ' || t.typname || ' ' || string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
   FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid JOIN pg_namespace n ON n.oid = t.typnamespace
  WHERE n.nspname = current_schema() GROUP BY t.typname
+UNION ALL
+SELECT 'part ' || c.relname || ' ' || pg_get_expr(c.relpartbound, c.oid)
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = current_schema() AND c.relispartition AND c.relkind IN ('r', 'p')
+UNION ALL
+SELECT 'partkey ' || c.relname || ' ' || pg_get_partkeydef(c.oid)
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = current_schema() AND c.relkind = 'p'
+UNION ALL
+SELECT 'seq ' || s.relname || ' owned by ' || coalesce(t.relname || '.' || a.attname, '-')
+  FROM pg_class s JOIN pg_namespace n ON n.oid = s.relnamespace
+  LEFT JOIN pg_depend d ON d.objid = s.oid AND d.classid = 'pg_class'::regclass AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
+  LEFT JOIN pg_class t ON t.oid = d.refobjid LEFT JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+ WHERE s.relkind = 'S' AND n.nspname = current_schema() AND coalesce(t.relname, '') <> 'goose_db_version'
+UNION ALL
+SELECT 'stat ' || x.stxname || ' ' || pg_get_statisticsobjdef(x.oid)
+  FROM pg_statistic_ext x JOIN pg_namespace n ON n.oid = x.stxnamespace WHERE n.nspname = current_schema()
+UNION ALL
+SELECT 'opt ' || c.relname || ' ' || array_to_string(c.reloptions, ',')
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = current_schema() AND c.reloptions IS NOT NULL
+UNION ALL
+SELECT 'invalid ' || c.relname
+  FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = current_schema() AND NOT i.indisvalid
+UNION ALL
+SELECT 'ext ' || extname FROM pg_extension WHERE extname <> 'plpgsql'
 ORDER BY 1`
 	var rows []string
 	if err := s.Client().NewRaw(q).Scan(ctxT(t), &rows); err != nil {
