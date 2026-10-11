@@ -191,7 +191,7 @@ func TestRace_StopWaitsForInFlightCommands(t *testing.T) {
 	results := make(chan result, n)
 	for range n {
 		go func() {
-			err := svc.Ping(ctx) // reply held by the proxy
+			err := svc.Ping(ctx)
 			results <- result{err, time.Now()}
 		}()
 	}
@@ -215,8 +215,6 @@ func TestRace_StopWaitsForInFlightCommands(t *testing.T) {
 	}
 }
 
-// Stop must not hang forever on a stuck operation: once its ctx ends it
-// closes the connection anyway and reports that it did not drain.
 func TestRace_StopGivesUpWhenCtxEnds(t *testing.T) {
 	p := newProxy(t)
 	svc := cache.NewCacheService([]string{p.Addr()}, testPassword, nil)

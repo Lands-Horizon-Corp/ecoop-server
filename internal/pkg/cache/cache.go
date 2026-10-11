@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bytedance/sonic"
 	valkey "github.com/valkey-io/valkey-go"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
@@ -85,15 +84,6 @@ func (c *CacheService) Client() valkey.Client {
 	return c.client
 }
 
-func (c *CacheService) running() (client valkey.Client, done func(), err error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.client == nil {
-		return nil, nil, ErrNotRunning
-	}
-	return c.client, c.inflight.Track(), nil
-}
-
 func (c *CacheService) Ping(ctx context.Context) error {
 	client, done, err := c.running()
 	if err != nil {
@@ -136,7 +126,7 @@ func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.
 		return err
 	}
 	defer done()
-	val, err := encode(value)
+	val, err := utils.Encode(value)
 	if err != nil {
 		return err
 	}
@@ -153,7 +143,7 @@ func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl tim
 		return false, err
 	}
 	defer done()
-	val, err := encode(value)
+	val, err := utils.Encode(value)
 	if err != nil {
 		return false, err
 	}
@@ -223,7 +213,7 @@ func (c *CacheService) ZAdd(ctx context.Context, key string, score float64, memb
 		return err
 	}
 	defer done()
-	m, err := encode(member)
+	m, err := utils.Encode(member)
 	if err != nil {
 		return err
 	}
@@ -260,7 +250,7 @@ func (c *CacheService) ZRem(ctx context.Context, key string, members ...any) (in
 	}
 	ms := make([]string, len(members))
 	for i, m := range members {
-		if ms[i], err = encode(m); err != nil {
+		if ms[i], err = utils.Encode(m); err != nil {
 			return 0, err
 		}
 	}
@@ -297,39 +287,13 @@ func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration
 	return client.Do(ctx, client.B().Pexpire().Key(key).Milliseconds(utils.TTLMillis(ttl)).Build()).AsBool()
 }
 
-func encode(value any) (string, error) {
-	switch v := value.(type) {
-	case string:
-		return v, nil
-	case []byte:
-		return valkey.BinaryString(v), nil
-	case int:
-		return strconv.Itoa(v), nil
-	case int64:
-		return strconv.FormatInt(v, 10), nil
-	case int32:
-		return strconv.FormatInt(int64(v), 10), nil
-	case uint64:
-		return strconv.FormatUint(v, 10), nil
-	case uint32:
-		return strconv.FormatUint(uint64(v), 10), nil
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64), nil
-	case float32:
-		return strconv.FormatFloat(float64(v), 'f', -1, 32), nil
-	case bool:
-		return strconv.FormatBool(v), nil
-	case nil:
-		return "", ErrNilValue
+func (c *CacheService) running() (client valkey.Client, done func(), err error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.client == nil {
+		return nil, nil, ErrNotRunning
 	}
-	if utils.IsNil(value) {
-		return "", ErrNilValue
-	}
-	b, err := sonic.Marshal(value)
-	if err != nil {
-		return "", fmt.Errorf("cache: encoding value: %w", err)
-	}
-	return string(b), nil
+	return c.client, c.inflight.Track(), nil
 }
 
 func isReadOnly(err error) bool {

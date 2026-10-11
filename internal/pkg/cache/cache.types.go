@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/valkey-io/valkey-go"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 var (
@@ -22,7 +24,7 @@ var (
 	ErrNotFound    = errors.New("cache: key not found")
 	ErrNotRunning  = errors.New("cache: service not running; call Run first")
 	ErrNoAddresses = errors.New("cache: no addresses configured")
-	ErrNilValue    = errors.New("cache: value is nil")
+	ErrNilValue    = utils.ErrNilValue
 )
 
 const (
