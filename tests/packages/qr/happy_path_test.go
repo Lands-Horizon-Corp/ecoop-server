@@ -80,7 +80,7 @@ func TestHappyPath_SameSecretInteroperates(t *testing.T) {
 
 func TestHappyPath_RestartKeepsWorking(t *testing.T) {
 	ctx := context.Background()
-	svc := qr.NewQRServices(testSecret)
+	svc := qr.NewQRServices(testSecret, nil)
 	for i := range 3 {
 		if err := svc.Start(ctx); err != nil {
 			t.Fatalf("cycle %d Start: %v", i, err)

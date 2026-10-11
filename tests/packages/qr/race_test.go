@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/qr"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 // Sync & race: one started service shared across goroutines.
@@ -90,7 +91,7 @@ func TestRace_IndependentInstancesInParallel(t *testing.T) {
 	var wg sync.WaitGroup
 	for w := range 8 {
 		wg.Go(func() {
-			svc := qr.NewQRServices(fmt.Sprintf("tenant-%d", w))
+			svc := qr.NewQRServices(fmt.Sprintf("tenant-%d", w), nil)
 			if err := svc.Start(ctx); err != nil {
 				t.Error(err)
 				return
@@ -111,7 +112,7 @@ func TestRace_RepeatedStartDoesNotLeakGoroutines(t *testing.T) {
 	runtime.GC()
 	before := runtime.NumGoroutine()
 
-	svc := qr.NewQRServices(testSecret)
+	svc := qr.NewQRServices(testSecret, nil)
 	for range 20 {
 		if err := svc.Start(ctx); err != nil {
 			t.Fatal(err)
@@ -135,7 +136,7 @@ func TestRace_RepeatedStartDoesNotLeakGoroutines(t *testing.T) {
 // finish; calls that arrive after it must get ErrNotStarted, never a panic.
 func TestRace_StopDuringTraffic(t *testing.T) {
 	ctx := context.Background()
-	svc := qr.NewQRServices(testSecret)
+	svc := qr.NewQRServices(testSecret, nil)
 	if err := svc.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -163,4 +164,59 @@ func TestRace_StopDuringTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	wg.Wait()
+}
+
+// Stop must wait for calls in flight before releasing the codecs. Encode and
+// Decode are too quick to catch mid-flight, so a shared tracker holds an
+// operation open the same way a slow call would.
+func TestRace_StopWaitsForInFlight(t *testing.T) {
+	ctx := context.Background()
+	shared := utils.NewInflight()
+	svc := qr.NewQRServices(testSecret, shared)
+	if err := svc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	enc, _ := svc.Encode(ctx, &qr.QRData{Data: "x"})
+
+	release := shared.Track()
+	stopped := make(chan error, 1)
+	go func() { stopped <- svc.Stop(ctx) }()
+
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while a call was still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if _, err := svc.Decode(ctx, enc); !errors.Is(err, qr.ErrNotStarted) {
+		t.Fatalf("new call during Stop = %v, want ErrNotStarted", err)
+	}
+	release()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("Stop: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not return after the in-flight call finished")
+	}
+}
+
+func TestRace_StopGivesUpWhenCtxEnds(t *testing.T) {
+	shared := utils.NewInflight()
+	svc := qr.NewQRServices(testSecret, shared)
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	release := shared.Track()
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := svc.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop = %v, want DeadlineExceeded", err)
+	}
+	if d := time.Since(start); d > 300*time.Millisecond {
+		t.Fatalf("Stop overran its deadline: %v", d)
+	}
 }

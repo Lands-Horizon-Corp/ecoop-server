@@ -86,7 +86,7 @@ func TestIntegrationChaos_SecretRotation(t *testing.T) {
 
 func TestIntegrationChaos_PrintedBeforeRestartScannedAfter(t *testing.T) {
 	ctx := context.Background()
-	svc := qr.NewQRServices(testSecret)
+	svc := qr.NewQRServices(testSecret, nil)
 	if err := svc.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

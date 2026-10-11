@@ -13,7 +13,7 @@ import (
 func TestZeroValue_UnstartedServiceReturnsErrors(t *testing.T) {
 	ctx := context.Background()
 	cases := map[string]qr.QRServices{
-		"constructed only": qr.NewQRServices(testSecret),
+		"constructed only": qr.NewQRServices(testSecret, nil),
 		"zero struct":      &qr.QRService{},
 	}
 	for name, svc := range cases {
@@ -39,7 +39,7 @@ func TestZeroValue_UnstartedServiceReturnsErrors(t *testing.T) {
 
 func TestZeroValue_StoppedServiceReturnsErrors(t *testing.T) {
 	ctx := context.Background()
-	svc := qr.NewQRServices(testSecret)
+	svc := qr.NewQRServices(testSecret, nil)
 	if err := svc.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -16,10 +16,7 @@ var (
 )
 
 const (
-	ScanCount = 1000
-
-	// ReplaceDrainTimeout bounds how long a re-Run waits for operations on the
-	// previous client before closing it.
+	ScanCount           = 1000
 	ReplaceDrainTimeout = 30 * time.Second
 )
 

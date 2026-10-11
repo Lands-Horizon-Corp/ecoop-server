@@ -24,7 +24,7 @@ func newStarted(t testing.TB) qr.QRServices {
 
 func newStartedWithSecret(t testing.TB, secret string) qr.QRServices {
 	t.Helper()
-	svc := qr.NewQRServices(secret)
+	svc := qr.NewQRServices(secret, nil)
 	if svc == nil {
 		t.Fatal("NewQRServices returned nil")
 	}
