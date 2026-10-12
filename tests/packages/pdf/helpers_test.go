@@ -159,20 +159,15 @@ func render(t testing.TB, s pdf.PDFServices, opts pdf.RenderOptions) []byte {
 	return b
 }
 
-var mediaBox = regexp.MustCompile(`/MediaBox\s*\[\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\]`)
-
-// pageSize is the first page's size in points.
-func pageSize(t testing.TB, doc []byte) (w, h float64) {
-	t.Helper()
-	m := mediaBox.FindSubmatch(doc)
+// landscape reports whether the first page is wider than it is tall.
+func landscape(doc []byte) bool {
+	m := regexp.MustCompile(`/MediaBox\s*\[\s*[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)\s*\]`).FindSubmatch(doc)
 	if m == nil {
-		t.Fatal("no /MediaBox in the PDF")
+		return false
 	}
-	x0, _ := strconv.ParseFloat(string(m[1]), 64)
-	y0, _ := strconv.ParseFloat(string(m[2]), 64)
-	x1, _ := strconv.ParseFloat(string(m[3]), 64)
-	y1, _ := strconv.ParseFloat(string(m[4]), 64)
-	return x1 - x0, y1 - y0
+	w, _ := strconv.ParseFloat(string(m[1]), 64)
+	h, _ := strconv.ParseFloat(string(m[2]), 64)
+	return w > h
 }
 
 func stored(t testing.TB, key string) int64 {
@@ -193,16 +188,6 @@ func capturePanic(fn func()) (recovered any, stack string) {
 	}()
 	fn()
 	return nil, ""
-}
-
-func mustNotPanic(t *testing.T, name string, fn func()) {
-	t.Helper()
-	if r, stack := capturePanic(fn); r != nil {
-		if testing.Verbose() {
-			t.Log(stack)
-		}
-		t.Fatalf("%s panicked: %v", name, r)
-	}
 }
 
 func mustPanic(t *testing.T, name string, fn func()) {

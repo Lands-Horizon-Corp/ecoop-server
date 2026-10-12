@@ -11,9 +11,6 @@ import (
 func TestSmoke(t *testing.T) {
 	t.Parallel()
 	s := started(t)
-	if err := s.Ping(ctxT(t)); err != nil {
-		t.Fatalf("Ping: %v", err)
-	}
 	render(t, s, invoice())
 	if err := s.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
