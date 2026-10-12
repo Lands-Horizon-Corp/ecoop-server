@@ -40,8 +40,6 @@ services:
     networks:
       - app-network
 
-  # S3-compatible object storage. The app talks to it with the S3 API, so the
-  # same code runs against AWS S3 or MinIO by changing STORAGE_* in .env.
   storage:
     image: rustfs/rustfs:${STORAGE_IMAGE_TAG:-latest}
     environment:
@@ -95,6 +93,49 @@ services:
       retries: 30
       start_period: 2s
     restart: unless-stopped
+    networks:
+      - app-network
+
+  # Renders HTML/Minijinja templates to PDF in-process (no browser). Returns
+  # the PDF, or stores it in PDF_BUCKET on the storage service.
+  pdf-engine:
+    image: zalven88/pdf-engine:${PDF_IMAGE_TAG:-1.1.0}
+    depends_on:
+      pdf-storage-setup:
+        condition: service_completed_successfully
+    environment:
+      API_PORT: "6767"
+      API_BEARER_TOKEN: ${PDF_ENGINE_API_BEARER_TOKEN:-change-me}
+      STORAGE_URL: http://storage:9000 # the storage service on the compose network
+      STORAGE_BUCKET: ${PDF_BUCKET:-pdfs}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-ecoop}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-ecoop-secret}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      RENDER_TIMEOUT_SECS: ${PDF_RENDER_TIMEOUT_SECS:-45}
+    ports:
+      - "${PDF_ENGINE_API_HOST:-127.0.0.1}:${PDF_ENGINE_API_PORT:-6767}:6767"
+    healthcheck:
+      test: ["CMD", "pdf-engine", "healthcheck"] # the image has no curl or wget
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Creates pdf-engine's bucket on the storage service, then exits.
+  pdf-storage-setup:
+    image: amazon/aws-cli:${PDF_SETUP_IMAGE_TAG:-latest}
+    depends_on:
+      - storage
+    environment:
+      AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY:-ecoop}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_KEY:-ecoop-secret}
+      AWS_DEFAULT_REGION: ${STORAGE_REGION:-us-east-1}
+      PDF_BUCKET: ${PDF_BUCKET:-pdfs}
+    entrypoint: >
+      sh -c "until aws --endpoint-url http://storage:9000 s3api head-bucket --bucket \"$$PDF_BUCKET\" 2>/dev/null ||
+                   aws --endpoint-url http://storage:9000 s3 mb \"s3://$$PDF_BUCKET\"; do sleep 1; done"
     networks:
       - app-network
 
