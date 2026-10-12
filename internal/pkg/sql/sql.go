@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -296,7 +295,7 @@ func (s *SQLService) Create(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	slug := strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(name), "_"), "_")
+	slug := utils.Slug(name, '_')
 	if slug == "" {
 		return ErrEmptyName
 	}
@@ -315,8 +314,6 @@ func (s *SQLService) Create(ctx context.Context, name string) error {
 	}
 	return nil
 }
-
-var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
 const migrationTemplate = `-- +goose Up
 -- +goose StatementBegin

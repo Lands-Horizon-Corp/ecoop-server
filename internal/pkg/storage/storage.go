@@ -4,9 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -550,10 +548,6 @@ var (
 // name or, failing that, the content type. Path parts in original are
 // dropped, so a name cannot climb out of its folder.
 func (s *StorageService) GenerateUniqueName(original, contentType string) (string, error) {
-	id := make([]byte, 12)
-	if _, err := rand.Read(id); err != nil {
-		return "", err
-	}
 	base := path.Base(strings.ReplaceAll(original, `\`, "/"))
 	ext := strings.ToLower(path.Ext(base))
 	base = strings.TrimSuffix(base, path.Ext(base))
@@ -569,7 +563,7 @@ func (s *StorageService) GenerateUniqueName(original, contentType string) (strin
 			}
 		}
 	}
-	name := hex.EncodeToString(id)
+	name := utils.RandomHex(12)
 	if base != "" {
 		name += "-" + base
 	}

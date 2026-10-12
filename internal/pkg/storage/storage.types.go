@@ -50,7 +50,6 @@ var (
 )
 
 type (
-	// Storage describes a stored file. FileSize and Progress are bytes.
 	Storage struct {
 		FileName   string
 		FileSize   int64
@@ -62,35 +61,26 @@ type (
 		Progress   int64
 	}
 
-	// ProgressCallback reports bytes uploaded so far out of total (-1 when
-	// the size is not known up front).
 	ProgressCallback func(progress int64, total int64, storage *Storage)
 
-	// Option tunes a StorageService.
 	Option func(*StorageService)
 
 	StorageServices interface {
-		// Run connects and creates the bucket if missing; Stop refuses new
-		// uploads and waits for running ones, or until ctx ends.
 		Run(ctx context.Context) error
 		Stop(ctx context.Context) error
 		Ping(ctx context.Context) error
 
-		// Upload stores file, whatever it is: a URL (http, https), a data
-		// URI, a file path, []byte, io.Reader or *multipart.FileHeader.
 		Upload(ctx context.Context, file any, onProgress ProgressCallback) (*Storage, error)
 		UploadFromPath(ctx context.Context, path string, cb ProgressCallback) (*Storage, error)
 		UploadFromBase64(ctx context.Context, base64 string, cb ProgressCallback) (*Storage, error)
 		UploadFromURL(ctx context.Context, url string, cb ProgressCallback) (*Storage, error)
 		UploadFromBinary(ctx context.Context, data []byte, cb ProgressCallback) (*Storage, error)
 		UploadFromHeader(ctx context.Context, header *multipart.FileHeader, cb ProgressCallback) (*Storage, error)
-		// UploadFromStream stores size bytes of r (-1: until EOF).
 		UploadFromStream(ctx context.Context, r io.Reader, size int64, fileName string, contentType string, cb ProgressCallback) (*Storage, error)
 
 		DeleteFile(ctx context.Context, storage *Storage) error
 		GeneratePresignedURL(ctx context.Context, storage *Storage, expiry time.Duration) (string, error)
 		GenerateUniqueName(original string, contentType string) (string, error)
-		// RemoveAllFiles empties the service's own bucket.
 		RemoveAllFiles(ctx context.Context) error
 	}
 )

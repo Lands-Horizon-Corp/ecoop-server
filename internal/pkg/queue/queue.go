@@ -2,8 +2,6 @@ package queue
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,12 +60,10 @@ func (e *retryAfterError) Error() string { return e.err.Error() }
 func (e *retryAfterError) Unwrap() error { return e.err }
 
 func NewQueueService(cache cache.CacheServices, opts ...ServiceOption) QueueServices {
-	id := make([]byte, 16)
-	_, _ = rand.Read(id)
 	q := &QueueService{
 		cache:    cache,
 		inflight: utils.NewInflight(),
-		id:       hex.EncodeToString(id),
+		id:       utils.RandomHex(16),
 		cron:     cron.New(),
 	}
 	for _, opt := range opts {
