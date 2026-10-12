@@ -165,7 +165,7 @@ func m100Generate(label string) (h m100History) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	name := pgRun + "_m100_" + label
-	if _, err := admin.Exec(`CREATE DATABASE "` + name + `"`); err != nil {
+	if _, err := admin.ExecContext(ctx, `CREATE DATABASE "`+name+`"`); err != nil {
 		return m100History{err: err}
 	}
 	suiteCleanups = append(suiteCleanups, func() { _, _ = admin.Exec(`DROP DATABASE IF EXISTS "` + name + `" WITH (FORCE)`) })
@@ -241,15 +241,14 @@ func (h *m100History) filesOf(v int) []string {
 // data jobs, as deploys would. It retries a file that gave up on a lock.
 func m100Apply(t testing.TB, h *m100History, s ecsql.SQLServices, from, to int, after func(v int)) {
 	t.Helper()
-	ctx := ctxT(t)
 	for v := from + 1; v <= to; v++ {
-		if err := m100Run(ctx, m100Pre, v, s.Client()); err != nil {
+		if err := m100Run(ctxT(t), m100Pre, v, s.Client()); err != nil {
 			t.Fatal(err)
 		}
 		for range h.files[v] - h.files[v-1] {
 			var err error
 			for attempt := range 5 {
-				if err = s.UpSteps(ctx, 1); err == nil || !retryable(err) {
+				if err = s.UpSteps(ctxT(t), 1); err == nil || !retryable(err) {
 					break
 				}
 				time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
@@ -258,7 +257,7 @@ func m100Apply(t testing.TB, h *m100History, s ecsql.SQLServices, from, to int, 
 				t.Fatalf("v%03d (%s): %v", v, m100Versions[v-1].note, err)
 			}
 		}
-		if err := m100Run(ctx, m100Post, v, s.Client()); err != nil {
+		if err := m100Run(ctxT(t), m100Post, v, s.Client()); err != nil {
 			t.Fatal(err)
 		}
 		if after != nil {
@@ -372,9 +371,9 @@ func TestModels100_ModelsMatchTheMigrations(t *testing.T) {
 func TestModels100_SeededEvolution(t *testing.T) {
 	t.Parallel()
 	oneHeavyTest(t)
-	h, _, s := m100Env(t)
+	h, e, s := m100Env(t)
 	m100Apply(t, h, s, 0, 10, nil)
-	execSQL(t, s, pg100SeedSQL)
+	seed(t, e, pg100SeedSQL)
 	m100Apply(t, h, s, 10, 100, func(v int) {
 		for _, table := range []string{"users", "accounts", "transactions"} {
 			if n := count(t, s, "SELECT count(*) FROM "+table); n != pg100Seed {
@@ -403,9 +402,9 @@ func TestModels100_SeededEvolution(t *testing.T) {
 func TestModels100_ZeroDowntimeUnderLoad(t *testing.T) {
 	t.Parallel()
 	oneHeavyTest(t)
-	h, _, s := m100Env(t)
+	h, e, s := m100Env(t)
 	m100Apply(t, h, s, 0, 10, nil)
-	execSQL(t, s, pg100SeedSQL)
+	seed(t, e, pg100SeedSQL)
 	m100Apply(t, h, s, 10, 50, nil)
 
 	ctx := ctxT(t)

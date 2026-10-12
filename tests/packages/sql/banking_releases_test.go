@@ -176,7 +176,9 @@ func copyMigrations(t testing.TB, src, dst *env) {
 	}
 }
 
-// replayAndRollBack applies e's migrations one at a time on a fresh database,
+// replayAndRollBack applies e's migrations one at a time on a fresh database
+// (each step with its own deadline, so a long history on a busy server is
+// not cut off by one overall timeout),
 // recording the schema after each, then rolls back one at a time checking
 // each step restores the schema recorded before it. It returns the final
 // schema.
@@ -185,18 +187,17 @@ func replayAndRollBack(t *testing.T, e *env) string {
 	fresh := newEnv(t)
 	copyMigrations(t, e, fresh)
 	s := fresh.started(t)
-	ctx := ctxT(t)
 	n := len(fresh.files("*.sql"))
 	snaps := []string{snapshot(t, s)}
 	for i := range n {
-		if err := s.UpSteps(ctx, 1); err != nil {
+		if err := s.UpSteps(ctxT(t), 1); err != nil {
 			t.Fatalf("replay step %d: %v", i+1, err)
 		}
 		snaps = append(snaps, snapshot(t, s))
 	}
 	final := snaps[n]
 	for i := n; i > 0; i-- {
-		if err := s.RollbackSteps(ctx, 1); err != nil {
+		if err := s.RollbackSteps(ctxT(t), 1); err != nil {
 			t.Fatalf("rolling back step %d: %v", i, err)
 		}
 		if got := snapshot(t, s); got != snaps[i-1] {

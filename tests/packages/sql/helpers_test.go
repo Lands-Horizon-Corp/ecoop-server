@@ -111,7 +111,9 @@ func startPostgres() error {
 	if out, err := up.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker compose up postgres: %w\n%s", err, out)
 	}
-	admin = sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsnFor(pgAdminDB))))
+	// Test setup only: CREATE DATABASE queues behind every other one on the
+	// server, so it is bounded by a context rather than a socket timeout.
+	admin = sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsnFor(pgAdminDB)), pgdriver.WithReadTimeout(0)))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := admin.PingContext(ctx); err != nil {
@@ -232,7 +234,9 @@ func newDatabase(t testing.TB) string {
 	t.Helper()
 	requirePG(t)
 	name := fmt.Sprintf("%s_%d", pgRun, dbSeq.Add(1))
-	if _, err := admin.ExecContext(context.Background(), "CREATE DATABASE "+name); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
 		t.Fatalf("create database: %v", err)
 	}
 	t.Cleanup(func() {
@@ -560,3 +564,16 @@ func diffLines(a, b string) string {
 
 // pgArray passes ids as a Postgres array parameter.
 func pgArray(ids []int64) any { return pgdialect.Array(ids) }
+
+// seed runs a bulk statement (test data) on its own connection to e's
+// database. The app's pool keeps pgdriver's 10s read timeout on purpose;
+// loading 100,000 rows per table can take longer when the whole suite
+// shares the server, so seeding is bounded by the test's context instead.
+func seed(t testing.TB, e *env, query string) {
+	t.Helper()
+	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(e.dsn), pgdriver.WithReadTimeout(0)))
+	defer db.Close()
+	if _, err := db.ExecContext(ctxT(t), query); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+}

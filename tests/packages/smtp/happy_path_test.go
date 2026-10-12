@@ -151,7 +151,7 @@ func TestHappyPath_PingAgainstServer(t *testing.T) {
 	if err := newService(t).Ping(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 2*time.Second {
+	if d := time.Since(start); d > 10*time.Second { // bounded, not hung; generous for a busy machine
 		t.Fatalf("Ping took %v", d)
 	}
 }

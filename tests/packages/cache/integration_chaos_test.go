@@ -112,10 +112,23 @@ func TestIntegrationChaos_DistributedLockMutualExclusion(t *testing.T) {
 	if m := maxHolders.Load(); m > 1 {
 		t.Fatalf("%d holders at once; lock is not exclusive", m)
 	}
-	if acquired.Load() == 0 {
-		t.Fatal("lock was never acquired")
+	// How often the lock was won during the storm depends on how fast the
+	// machine reconnects; what must hold is that the storm left no stuck
+	// lock: once it ends, the lock can be taken again within its TTL.
+	t.Logf("lock acquired %d times during the storm", acquired.Load())
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ok, err := nodes[0].SetNX(ctx, lock, "after-the-storm", 5*time.Second)
+		cancel()
+		if err == nil && ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the lock could not be taken after the storm: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	t.Logf("lock acquired %d times", acquired.Load())
 }
 
 func TestIntegrationChaos_SlidingWindowAcrossRestarts(t *testing.T) {

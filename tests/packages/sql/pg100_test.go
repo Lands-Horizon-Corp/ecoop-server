@@ -82,11 +82,10 @@ func versionInt(t testing.TB, s ecsql.SQLServices, e *env) int {
 // lost a lock wait (lock_timeout) or a deadlock, as a deploy would.
 func upTo(t testing.TB, s ecsql.SQLServices, e *env, v int) {
 	t.Helper()
-	ctx := ctxT(t)
 	for cur := versionInt(t, s, e); cur < v; cur++ {
 		var err error
 		for attempt := range 5 {
-			if err = s.UpSteps(ctx, 1); err == nil || !retryable(err) {
+			if err = s.UpSteps(ctxT(t), 1); err == nil || !retryable(err) {
 				break
 			}
 			time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
@@ -373,14 +372,13 @@ func TestPG100_BlankSlateIsDeterministic(t *testing.T) {
 func TestPG100_FullRoundTrip(t *testing.T) {
 	t.Parallel()
 	e, s := pg100Env(t)
-	ctx := ctxT(t)
 	snaps := []string{snapshot(t, s)}
 	for v := 1; v <= pg100Count; v++ {
 		upTo(t, s, e, v)
 		snaps = append(snaps, snapshot(t, s))
 	}
 	for v := pg100Count; v >= 1; v-- {
-		if err := s.RollbackSteps(ctx, 1); err != nil {
+		if err := s.RollbackSteps(ctxT(t), 1); err != nil {
 			t.Fatalf("Down of v%03d: %v", v, err)
 		}
 		if got := snapshot(t, s); got != snaps[v-1] {
@@ -404,7 +402,7 @@ func TestPG100_SeededDataSurvivesTheWholeHistory(t *testing.T) {
 	e, s := pg100Env(t)
 	ctx := ctxT(t)
 	upTo(t, s, e, 10)
-	execSQL(t, s, pg100SeedSQL)
+	seed(t, e, pg100SeedSQL)
 	seeded, schema10 := digest(t, s), snapshot(t, s)
 	for _, checkpoint := range []int{20, 37, 39, 40, 50, 64, 66, 67, 68, 80, 85, 90, 97, 100} {
 		upTo(t, s, e, checkpoint)
@@ -543,7 +541,7 @@ func TestPG100_ZeroDowntimeUnderLoad(t *testing.T) {
 	oneHeavyTest(t)
 	e, s := pg100Env(t)
 	upTo(t, s, e, 10)
-	execSQL(t, s, pg100SeedSQL)
+	seed(t, e, pg100SeedSQL)
 	upTo(t, s, e, 50)
 
 	ctx := ctxT(t)
