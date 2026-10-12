@@ -1,0 +1,47 @@
+//go:build integration
+
+package broker_test
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
+)
+
+// Two instances in one group: when the one consuming stops mid-stream, the
+// other takes over and nothing is lost (at least once).
+func TestIntegrationChaos_InstanceStopsMidStream(t *testing.T) {
+	t.Parallel()
+	topic, group := names()
+	var in inbox
+	a := broker.NewBrokerService([]string{addr}, group, nil)
+	_ = a.Subscribe(ctxT(t), topic, func(ctx context.Context, k, v []byte) error {
+		time.Sleep(20 * time.Millisecond) // a slow worker
+		return in.handle(ctx, k, v)
+	})
+	if err := a.Run(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	sender := service(t, group+"-sender")
+	const n = 40
+	publish(t, sender, topic, n, "k")
+	for len(in.all()) < 5 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = a.Stop(context.Background())
+	b := service(t, group)
+	_ = b.Subscribe(ctxT(t), topic, in.handle)
+	in.wait(t, n) // duplicates are allowed, gaps are not
+	seen := map[string]bool{}
+	for _, m := range in.all() {
+		seen[m] = true
+	}
+	for i := range n {
+		if !seen[fmt.Sprintf("k=%d", i)] {
+			t.Fatalf("message %d was lost when the instance stopped", i)
+		}
+	}
+}

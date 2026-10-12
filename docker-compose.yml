@@ -134,6 +134,39 @@ services:
     networks:
       - app-network
 
+  # Single-node Kafka (KRaft, no ZooKeeper). Containers reach it at
+  # kafka:9092; this machine at BROKER_HOST:BROKER_PORT.
+  kafka:
+    image: apache/kafka:${BROKER_IMAGE_TAG:-latest}
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://${BROKER_HOST:-127.0.0.1}:${BROKER_PORT:-9094}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    ports:
+      - "${BROKER_HOST:-127.0.0.1}:${BROKER_PORT:-9094}:9094"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 2s
+      timeout: 10s
+      retries: 60
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - app-network
+
   mailpit:
     image: axllent/mailpit:latest
     restart: always
@@ -147,6 +180,7 @@ networks:
   app-network:
 
 volumes:
+  kafka-data:
   storage-data:
   postgres-data:
   valkey-data:
