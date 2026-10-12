@@ -9,8 +9,12 @@ import (
 )
 
 const (
-	MaxSessionTTL = 30 * 24 * time.Hour // longest session SetCSRF accepts
-	TokenBytes    = 32                  // random bytes in a token
+	MaxSessionTTL = 30 * 24 * time.Hour
+	TokenBytes    = 32
+	// StoreTimeout bounds each call's work on the session store. Request
+	// contexts often have no deadline; without one, a cache outage would
+	// hang every signed-in request instead of failing it with ErrSession.
+	StoreTimeout = 3 * time.Second
 )
 
 var (

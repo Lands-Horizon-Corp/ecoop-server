@@ -47,6 +47,8 @@ type session struct {
 }
 
 func (h *AuthService[T]) SetCSRF(ctx context.Context, c *app.RequestContext, claim T, expiry time.Duration) error {
+	ctx, cancel := bound(ctx)
+	defer cancel()
 	if err := h.ready(); err != nil {
 		return err
 	}
@@ -85,11 +87,15 @@ func (h *AuthService[T]) SetCSRF(ctx context.Context, c *app.RequestContext, cla
 }
 
 func (h *AuthService[T]) GetCSRF(ctx context.Context, c *app.RequestContext) (T, error) {
+	ctx, cancel := bound(ctx)
+	defer cancel()
 	claim, _, err := h.current(ctx, c)
 	return claim, err
 }
 
 func (h *AuthService[T]) VerifyCSRF(ctx context.Context, token string) (T, error) {
+	ctx, cancel := bound(ctx)
+	defer cancel()
 	claim, _, err := h.load(ctx, token)
 	return claim, err
 }
@@ -97,6 +103,8 @@ func (h *AuthService[T]) VerifyCSRF(ctx context.Context, token string) (T, error
 // ClearCSRF signs out this device. Without a session there is nothing to
 // do; the cookies are cleared either way.
 func (h *AuthService[T]) ClearCSRF(ctx context.Context, c *app.RequestContext) error {
+	ctx, cancel := bound(ctx)
+	defer cancel()
 	defer h.clearCookies(c)
 	if err := h.ready(); err != nil {
 		return err
@@ -119,6 +127,8 @@ func (h *AuthService[T]) ClearCSRF(ctx context.Context, c *app.RequestContext) e
 // Devices
 
 func (h *AuthService[T]) HasActiveSessionOnOtherDevice(ctx context.Context, c *app.RequestContext) (bool, error) {
+	ctx, cancel := bound(ctx)
+	defer cancel()
 	claim, id, err := h.current(ctx, c)
 	if err != nil {
 		return false, err
@@ -128,6 +138,8 @@ func (h *AuthService[T]) HasActiveSessionOnOtherDevice(ctx context.Context, c *a
 }
 
 func (h *AuthService[T]) GetActiveSessionClaims(ctx context.Context, c *app.RequestContext) ([]T, error) {
+	ctx, cancel := bound(ctx)
+	defer cancel()
 	claim, id, err := h.current(ctx, c)
 	if err != nil {
 		return nil, err
@@ -146,6 +158,8 @@ func (h *AuthService[T]) GetActiveSessionClaims(ctx context.Context, c *app.Requ
 }
 
 func (h *AuthService[T]) RevokeUserSessions(ctx context.Context, userID string) error {
+	ctx, cancel := bound(ctx)
+	defer cancel()
 	if err := h.ready(); err != nil {
 		return err
 	}
@@ -156,6 +170,8 @@ func (h *AuthService[T]) RevokeUserSessions(ctx context.Context, userID string) 
 }
 
 func (h *AuthService[T]) RevokeAllUserSessions(ctx context.Context, c *app.RequestContext) error {
+	ctx, cancel := bound(ctx)
+	defer cancel()
 	claim, _, err := h.current(ctx, c)
 	if err != nil {
 		return err
@@ -164,17 +180,15 @@ func (h *AuthService[T]) RevokeAllUserSessions(ctx context.Context, c *app.Reque
 	return h.revoke(ctx, claim.GetID(), "")
 }
 
-// RevokeOtherDeviceSessions signs the user out everywhere else; this device
-// stays signed in.
 func (h *AuthService[T]) RevokeOtherDeviceSessions(ctx context.Context, c *app.RequestContext) error {
+	ctx, cancel := bound(ctx)
+	defer cancel()
 	claim, id, err := h.current(ctx, c)
 	if err != nil {
 		return err
 	}
 	return h.revoke(ctx, claim.GetID(), id)
 }
-
-// Helpers
 
 func (h *AuthService[T]) ready() error {
 	var errs []error
@@ -190,6 +204,7 @@ func (h *AuthService[T]) ready() error {
 func (h *AuthService[T]) sessionKey(id string) string {
 	return h.name + ":auth:session:" + id
 }
+
 func (h *AuthService[T]) userKey(userID string) string {
 	return h.name + ":auth:user:" + userID
 }
@@ -347,4 +362,12 @@ func (h *AuthService[T]) clearCookies(c *app.RequestContext) {
 	if name := h.cookieName(c); name != h.csrfHeader {
 		h.setCookie(c, h.csrfHeader, "", -1)
 	}
+}
+
+// bound limits ctx to StoreTimeout (or keeps its own, earlier deadline).
+func bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(ctx, StoreTimeout)
 }
