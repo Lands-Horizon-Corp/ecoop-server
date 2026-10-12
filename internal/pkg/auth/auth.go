@@ -43,7 +43,7 @@ func NewAuthService[T ClaimWithID](
 
 type session struct {
 	UserID string `json:"u"`
-	Claim  []byte `json:"c"` // encrypted JSON of T
+	Claim  []byte `json:"c"`
 }
 
 func (h *AuthService[T]) SetCSRF(ctx context.Context, c *app.RequestContext, claim T, expiry time.Duration) error {
@@ -336,8 +336,6 @@ func (h *AuthService[T]) token(c *app.RequestContext) string {
 	return string(c.Cookie(h.csrfHeader))
 }
 
-// cookieName is the session cookie for the site calling, so one API can
-// serve several front ends without their sessions overwriting each other.
 func (h *AuthService[T]) cookieName(c *app.RequestContext) string {
 	host := utils.RequestHost(string(c.GetHeader("Origin")), string(c.GetHeader("Referer")), string(c.Host()))
 	if scope := utils.Slug(host, '-'); scope != "" {
@@ -364,7 +362,6 @@ func (h *AuthService[T]) clearCookies(c *app.RequestContext) {
 	}
 }
 
-// bound limits ctx to StoreTimeout (or keeps its own, earlier deadline).
 func bound(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
