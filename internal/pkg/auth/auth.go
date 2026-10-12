@@ -99,9 +99,6 @@ func (h *AuthService[T]) VerifyCSRF(ctx context.Context, token string) (T, error
 	claim, _, err := h.load(ctx, token)
 	return claim, err
 }
-
-// ClearCSRF signs out this device. Without a session there is nothing to
-// do; the cookies are cleared either way.
 func (h *AuthService[T]) ClearCSRF(ctx context.Context, c *app.RequestContext) error {
 	ctx, cancel := bound(ctx)
 	defer cancel()

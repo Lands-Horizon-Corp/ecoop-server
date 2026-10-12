@@ -13,7 +13,7 @@ var (
 )
 
 type (
-	MessageBrokerServices interface {
+	BrokerServices interface {
 		Run(ctx context.Context) error
 		Stop(ctx context.Context) error
 		Publish(ctx context.Context, topic string, key, value []byte) error
