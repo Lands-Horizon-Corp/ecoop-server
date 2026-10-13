@@ -23,7 +23,7 @@ import (
 )
 
 // Tests run against the compose stack, configured from .env or the
-// environment (BROKER_HOST, BROKER_PORT, POSTGRES_*, DEBEZIUM_*). The tests
+// environment (BROKER_HOST, BROKER_PORT, POSTGRES_*, CDC_*). The tests
 // that feed hand-made events need only Kafka; the realtime ones also need
 // Debezium and skip without it.
 var (
@@ -145,7 +145,7 @@ func skipUnlessDebezium(t testing.TB) {
 
 // newService is a CDC service for the test Kafka, not yet running.
 func newService() cdc.CDCServices {
-	return cdc.NewCDCService([]string{addr}, fmt.Sprintf("cdc-test-%d", runID), cfg("DEBEZIUM_TOPIC_PREFIX", "ecoop"))
+	return cdc.NewCDCService([]string{addr}, fmt.Sprintf("cdc-test-%d", runID), cfg("CDC_TOPIC_PREFIX", "ecoop"))
 }
 
 // service is a CDC service, run until t ends.

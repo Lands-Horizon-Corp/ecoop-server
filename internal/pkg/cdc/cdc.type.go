@@ -82,7 +82,7 @@ type (
 		Stop(ctx context.Context) error
 
 		// Topic is the Debezium topic of schema.table:
-		// <DEBEZIUM_TOPIC_PREFIX>.<schema>.<table>.
+		// <CDC_TOPIC_PREFIX>.<schema>.<table>.
 		Topic(schema, table string) string
 
 		// Subscribe delivers each change on topic to handler, at least once

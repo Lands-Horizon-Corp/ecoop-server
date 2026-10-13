@@ -30,7 +30,7 @@ func TestSmoke(t *testing.T) {
 	}
 }
 
-// Topic follows the connector's naming, from DEBEZIUM_TOPIC_PREFIX.
+// Topic follows the connector's naming, from CDC_TOPIC_PREFIX.
 func TestSmoke_Topic(t *testing.T) {
 	t.Parallel()
 	if got := cdc.NewCDCService(nil, "", "acme").Topic("public", "users"); got != "acme.public.users" {
