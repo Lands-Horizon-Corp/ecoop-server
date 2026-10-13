@@ -58,10 +58,10 @@ test-unit: ## unit tests only (no integration tag), -race -v
 	$(GO) test $(TEST_FLAGS) $(if $(PKG),$(PKG),./...)
 
 test-integration: ## integration tests only (tests/packages/...), -race -v; needs docker
-	$(GO) test -tags integration $(TEST_FLAGS) $(if $(PKG),$(PKG),./tests/packages/...)
+	$(GO) test -tags integration -p $(or $(PARALLEL),1) $(TEST_FLAGS) $(if $(PKG),$(PKG),./tests/packages/...)
 
 test-all: ## everything: unit + integration in one run, -race -v; needs docker
-	$(GO) test -tags integration $(TEST_FLAGS) $(if $(PKG),$(PKG),./...)
+	$(GO) test -tags integration -p $(or $(PARALLEL),1) $(TEST_FLAGS) $(if $(PKG),$(PKG),./...)
 
 test: test-all ## alias for test-all
 
@@ -79,7 +79,7 @@ test-sql: ## sql service integration suite, -race -v
 
 test-errors: ## everything (unit + integration), print only failures; full log in .test-logs/
 	@mkdir -p $(LOGDIR)
-	@$(GO) test -tags integration $(TEST_FLAGS) $(if $(PKG),$(PKG),./...) > $(LOGDIR)/all.log 2>&1; status=$$?; \
+	@$(GO) test -tags integration -p $(or $(PARALLEL),1) $(TEST_FLAGS) $(if $(PKG),$(PKG),./...) > $(LOGDIR)/all.log 2>&1; status=$$?; \
 		$(MAKE) --no-print-directory report LOG=$(LOGDIR)/all.log; exit $$status
 
 test-unit-errors: ## unit tests only, print only failures

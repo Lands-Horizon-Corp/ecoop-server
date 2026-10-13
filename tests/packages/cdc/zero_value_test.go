@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cdc"
 )
@@ -58,7 +59,11 @@ func TestZeroValue_StopDuringRetries(t *testing.T) {
 		return errors.New("always fails")
 	})
 	_ = producer(t).Publish(ctxT(t), topic, key(1), event(cdc.OpCreate, 1, "x"))
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("handler never ran")
+	}
 	for range 2 {
 		if err := s.Stop(context.Background()); err != nil {
 			t.Fatal(err)
