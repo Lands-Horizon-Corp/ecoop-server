@@ -4,7 +4,17 @@ name: ecoop
 services:
   postgres:
     image: postgres:18-alpine
-    command: ["postgres", "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-200}"]
+    # wal_level=logical lets Debezium stream changes through a replication slot.
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-200}
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=${POSTGRES_MAX_WAL_SENDERS:-10}
+      - -c
+      - max_replication_slots=${POSTGRES_MAX_REPLICATION_SLOTS:-10}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ecoop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecoop}
@@ -164,6 +174,64 @@ services:
       retries: 60
       start_period: 5s
     restart: unless-stopped
+    networks:
+      - app-network
+
+  # Debezium = Kafka Connect + the Postgres connector. It talks to the same
+  # kafka service as the app (kafka:9092) and publishes row changes to
+  # <DEBEZIUM_TOPIC_PREFIX>.<schema>.<table>, which the app consumes with
+  # BrokerService.Subscribe like any other topic.
+  debezium:
+    image: quay.io/debezium/connect:${DEBEZIUM_IMAGE_TAG:-3.0}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: ${DEBEZIUM_CONNECT_GROUP_ID:-ecoop-connect}
+      CONFIG_STORAGE_TOPIC: ${DEBEZIUM_CONNECT_GROUP_ID:-ecoop-connect}.configs
+      OFFSET_STORAGE_TOPIC: ${DEBEZIUM_CONNECT_GROUP_ID:-ecoop-connect}.offsets
+      STATUS_STORAGE_TOPIC: ${DEBEZIUM_CONNECT_GROUP_ID:-ecoop-connect}.status
+      CONFIG_STORAGE_REPLICATION_FACTOR: ${DEBEZIUM_REPLICATION_FACTOR:-1}
+      OFFSET_STORAGE_REPLICATION_FACTOR: ${DEBEZIUM_REPLICATION_FACTOR:-1}
+      STATUS_STORAGE_REPLICATION_FACTOR: ${DEBEZIUM_REPLICATION_FACTOR:-1}
+    ports:
+      - "${DEBEZIUM_HOST:-127.0.0.1}:${DEBEZIUM_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8083/connectors >/dev/null"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  debezium-setup:
+    image: curlimages/curl:${DEBEZIUM_SETUP_IMAGE_TAG:-latest}
+    depends_on:
+      debezium:
+        condition: service_healthy
+    environment:
+      CONNECT_URL: http://debezium:8083
+      CONNECTOR_NAME: ${DEBEZIUM_CONNECTOR_NAME:-ecoop-postgres}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DEBEZIUM_DB_USER:-${POSTGRES_USER:-ecoop}}
+      DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD:-${POSTGRES_PASSWORD:-ecoop}}
+      DB_NAME: ${POSTGRES_DB:-ecoop}
+      TOPIC_PREFIX: ${DEBEZIUM_TOPIC_PREFIX:-ecoop}
+      TABLE_INCLUDE_LIST: ${DEBEZIUM_TABLE_INCLUDE_LIST:-public.users}
+      SLOT_NAME: ${DEBEZIUM_SLOT_NAME:-ecoop_debezium}
+      PUBLICATION_NAME: ${DEBEZIUM_PUBLICATION_NAME:-ecoop_debezium}
+      SNAPSHOT_MODE: ${DEBEZIUM_SNAPSHOT_MODE:-initial}
+      TOPIC_REPLICATION_FACTOR: ${DEBEZIUM_REPLICATION_FACTOR:-1}
+      TOPIC_PARTITIONS: ${DEBEZIUM_TOPIC_PARTITIONS:-1}
+    volumes:
+      - ./docker/debezium/register.sh:/register.sh:ro
+    entrypoint: ["sh", "/register.sh"]
     networks:
       - app-network
 

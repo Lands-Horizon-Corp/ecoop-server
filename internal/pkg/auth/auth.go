@@ -41,11 +41,6 @@ func NewAuthService[T ClaimWithID](
 	}
 }
 
-type session struct {
-	UserID string `json:"u"`
-	Claim  []byte `json:"c"`
-}
-
 func (h *AuthService[T]) SetCSRF(ctx context.Context, c *app.RequestContext, claim T, expiry time.Duration) error {
 	ctx, cancel := bound(ctx)
 	defer cancel()
@@ -80,7 +75,7 @@ func (h *AuthService[T]) SetCSRF(ctx context.Context, c *app.RequestContext, cla
 		_, _ = h.cache.Delete(ctx, h.sessionKey(id))
 		return errors.Join(ErrSession, err)
 	}
-	_, _ = h.cache.Expire(ctx, userKey, MaxSessionTTL) // the index outlives any one session
+	_, _ = h.cache.Expire(ctx, userKey, MaxSessionTTL)
 	c.Response.Header.Set(h.csrfHeader, token)
 	h.setCookie(c, h.cookieName(c), token, int(expiry/time.Second))
 	return nil

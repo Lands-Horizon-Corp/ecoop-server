@@ -6,9 +6,24 @@ import (
 	"time"
 )
 
+// Defaults, each overridable through an Option or its BROKER_* variable.
 const (
-	HandlerAttempts = 3                      // tries per message before it is skipped
+	HandlerAttempts = 3                      // tries per message before it is parked on the DLQ
 	RetryBackoff    = 200 * time.Millisecond // between tries, doubling
+	DLQSuffix       = ".dlq"                 // dead-letter topic is <topic><suffix>
+	maxDLQBackoff   = 5 * time.Second        // cap while the DLQ itself is unreachable
+)
+
+// Headers added to every dead-lettered record. The original record's own
+// headers (Debezium sets some) are kept.
+const (
+	HeaderDLQTopic     = "dlq.original-topic"
+	HeaderDLQPartition = "dlq.original-partition"
+	HeaderDLQOffset    = "dlq.original-offset"
+	HeaderDLQError     = "dlq.error"
+	HeaderDLQAttempts  = "dlq.attempts"
+	HeaderDLQGroup     = "dlq.group"
+	HeaderDLQFailedAt  = "dlq.failed-at"
 )
 
 var (
@@ -21,12 +36,18 @@ var (
 	ErrDuplicateSubscription = errors.New("broker: topic already subscribed")
 	ErrConnect               = errors.New("broker: cannot reach Kafka")
 	ErrPublish               = errors.New("broker: publish failed")
+	ErrBadConfig             = errors.New("broker: invalid BROKER_* setting")
 )
 
 type (
 	// Handler processes one message. Return nil when done; an error retries
-	// it (HandlerAttempts in all) before it is skipped.
+	// it (HandlerAttempts in all) before it is parked on the topic's dead-letter
+	// topic, <topic>+DLQSuffix, and the topic moves on. A message is committed
+	// only once handled or parked, so nothing is lost.
 	Handler func(ctx context.Context, key, value []byte) error
+
+	// Option tunes a BrokerService.
+	Option func(*BrokerService)
 
 	// BrokerServices publishes to and consumes from Kafka.
 	BrokerServices interface {

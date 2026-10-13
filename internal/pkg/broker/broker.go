@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,10 @@ type BrokerService struct {
 	groupID string
 	gate    *utils.Gate
 
+	dlqSuffix string
+	attempts  int
+	backoff   time.Duration
+
 	mu       sync.Mutex
 	producer *kgo.Client
 	subs     map[string]*subscription
@@ -29,17 +34,89 @@ type subscription struct {
 	client  *kgo.Client // nil while not running
 }
 
+// WithDLQSuffix names dead-letter topics <topic><suffix>. Empty keeps the default.
+func WithDLQSuffix(suffix string) Option {
+	return func(b *BrokerService) {
+		if s := strings.TrimSpace(suffix); s != "" {
+			b.dlqSuffix = s
+		}
+	}
+}
+
+// WithRetry sets the tries per message and the first wait between them
+// (doubling). Non-positive values keep the defaults.
+func WithRetry(attempts int, backoff time.Duration) Option {
+	return func(b *BrokerService) {
+		if attempts > 0 {
+			b.attempts = attempts
+		}
+		if backoff > 0 {
+			b.backoff = backoff
+		}
+	}
+}
+
 // NewBrokerService creates the service. groupID is only needed to
 // Subscribe. inflight may be shared with other services; nil gives the
 // service its own tracker.
 func NewBrokerService(
-	brokers []string, groupID string, inflight *utils.Inflight) BrokerServices {
-	return &BrokerService{
-		brokers: brokers,
-		groupID: groupID,
-		gate:    utils.NewGate(inflight),
-		subs:    map[string]*subscription{},
+	brokers []string, groupID string, inflight *utils.Inflight, opts ...Option) BrokerServices {
+	b := &BrokerService{
+		brokers:   brokers,
+		groupID:   groupID,
+		gate:      utils.NewGate(inflight),
+		subs:      map[string]*subscription{},
+		dlqSuffix: DLQSuffix,
+		attempts:  HandlerAttempts,
+		backoff:   RetryBackoff,
 	}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
+}
+
+// NewBrokerServiceFromEnv builds the service from the environment, so the
+// same binary runs against any Kafka (plain or the one Debezium publishes
+// to) without a rebuild:
+//
+//	BROKER_BOOTSTRAP_SERVERS  comma-separated host:port list; wins when set
+//	BROKER_HOST, BROKER_PORT  used when BOOTSTRAP_SERVERS is empty
+//	BROKER_GROUP_ID           consumer group
+//	BROKER_DLQ_SUFFIX         optional, default ".dlq"
+//	BROKER_HANDLER_ATTEMPTS   optional, default 3
+//	BROKER_RETRY_BACKOFF      optional Go duration, default 200ms
+func NewBrokerServiceFromEnv(getenv func(string) string, inflight *utils.Inflight) (BrokerServices, error) {
+	var brokers []string
+	if list := getenv("BROKER_BOOTSTRAP_SERVERS"); strings.TrimSpace(list) != "" {
+		for addr := range strings.SplitSeq(list, ",") {
+			if addr = strings.TrimSpace(addr); addr != "" {
+				brokers = append(brokers, addr)
+			}
+		}
+	} else if host, port := getenv("BROKER_HOST"), getenv("BROKER_PORT"); host != "" && port != "" {
+		brokers = []string{host + ":" + port}
+	}
+	var opts []Option
+	opts = append(opts, WithDLQSuffix(getenv("BROKER_DLQ_SUFFIX")))
+	var attempts int
+	var backoff time.Duration
+	if v := getenv("BROKER_HANDLER_ATTEMPTS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, errors.Join(ErrBadConfig, errors.New("BROKER_HANDLER_ATTEMPTS must be a positive integer"))
+		}
+		attempts = n
+	}
+	if v := getenv("BROKER_RETRY_BACKOFF"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, errors.Join(ErrBadConfig, errors.New("BROKER_RETRY_BACKOFF must be a positive duration such as 200ms"))
+		}
+		backoff = d
+	}
+	opts = append(opts, WithRetry(attempts, backoff))
+	return NewBrokerService(brokers, getenv("BROKER_GROUP_ID"), inflight, opts...), nil
 }
 
 func (b *BrokerService) Run(ctx context.Context) error {
@@ -62,15 +139,17 @@ func (b *BrokerService) Run(ctx context.Context) error {
 		producer.Close()
 		return errors.Join(ErrConnect, err)
 	}
+	// Open before consuming: a backlog is handled the moment a consumer
+	// starts, and a closed gate would end its loop.
+	b.producer = producer
+	b.gate.Open()
 	for _, s := range b.subs {
 		if err := b.consume(s); err != nil {
 			b.closeLocked()
-			producer.Close()
+			_ = b.gate.Close(context.Background())
 			return err
 		}
 	}
-	b.producer = producer
-	b.gate.Open()
 	return nil
 }
 
@@ -168,9 +247,9 @@ func (b *BrokerService) consume(s *subscription) error {
 	return nil
 }
 
-// loop hands each message to handler and commits what was handled. When
-// the service stops mid-batch the rest stays uncommitted, to be delivered
-// again.
+// loop hands each message to handler and commits what was handled or
+// parked. When the service stops mid-batch the rest stays uncommitted, to be
+// delivered again.
 func (b *BrokerService) loop(client *kgo.Client, handler Handler) {
 	for {
 		fetches := client.PollFetches(context.Background())
@@ -198,23 +277,65 @@ func (b *BrokerService) loop(client *kgo.Client, handler Handler) {
 	}
 }
 
-// handle runs handler on r, retrying with backoff. It reports false when
-// the service is stopping and r was not handled.
+// handle runs handler on r, retrying with backoff, then parks r on its
+// dead-letter topic if it never succeeds. It reports false when the service
+// is stopping and r is neither handled nor parked, so it is not committed.
 func (b *BrokerService) handle(handler Handler, r *kgo.Record) bool {
 	done, ok := b.gate.Enter()
 	if !ok {
 		return false
 	}
 	defer done()
-	wait := RetryBackoff
-	for attempt := 1; attempt <= HandlerAttempts; attempt++ {
-		if err := safely(handler, r); err == nil || attempt == HandlerAttempts {
-			return true // done, or given up on: skipped so the topic moves on
+	wait := b.backoff
+	var err error
+	for attempt := 1; attempt <= b.attempts; attempt++ {
+		if err = safely(handler, r); err == nil {
+			return true
+		}
+		if attempt < b.attempts {
+			time.Sleep(wait)
+			wait *= 2
+		}
+	}
+	return b.deadLetter(r, err)
+}
+
+// deadLetter publishes r to <topic><suffix> and waits until Kafka has it.
+// While the DLQ is unreachable it keeps trying rather than dropping r; it
+// gives up (false, r stays uncommitted) only when the service stops.
+func (b *BrokerService) deadLetter(r *kgo.Record, cause error) bool {
+	b.mu.Lock()
+	producer := b.producer
+	b.mu.Unlock()
+	if producer == nil {
+		return false
+	}
+	dead := &kgo.Record{
+		Topic: r.Topic + b.dlqSuffix,
+		Key:   r.Key,
+		Value: r.Value,
+		Headers: append(append([]kgo.RecordHeader(nil), r.Headers...),
+			kgo.RecordHeader{Key: HeaderDLQTopic, Value: []byte(r.Topic)},
+			kgo.RecordHeader{Key: HeaderDLQPartition, Value: []byte(strconv.Itoa(int(r.Partition)))},
+			kgo.RecordHeader{Key: HeaderDLQOffset, Value: []byte(strconv.FormatInt(r.Offset, 10))},
+			kgo.RecordHeader{Key: HeaderDLQError, Value: []byte(cause.Error())},
+			kgo.RecordHeader{Key: HeaderDLQAttempts, Value: []byte(strconv.Itoa(b.attempts))},
+			kgo.RecordHeader{Key: HeaderDLQGroup, Value: []byte(b.groupID)},
+			kgo.RecordHeader{Key: HeaderDLQFailedAt, Value: []byte(time.Now().UTC().Format(time.RFC3339Nano))},
+		),
+	}
+	wait := b.backoff
+	for b.gate.IsOpen() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := producer.ProduceSync(ctx, dead).FirstErr()
+		cancel()
+		if err == nil {
+			return true
 		}
 		time.Sleep(wait)
-		wait *= 2
+		wait = min(wait*2, maxDLQBackoff)
 	}
-	return true
+	return false
 }
 
 // safely runs handler, turning a panic into an error so one bad message

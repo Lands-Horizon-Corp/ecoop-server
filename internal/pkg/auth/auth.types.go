@@ -29,6 +29,11 @@ var (
 )
 
 type (
+	session struct {
+		UserID string `json:"u"`
+		Claim  []byte `json:"c"`
+	}
+
 	ClaimWithID interface {
 		GetID() string
 	}
