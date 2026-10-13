@@ -24,8 +24,6 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
-var _ ISQLService = (*SQLService)(nil)
-
 type SQLService struct {
 	dsn         string
 	maxIdleConn int
