@@ -4,6 +4,8 @@ package broker_test
 
 import (
 	"context"
+	"errors"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
 	"testing"
 )
 
@@ -24,5 +26,17 @@ func TestSmoke(t *testing.T) {
 	}
 	if err := b.Stop(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Smoke: a dead letter's topic is the original plus the default suffix.
+func TestSmoke_DLQ(t *testing.T) {
+	t.Parallel()
+	topic, group := names()
+	b := service(t, group)
+	_ = b.Subscribe(ctxT(t), topic, func(context.Context, []byte, []byte) error { return errors.New("no") })
+	_ = b.Publish(ctxT(t), topic, []byte("k"), []byte("v"))
+	if dead := readDLQ(t, topic+broker.DLQSuffix); string(dead.Value) != "v" {
+		t.Fatalf("dead letter = %q", dead.Value)
 	}
 }

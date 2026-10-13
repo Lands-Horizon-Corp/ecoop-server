@@ -34,3 +34,26 @@ func TestZeroValue_Absence(t *testing.T) {
 	var ptr *broker.BrokerService
 	mustPanic(t, "nil receiver", func() { _ = ptr.Run(ctx) })
 }
+
+// Stop while a handler is mid-retry neither hangs nor panics, and a second
+// Stop is a no-op.
+func TestZeroValue_StopDuringRetries(t *testing.T) {
+	t.Parallel()
+	topic, group := names()
+	b := service(t, group)
+	entered := make(chan struct{}, 1)
+	_ = b.Subscribe(ctxT(t), topic, func(context.Context, []byte, []byte) error {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		return errors.New("always fails")
+	})
+	_ = b.Publish(ctxT(t), topic, []byte("k"), []byte("v"))
+	<-entered
+	for range 2 {
+		if err := b.Stop(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

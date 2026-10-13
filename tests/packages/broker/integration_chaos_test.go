@@ -4,6 +4,7 @@ package broker_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -43,5 +44,36 @@ func TestIntegrationChaos_InstanceStopsMidStream(t *testing.T) {
 		if !seen[fmt.Sprintf("k=%d", i)] {
 			t.Fatalf("message %d was lost when the instance stopped", i)
 		}
+	}
+}
+
+// The instance that dead-letters a poison message stops; the next one takes
+// over, delivers the rest, and the poison message is on the DLQ exactly once
+// (it was committed after being parked, so it is not replayed).
+func TestIntegrationChaos_PoisonThenFailover(t *testing.T) {
+	t.Parallel()
+	topic, group := names()
+	var in inbox
+	handler := func(ctx context.Context, k, v []byte) error {
+		if string(v) == "poison" {
+			return errors.New("bad row")
+		}
+		return in.handle(ctx, k, v)
+	}
+	a := broker.NewBrokerService([]string{addr}, group, nil)
+	_ = a.Subscribe(ctxT(t), topic, handler)
+	if err := a.Run(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	sender := service(t, group+"-sender")
+	_ = sender.Publish(ctxT(t), topic, []byte("k"), []byte("poison"))
+	readDLQ(t, topic+broker.DLQSuffix)
+	_ = a.Stop(context.Background())
+	b := service(t, group)
+	_ = b.Subscribe(ctxT(t), topic, handler)
+	publish(t, sender, topic, 5, "k")
+	in.wait(t, 5)
+	if n := countFor(t, topic+broker.DLQSuffix, 3*time.Second); n != 1 {
+		t.Fatalf("poison message dead-lettered %d times, want 1", n)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Defaults, each overridable through an Option or its BROKER_* variable.
+// Delivery settings.
 const (
 	HandlerAttempts = 3                      // tries per message before it is parked on the DLQ
 	RetryBackoff    = 200 * time.Millisecond // between tries, doubling
@@ -36,7 +36,6 @@ var (
 	ErrDuplicateSubscription = errors.New("broker: topic already subscribed")
 	ErrConnect               = errors.New("broker: cannot reach Kafka")
 	ErrPublish               = errors.New("broker: publish failed")
-	ErrBadConfig             = errors.New("broker: invalid BROKER_* setting")
 )
 
 type (
@@ -45,9 +44,6 @@ type (
 	// topic, <topic>+DLQSuffix, and the topic moves on. A message is committed
 	// only once handled or parked, so nothing is lost.
 	Handler func(ctx context.Context, key, value []byte) error
-
-	// Option tunes a BrokerService.
-	Option func(*BrokerService)
 
 	// BrokerServices publishes to and consumes from Kafka.
 	BrokerServices interface {

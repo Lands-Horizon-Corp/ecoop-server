@@ -34,34 +34,12 @@ type subscription struct {
 	client  *kgo.Client // nil while not running
 }
 
-// WithDLQSuffix names dead-letter topics <topic><suffix>. Empty keeps the default.
-func WithDLQSuffix(suffix string) Option {
-	return func(b *BrokerService) {
-		if s := strings.TrimSpace(suffix); s != "" {
-			b.dlqSuffix = s
-		}
-	}
-}
-
-// WithRetry sets the tries per message and the first wait between them
-// (doubling). Non-positive values keep the defaults.
-func WithRetry(attempts int, backoff time.Duration) Option {
-	return func(b *BrokerService) {
-		if attempts > 0 {
-			b.attempts = attempts
-		}
-		if backoff > 0 {
-			b.backoff = backoff
-		}
-	}
-}
-
 // NewBrokerService creates the service. groupID is only needed to
 // Subscribe. inflight may be shared with other services; nil gives the
 // service its own tracker.
 func NewBrokerService(
-	brokers []string, groupID string, inflight *utils.Inflight, opts ...Option) BrokerServices {
-	b := &BrokerService{
+	brokers []string, groupID string, inflight *utils.Inflight) BrokerServices {
+	return &BrokerService{
 		brokers:   brokers,
 		groupID:   groupID,
 		gate:      utils.NewGate(inflight),
@@ -70,53 +48,6 @@ func NewBrokerService(
 		attempts:  HandlerAttempts,
 		backoff:   RetryBackoff,
 	}
-	for _, opt := range opts {
-		opt(b)
-	}
-	return b
-}
-
-// NewBrokerServiceFromEnv builds the service from the environment, so the
-// same binary runs against any Kafka (plain or the one Debezium publishes
-// to) without a rebuild:
-//
-//	BROKER_BOOTSTRAP_SERVERS  comma-separated host:port list; wins when set
-//	BROKER_HOST, BROKER_PORT  used when BOOTSTRAP_SERVERS is empty
-//	BROKER_GROUP_ID           consumer group
-//	BROKER_DLQ_SUFFIX         optional, default ".dlq"
-//	BROKER_HANDLER_ATTEMPTS   optional, default 3
-//	BROKER_RETRY_BACKOFF      optional Go duration, default 200ms
-func NewBrokerServiceFromEnv(getenv func(string) string, inflight *utils.Inflight) (BrokerServices, error) {
-	var brokers []string
-	if list := getenv("BROKER_BOOTSTRAP_SERVERS"); strings.TrimSpace(list) != "" {
-		for addr := range strings.SplitSeq(list, ",") {
-			if addr = strings.TrimSpace(addr); addr != "" {
-				brokers = append(brokers, addr)
-			}
-		}
-	} else if host, port := getenv("BROKER_HOST"), getenv("BROKER_PORT"); host != "" && port != "" {
-		brokers = []string{host + ":" + port}
-	}
-	var opts []Option
-	opts = append(opts, WithDLQSuffix(getenv("BROKER_DLQ_SUFFIX")))
-	var attempts int
-	var backoff time.Duration
-	if v := getenv("BROKER_HANDLER_ATTEMPTS"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return nil, errors.Join(ErrBadConfig, errors.New("BROKER_HANDLER_ATTEMPTS must be a positive integer"))
-		}
-		attempts = n
-	}
-	if v := getenv("BROKER_RETRY_BACKOFF"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil || d <= 0 {
-			return nil, errors.Join(ErrBadConfig, errors.New("BROKER_RETRY_BACKOFF must be a positive duration such as 200ms"))
-		}
-		backoff = d
-	}
-	opts = append(opts, WithRetry(attempts, backoff))
-	return NewBrokerService(brokers, getenv("BROKER_GROUP_ID"), inflight, opts...), nil
 }
 
 func (b *BrokerService) Run(ctx context.Context) error {
