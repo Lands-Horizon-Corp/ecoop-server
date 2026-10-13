@@ -82,15 +82,6 @@ func NewSQLService(
 	}
 }
 
-// Lifecycle
-
-// Start opens the connection pools and checks the database answers. Calling
-// it while started does nothing.
-//
-// Migrations get a pool of their own: app queries keep pgdriver's socket
-// timeouts, while a migration statement (an index build, a backfill, a wait
-// on a lock) runs as long as its ctx allows, and never waits for a
-// connection held by app traffic.
 func (s *SQLService) Start(ctx context.Context) error {
 	if ctx == nil {
 		return ErrNilContext
@@ -116,7 +107,7 @@ func (s *SQLService) Start(ctx context.Context) error {
 	}
 	sqldb := sql.OpenDB(app)
 	sqldb.SetMaxOpenConns(s.maxOpenConn)
-	sqldb.SetMaxIdleConns(s.maxIdleConn) // database/sql caps it at MaxOpenConns
+	sqldb.SetMaxIdleConns(s.maxIdleConn)
 	sqldb.SetConnMaxLifetime(s.connMaxLifetime)
 	sqldb.SetConnMaxIdleTime(s.connMaxIdleTime)
 	db := bun.NewDB(sqldb, pgdialect.New())
@@ -133,8 +124,6 @@ func (s *SQLService) Start(ctx context.Context) error {
 	return nil
 }
 
-// connector builds a pgdriver connector, which panics on a malformed DSN.
-// The DSN holds the password, so the error does not repeat it.
 func connector(dsn string, opts ...pgdriver.Option) (c *pgdriver.Connector, err error) {
 	defer func() {
 		if recover() != nil {
@@ -144,11 +133,6 @@ func connector(dsn string, opts ...pgdriver.Option) (c *pgdriver.Connector, err 
 	return pgdriver.NewConnector(append([]pgdriver.Option{pgdriver.WithDSN(dsn)}, opts...)...), nil
 }
 
-// Run applies pending migrations when autoMigrate is on, and does nothing
-// otherwise. It only applies the files already in the migrations directory:
-// generating them is Migrate's job, done in development so the files are
-// reviewed and committed. Instances that Run at once take turns through a
-// Postgres advisory lock.
 func (s *SQLService) Run(ctx context.Context) error {
 	if !s.autoMigrate {
 		return nil
@@ -158,10 +142,6 @@ func (s *SQLService) Run(ctx context.Context) error {
 	})
 }
 
-// Stop refuses new commands, waits for running ones (a migration is never
-// cut off halfway), then closes the pools; database/sql lets queries already
-// running through Client finish first. If ctx ends first Stop returns its
-// error and closes the pools in the background once the commands finish.
 func (s *SQLService) Stop(ctx context.Context) error {
 	if ctx == nil {
 		return ErrNilContext
@@ -179,8 +159,6 @@ func (s *SQLService) Stop(ctx context.Context) error {
 	return s.release(db, migdb)
 }
 
-// release closes the pools and clears them, unless a later Start replaced
-// them.
 func (s *SQLService) release(db *bun.DB, migdb *sql.DB) error {
 	if db == nil {
 		return nil
@@ -205,27 +183,10 @@ func (s *SQLService) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Client returns the Bun handle, or nil before Start.
 func (s *SQLService) Client() *bun.DB {
 	return s.db.Load()
 }
 
-// Migrations
-
-// Migrate applies pending migrations, then plans migrations from the
-// models with Atlas and applies them until the schema matches (at most
-// MigratePasses). Atlas compares the migrations folder, replayed in a
-// scratch database, with the models' tables, created by Bun in another, so
-// the plan never depends on what was changed by hand in this database; such
-// a change is reported as ErrDrift instead. Applying first means a
-// teammate's pending migration is never generated again.
-//
-// The models are the schema: tables, columns, foreign keys, and the indexes
-// and checks their AfterCreateTable hooks create. A change that drops a
-// table, column, check, foreign key or unique index is written with
-// ReviewSuffix and not applied until a person renames it. A generated file
-// that fails to apply is removed (goose rolled it back), so fixing the cause
-// and running Migrate again starts clean.
 func (s *SQLService) Migrate(ctx context.Context) error {
 	if err := validModels(s.models); err != nil {
 		return err
@@ -246,7 +207,7 @@ func (s *SQLService) Migrate(ctx context.Context) error {
 					return err
 				}
 				if err := upLocked(ctx, mig, dir); err != nil {
-					if lockTimedOut(err) { // a valid migration that met traffic: keep it
+					if lockTimedOut(err) {
 						return err
 					}
 					return errors.Join(ErrInvalidMigration, err, os.Remove(file))
@@ -260,12 +221,10 @@ func (s *SQLService) Migrate(ctx context.Context) error {
 	})
 }
 
-// Fresh drops everything in the current schema and reapplies all migrations.
-// It destroys all data in that schema.
 func (s *SQLService) Fresh(ctx context.Context) error {
 	return s.migration(ctx, func(mig *sql.DB, dir string) error {
 		return withMigrationLock(ctx, mig, func() error {
-			db := bun.NewDB(mig, pgdialect.New()) // for quoting; never Close it
+			db := bun.NewDB(mig, pgdialect.New())
 			var schema string
 			if err := db.NewRaw("SELECT current_schema()").Scan(ctx, &schema); err != nil {
 				return fmt.Errorf("sql: fresh: %w", err)
@@ -282,9 +241,6 @@ func (s *SQLService) Fresh(ctx context.Context) error {
 	})
 }
 
-// Create writes a new goose .sql migration from the standard template, named
-// name in snake_case, versioned after every existing migration. It needs no
-// Start.
 func (s *SQLService) Create(ctx context.Context, name string) error {
 	if ctx == nil {
 		return ErrNilContext
@@ -297,7 +253,7 @@ func (s *SQLService) Create(ctx context.Context, name string) error {
 	if slug == "" {
 		return ErrEmptyName
 	}
-	select { // so two Creates here never pick the same version
+	select {
 	case s.migrating <- struct{}{}:
 		defer func() { <-s.migrating }()
 	case <-ctx.Done():
@@ -313,18 +269,6 @@ func (s *SQLService) Create(ctx context.Context, name string) error {
 	return nil
 }
 
-const migrationTemplate = `-- +goose Up
--- +goose StatementBegin
-SELECT 'up SQL query';
--- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-SELECT 'down SQL query';
--- +goose StatementEnd
-`
-
-// Rollback reverts the last applied migration.
 func (s *SQLService) Rollback(ctx context.Context) error {
 	return s.withProvider(ctx, func(p *goose.Provider) error {
 		_, err := p.Down(ctx)
@@ -332,7 +276,6 @@ func (s *SQLService) Rollback(ctx context.Context) error {
 	})
 }
 
-// RollbackTo reverts migrations until version is the latest applied.
 func (s *SQLService) RollbackTo(ctx context.Context, version int64) error {
 	return s.withProvider(ctx, func(p *goose.Provider) error {
 		_, err := p.DownTo(ctx, version)
@@ -340,8 +283,6 @@ func (s *SQLService) RollbackTo(ctx context.Context, version int64) error {
 	})
 }
 
-// Redo reverts the last applied migration and applies it again. With none
-// applied there is nothing to redo.
 func (s *SQLService) Redo(ctx context.Context) error {
 	return s.withProvider(ctx, func(p *goose.Provider) error {
 		if _, err := p.Down(ctx); err != nil {
@@ -352,8 +293,6 @@ func (s *SQLService) Redo(ctx context.Context) error {
 	})
 }
 
-// RollbackSteps reverts steps migrations. Asking for more than are applied
-// is refused before any is reverted.
 func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
 	return s.steps(ctx, steps, goose.StateApplied, func(p *goose.Provider) error {
 		_, err := p.Down(ctx)
@@ -361,8 +300,6 @@ func (s *SQLService) RollbackSteps(ctx context.Context, steps int) error {
 	})
 }
 
-// UpSteps applies steps pending migrations. Asking for more than are
-// pending is refused before any is applied.
 func (s *SQLService) UpSteps(ctx context.Context, steps int) error {
 	return s.steps(ctx, steps, goose.StatePending, func(p *goose.Provider) error {
 		_, err := p.UpByOne(ctx)
@@ -370,8 +307,6 @@ func (s *SQLService) UpSteps(ctx context.Context, steps int) error {
 	})
 }
 
-// steps runs step steps times, after checking that many migrations are in
-// state.
 func (s *SQLService) steps(ctx context.Context, steps int, state goose.State, step func(*goose.Provider) error) error {
 	if steps <= 0 {
 		return ErrInvalidSteps
@@ -399,7 +334,6 @@ func (s *SQLService) steps(ctx context.Context, steps int, state goose.State, st
 	})
 }
 
-// Status writes every migration and whether it is applied to the output.
 func (s *SQLService) Status(ctx context.Context) error {
 	w := tabwriter.NewWriter(s.output, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "VERSION\tSTATE\tAPPLIED AT\tFILE")
@@ -423,8 +357,6 @@ func (s *SQLService) Status(ctx context.Context) error {
 	return w.Flush()
 }
 
-// Version writes the latest applied migration version to the output: 0
-// when nothing has been applied.
 func (s *SQLService) Version(ctx context.Context) error {
 	_, mig, done, err := s.ready(ctx)
 	if err != nil {
@@ -443,10 +375,6 @@ func (s *SQLService) Version(ctx context.Context) error {
 	return err
 }
 
-// Helpers
-
-// ready checks ctx and enters the gate, returning the app and migration
-// pools. The caller must call done when it finishes, so Stop waits for it.
 func (s *SQLService) ready(ctx context.Context) (db *bun.DB, mig *sql.DB, done func(), err error) {
 	if ctx == nil {
 		return nil, nil, nil, ErrNilContext
@@ -463,10 +391,6 @@ func (s *SQLService) ready(ctx context.Context) (db *bun.DB, mig *sql.DB, done f
 	return db, mig, done, nil
 }
 
-// migration runs fn as this process's only migration command at the time:
-// commands queue here (giving up when ctx ends) rather than each holding a
-// connection while waiting for the database lock. fn gets the migration
-// pool and the migrations directory.
 func (s *SQLService) migration(ctx context.Context, fn func(mig *sql.DB, dir string) error) error {
 	_, mig, done, err := s.ready(ctx)
 	if err != nil {
@@ -486,7 +410,6 @@ func (s *SQLService) migration(ctx context.Context, fn func(mig *sql.DB, dir str
 	return fn(mig, dir)
 }
 
-// upLocked applies pending migrations; the caller holds the migration lock.
 func upLocked(ctx context.Context, mig *sql.DB, dir string) error {
 	p, err := provider(mig, dir)
 	if errors.Is(err, goose.ErrNoMigrations) {
@@ -503,7 +426,7 @@ func upLocked(ctx context.Context, mig *sql.DB, dir string) error {
 		if !lockTimedOut(err) || attempt == MigrationLockRetries {
 			return fmt.Errorf("sql: applying migrations: %w", err)
 		}
-		select { // the failed migration rolled back; try it again shortly
+		select {
 		case <-time.After(time.Duration(attempt) * time.Second):
 		case <-ctx.Done():
 			return fmt.Errorf("sql: applying migrations: %w", errors.Join(err, ctx.Err()))
@@ -511,17 +434,11 @@ func upLocked(ctx context.Context, mig *sql.DB, dir string) error {
 	}
 }
 
-// lockTimedOut reports a migration that gave up waiting for a lock
-// (lock_timeout): it changed nothing and can simply run again.
 func lockTimedOut(err error) bool {
 	pg, ok := errors.AsType[pgdriver.Error](err)
 	return ok && pg.Field('C') == "55P03"
 }
 
-// withProvider runs fn with a goose provider while holding the migration
-// lock, so a command of several steps (Redo, RollbackSteps) cannot
-// interleave with another instance's. With no migration files there is
-// nothing to do.
 func (s *SQLService) withProvider(ctx context.Context, fn func(*goose.Provider) error) error {
 	return s.migration(ctx, func(mig *sql.DB, dir string) error {
 		return withMigrationLock(ctx, mig, func() error {
@@ -540,9 +457,6 @@ func (s *SQLService) withProvider(ctx context.Context, fn func(*goose.Provider) 
 	})
 }
 
-// provider builds a goose provider over dir; the caller holds the migration
-// lock. It is rebuilt per command so files added by Create or Migrate are
-// seen. Never Close it: goose's Provider.Close closes the shared *sql.DB.
 func provider(mig *sql.DB, dir string) (*goose.Provider, error) {
 	p, err := goose.NewProvider(goose.DialectPostgres, mig, os.DirFS(dir), goose.WithDisableGlobalRegistry(true))
 	if err != nil {
@@ -551,15 +465,6 @@ func provider(mig *sql.DB, dir string) (*goose.Provider, error) {
 	return p, nil
 }
 
-// withMigrationLock runs fn while holding the Postgres advisory lock, so
-// migration commands run on one instance at a time. The lock is held by a
-// session, so a crashed instance's lock goes when its connection does.
-//
-// Waiting instances poll with pg_try_advisory_lock rather than block in
-// pg_advisory_lock: a blocked statement keeps its snapshot open, and CREATE
-// INDEX CONCURRENTLY on the instance holding the lock waits for every older
-// snapshot to end. Blocking would make them wait for each other forever,
-// through this process, where Postgres cannot see the deadlock.
 func withMigrationLock(ctx context.Context, mig *sql.DB, fn func() error) error {
 	conn, err := mig.Conn(ctx)
 	if err != nil {
@@ -601,8 +506,6 @@ func (s *SQLService) dir() (string, error) {
 	return dir, nil
 }
 
-// validModels checks every model is a pointer to a struct, as Bun needs;
-// anything else makes Bun panic.
 func validModels(models []any) error {
 	for i, m := range models {
 		if t := reflect.TypeOf(m); t == nil || t.Kind() != reflect.Pointer || t.Elem().Kind() != reflect.Struct {
@@ -612,8 +515,6 @@ func validModels(models []any) error {
 	return nil
 }
 
-// writeNew creates file with content, failing rather than overwriting an
-// existing migration.
 func writeNew(file, content string) error {
 	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
@@ -623,8 +524,6 @@ func writeNew(file, content string) error {
 	return errors.Join(err, f.Close())
 }
 
-// pendingReview returns the review file in dir that already holds body, so
-// running Migrate again does not pile up copies of the same changes.
 func pendingReview(dir, body string) (string, error) {
 	matches, err := filepath.Glob(filepath.Join(dir, "*"+ReviewSuffix))
 	if err != nil {
@@ -642,10 +541,6 @@ func pendingReview(dir, body string) (string, error) {
 	return "", nil
 }
 
-// nextVersion is the current UTC time as a goose timestamp version, raised
-// above every migration already in dir. Two generations in the same second
-// (or a clock behind the newest file) would otherwise reuse a name and
-// overwrite a migration, or break goose's ordering.
 func nextVersion(dir string) (int64, error) {
 	version, _ := strconv.ParseInt(time.Now().UTC().Format("20060102150405"), 10, 64)
 	entries, err := os.ReadDir(dir)
@@ -664,7 +559,6 @@ func nextVersion(dir string) (int64, error) {
 	return version, nil
 }
 
-// noVersionOK treats "nothing left to apply or revert" as success.
 func noVersionOK(err error) error {
 	if errors.Is(err, goose.ErrNoNextVersion) || errors.Is(err, goose.ErrNoCurrentVersion) || errors.Is(err, goose.ErrNoMigrations) {
 		return nil

@@ -5,6 +5,22 @@ import (
 	"strings"
 )
 
+var likeReplacer = strings.NewReplacer(
+	`\`, `\\`,
+	`%`, `\%`,
+	`_`, `\_`,
+)
+
+// EscapeLike escapes special SQL LIKE wildcard characters (% and _)
+// and the escape character itself (\) so they are treated as literal strings.
+//
+// Make sure your SQL query specifies the escape character, for example:
+//
+//	SELECT * FROM users WHERE name LIKE ? ESCAPE '\'
+func EscapeLike(s string) string {
+	return likeReplacer.Replace(s)
+}
+
 // Slug lower-cases s and keeps its ASCII letters and digits, turning every
 // run of anything else into one sep, trimmed from both ends: "Add Members"
 // -> "add_members" with '_', "app.ecoop.test" -> "app-ecoop-test" with

@@ -27,6 +27,17 @@ const (
 	// times), so a migration never queues live traffic behind it for long.
 	MigrationLockTimeout = 5 * time.Second
 	MigrationLockRetries = 5
+
+	migrationTemplate = `-- +goose Up
+-- +goose StatementBegin
+SELECT 'up SQL query';
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+SELECT 'down SQL query';
+-- +goose StatementEnd
+`
 )
 
 var (
@@ -46,9 +57,28 @@ var (
 	ErrInvalidMigration = errors.New("sql: the generated migration does not apply, so it was removed")
 	ErrNotConverged     = errors.New("sql: the schema still differs from the models after migrating")
 	ErrInvalidPool      = errors.New("sql: max open and max idle connections must be zero or more")
+
+	ErrNilTx       = errors.New("sql: transaction is nil or was never started")
+	ErrUnsafeText  = errors.New("sql: text contains a replacement, control or BiDi override character")
+	ErrInvalidText = errors.New("sql: text is not valid UTF-8 or contains a NUL byte")
 )
 
 type (
+	tenantKey struct{}
+
+	// TextPolicy decides how CleanText treats valid text. Invalid UTF-8 (including truncated and overlong
+	// sequences) and NUL bytes are always refused: Postgres cannot store them and bun inlines values into
+	// the SQL text, where a NUL cuts the statement short.
+	TextPolicy struct {
+		// Normalize rewrites strings to NFC, so "Müller" typed as u + U+0308 and as U+00FC is one value.
+		Normalize bool
+		// RejectUnsafe refuses U+FFFD (the trace of a lossy conversion), C0/C1 control characters other
+		// than tab, newline and carriage return, and the BiDi embedding, override and isolate characters
+		// (U+202A..U+202E, U+2066..U+2069). Other format characters, such as the zero-width joiner inside
+		// emoji sequences, stay allowed.
+		RejectUnsafe bool
+	}
+
 	ISQLService interface {
 		Start(ctx context.Context) error
 		Run(ctx context.Context) error

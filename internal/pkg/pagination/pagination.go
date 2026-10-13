@@ -65,11 +65,6 @@ func (s *PaginationService[TData, TID]) PaginateWithHertz(ctx context.Context, t
 	panic("not implemented")
 }
 
-// Count implements IPaginationService.
-func (s *PaginationService[TData, TID]) Count(ctx context.Context, filter StructuredFilter) (int64, error) {
-	panic("not implemented")
-}
-
 // CountWithTx implements IPaginationService.
 func (s *PaginationService[TData, TID]) CountWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter) (int64, error) {
 	panic("not implemented")
