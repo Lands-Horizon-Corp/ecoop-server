@@ -25,6 +25,9 @@ func (c *PaginationService[TData, TID]) applyFilters(
 			if groupErr != nil {
 				break
 			}
+			if f.Timezone == "" {
+				f.Timezone = filterRoot.Timezone
+			}
 			wholeIndexSearch := f.Mode == ModeSearch && f.Field == ""
 			isCustom := f.Mode == ModeCustom
 			if !wholeIndexSearch && !isCustom && utils.StructTagFieldIndex[TData]("bun", f.Field) == -1 {
@@ -50,7 +53,7 @@ func (c *PaginationService[TData, TID]) applyFilters(
 
 func (c *PaginationService[TData, TID]) applyTerm(q *bun.SelectQuery, f Filter) (*bun.SelectQuery, error) {
 	if f.Mode != ModeCustom {
-		return applyFilterTerm(q, f, c.ColumnDefaultID)
+		return applyFilterTerm(q, f, c.ColumnDefaultID, c.columnKind(f.Field))
 	}
 	if f.Custom == nil {
 		return nil, fmt.Errorf("%w: ModeCustom requires Filter.Custom", ErrInvalidFilter)
@@ -65,7 +68,29 @@ func (c *PaginationService[TData, TID]) applyTerm(q *bun.SelectQuery, f Filter) 
 	return built, nil
 }
 
-func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string) (*bun.SelectQuery, error) {
+// columnKind reads how the entity stores the column (date, timestamptz, time...)
+// from its bun schema; an unknown column is compared as an instant.
+func (c *PaginationService[TData, TID]) columnKind(field string) (kind colKind) {
+	defer func() {
+		if recover() != nil {
+			kind = kindInstant
+		}
+	}()
+	if c.ReadSQLService == nil || c.ReadSQLService.Client() == nil {
+		return kindInstant
+	}
+	table := c.ReadSQLService.Client().Table(reflect.TypeFor[TData]())
+	if fld, ok := table.FieldMap[field]; ok {
+		return kindOf(fld.CreateTableSQLType)
+	}
+	return kindInstant
+}
+
+func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string, kind colKind) (*bun.SelectQuery, error) {
+	loc, err := resolveZone(f.Timezone)
+	if err != nil {
+		return nil, err
+	}
 	if f.Value != nil {
 		clean, err := utils.CleanText(reflect.ValueOf(f.Value), utils.TextPolicy{Normalize: true})
 		if err != nil {
@@ -91,6 +116,30 @@ func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string) (*bun
 		}
 		if k := reflect.ValueOf(f.Value).Kind(); k != reflect.Slice && k != reflect.Array {
 			return nil, fmt.Errorf("%w: mode %q requires a list value, got %T", ErrInvalidFilter, f.Mode, f.Value)
+		}
+		list := reflect.ValueOf(f.Value)
+		for i := range list.Len() {
+			if e := list.Index(i); e.Kind() == reflect.Interface && e.IsNil() {
+				return nil, fmt.Errorf("%w: mode %q does not accept null list items (item %d)", ErrInvalidFilter, f.Mode, i)
+			}
+		}
+	}
+	if f.DataType == DataTypeTime {
+		expr, args, ok, err := timeCondition(col, f, loc, kind)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return q.Where(expr, args...), nil
+		}
+	}
+	if f.DataType == DataTypeDate {
+		expr, args, ok, err := dateCondition(col, f, loc, kind)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return q.Where(expr, args...), nil
 		}
 	}
 	switch f.Mode {
@@ -129,8 +178,14 @@ func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string) (*bun
 	case ModeEndsWith:
 		return q.Where("? LIKE ?", col, "%"+utils.EscapeLike(fmt.Sprint(f.Value))), nil
 	case ModeInside:
+		if reflect.ValueOf(f.Value).Len() == 0 {
+			return q.Where("1 = 0"), nil // IN () matches nothing
+		}
 		return q.Where("? IN (?)", col, bun.List(f.Value)), nil
 	case ModeOutside:
+		if reflect.ValueOf(f.Value).Len() == 0 {
+			return q.Where("1 = 1"), nil // NOT IN () excludes nothing
+		}
 		return q.Where("? NOT IN (?)", col, bun.List(f.Value)), nil
 	case ModeSearch:
 		if f.Field != "" {
@@ -150,9 +205,9 @@ func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string) (*bun
 		}
 		return q.Where("? BETWEEN ? AND ?", col, from, to), nil
 	case ModeIsEmpty:
-		return q.Where("(? IS NULL OR ? = '')", col, col), nil
+		return q.Where("(? IS NULL OR ?::text = '')", col, col), nil
 	case ModeIsNotEmpty:
-		return q.Where("(? IS NOT NULL AND ? != '')", col, col), nil
+		return q.Where("(? IS NOT NULL AND ?::text != '')", col, col), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported mode %q", ErrInvalidFilter, f.Mode)
 	}
@@ -173,6 +228,10 @@ func coerceDateTimeFilterValue(dataType DataType, value any) (any, error) {
 		t, ok := parse(v)
 		if !ok {
 			return nil, fmt.Errorf("%w: unrecognized %s value %q", ErrInvalidFilter, dataType, v)
+		}
+		if dataType == DataTypeTime {
+			// A time.Time here would be sent as year 0000, which Postgres rejects.
+			return t.Format("15:04:05.999999"), nil
 		}
 		return t, nil
 	case []any:

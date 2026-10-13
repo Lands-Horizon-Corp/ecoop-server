@@ -93,10 +93,16 @@ type (
 	}
 
 	Filter struct {
-		Field    string       `json:"field"`
-		Value    any          `json:"value"`
-		Mode     Mode         `json:"mode"`
-		DataType DataType     `json:"dataType"`
+		Field    string   `json:"field"`
+		Value    any      `json:"value"`
+		Mode     Mode     `json:"mode"`
+		DataType DataType `json:"dataType"`
+		// Timezone is the business zone this filter's dates and times are read
+		// in: an IANA name ("Asia/Manila") or an offset ("+08:00"). A bare date
+		// then means that zone's whole day, a time without an offset is local
+		// to it, and a time of day is compared in it. Empty uses the
+		// StructuredFilter's zone, then UTC.
+		Timezone string       `json:"timezone"`
 		Custom   CustomFilter `json:"-"`
 	}
 
@@ -105,6 +111,8 @@ type (
 		SortFields []SortField `json:"sortFields"`
 		Logic      Logic       `json:"logic"`
 		Preload    []string    `json:"preload"`
+		// Timezone is the default for every filter that does not set its own.
+		Timezone string `json:"timezone"`
 	}
 
 	Pagination struct {

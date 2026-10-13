@@ -44,9 +44,17 @@ var timeLayouts = []string{
 	"15:04:05-07:00",
 }
 
+// ParseDateTime reads a date and time in any known layout. A value without a
+// zone is read as UTC.
 func ParseDateTime(s string) (t time.Time, ok bool) {
+	return ParseDateTimeIn(s, time.UTC)
+}
+
+// ParseDateTimeIn is ParseDateTime for values without a zone: they are read in
+// loc. A zone in the value itself always wins.
+func ParseDateTimeIn(s string, loc *time.Location) (t time.Time, ok bool) {
 	for _, layout := range dateTimeLayouts {
-		if t, err := time.Parse(layout, s); err == nil {
+		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
 			return t, true
 		}
 	}

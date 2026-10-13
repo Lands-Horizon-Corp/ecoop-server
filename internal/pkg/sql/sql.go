@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -95,7 +96,7 @@ func (s *SQLService) Start(ctx context.Context) error {
 	if s.gate == nil {
 		return ErrNoTracker
 	}
-	app, err := connector(s.dsn)
+	app, err := connector(withClientCheck(s.dsn))
 	if err != nil {
 		return err
 	}
@@ -122,6 +123,25 @@ func (s *SQLService) Start(ctx context.Context) error {
 	s.db.Store(db)
 	s.gate.Open()
 	return nil
+}
+
+// withClientCheck asks the server to notice, every second, that a client has
+// gone away mid-query and abort the statement. pgdriver cancels by closing the
+// socket, not by a cancel request, so without this a query whose caller timed
+// out keeps running to completion. A DSN that sets the parameter itself, or
+// that cannot be parsed, is left alone.
+func withClientCheck(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil || u.Scheme == "" {
+		return dsn
+	}
+	q := u.Query()
+	if q.Has("client_connection_check_interval") {
+		return dsn
+	}
+	q.Set("client_connection_check_interval", "1000")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func connector(dsn string, opts ...pgdriver.Option) (c *pgdriver.Connector, err error) {

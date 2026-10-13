@@ -2,6 +2,7 @@ package pagination
 
 import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 type PaginationService[TData any, TID comparable] struct {
@@ -10,10 +11,12 @@ type PaginationService[TData any, TID comparable] struct {
 	ColumnDefaultID   string
 	ColumnDefaultSort string
 	Preloads          []string
+
+	gate *utils.Gate
 }
 
 func NewPaginationService[TData any, TID comparable](
-	p *PaginationService[TData, TID],
+	p *PaginationService[TData, TID], inflight *utils.Inflight,
 ) IPaginationService[TData, TID] {
 	if p.ColumnDefaultID == "" {
 		p.ColumnDefaultID = "id"
@@ -33,5 +36,6 @@ func NewPaginationService[TData any, TID comparable](
 		ColumnDefaultID:   p.ColumnDefaultID,
 		ColumnDefaultSort: p.ColumnDefaultSort,
 		Preloads:          p.Preloads,
+		gate:              utils.NewGate(inflight),
 	}
 }
