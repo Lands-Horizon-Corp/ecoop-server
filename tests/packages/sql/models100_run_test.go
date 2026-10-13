@@ -239,7 +239,7 @@ func (h *m100History) filesOf(v int) []string {
 // m100Apply brings a database (with the generated files in its folder)
 // from version from to version to, file by file, running each version's
 // data jobs, as deploys would. It retries a file that gave up on a lock.
-func m100Apply(t testing.TB, h *m100History, s ecsql.SQLServices, from, to int, after func(v int)) {
+func m100Apply(t testing.TB, h *m100History, s ecsql.ISQLService, from, to int, after func(v int)) {
 	t.Helper()
 	for v := from + 1; v <= to; v++ {
 		if err := m100Run(ctxT(t), m100Pre, v, s.Client()); err != nil {
@@ -267,7 +267,7 @@ func m100Apply(t testing.TB, h *m100History, s ecsql.SQLServices, from, to int, 
 }
 
 // m100Env is a new database with the generated files in its folder.
-func m100Env(t *testing.T) (*m100History, *env, ecsql.SQLServices) {
+func m100Env(t *testing.T) (*m100History, *env, ecsql.ISQLService) {
 	t.Helper()
 	h := m100Generated(t)
 	e := newEnv(t)
@@ -277,7 +277,7 @@ func m100Env(t *testing.T) (*m100History, *env, ecsql.SQLServices) {
 
 // m100Books checks the money at version v: accounts hold exactly what their
 // transactions add up to (and, when exact, what the seed put in).
-func m100Books(t testing.TB, s ecsql.SQLServices, v int, exact bool) {
+func m100Books(t testing.TB, s ecsql.ISQLService, v int, exact bool) {
 	t.Helper()
 	acct, tx := "round(balance * 100)", "round(amount * 100)"
 	if v >= 39 {

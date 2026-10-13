@@ -45,7 +45,7 @@ type (
 		FromName string
 	}
 
-	SMTPServices interface {
+	ISMTPService interface {
 		Start(ctx context.Context) error
 		Stop(ctx context.Context) error
 		Ping(ctx context.Context) error

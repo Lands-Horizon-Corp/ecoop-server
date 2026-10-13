@@ -21,7 +21,7 @@ type PDFEngineService struct {
 	gate   *utils.Gate
 }
 
-func NewPDFEngine(url, token string, inflight *utils.Inflight) PDFServices {
+func NewPDFService(url, token string, inflight *utils.Inflight) IPDFServices {
 	return &PDFEngineService{
 		url:    strings.TrimRight(url, "/"),
 		token:  token,

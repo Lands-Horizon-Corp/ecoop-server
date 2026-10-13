@@ -209,7 +209,7 @@ func replayAndRollBack(t *testing.T, e *env) string {
 
 // bankMoney is the money in accounts, in cents, whichever column holds it
 // at the current release.
-func bankMoney(t testing.TB, s ecsql.SQLServices) int64 {
+func bankMoney(t testing.TB, s ecsql.ISQLService) int64 {
 	t.Helper()
 	col := "balance_cents"
 	if count(t, s, "SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'accounts' AND column_name = 'balance'") == 1 {
@@ -224,7 +224,7 @@ func bankMoney(t testing.TB, s ecsql.SQLServices) int64 {
 
 // bankAt returns a started service on a new database migrated to release n
 // and seeded at release 3 (when n >= 3), with all twenty releases written.
-func bankAt(t *testing.T, n int) (*env, ecsql.SQLServices) {
+func bankAt(t *testing.T, n int) (*env, ecsql.ISQLService) {
 	t.Helper()
 	e := newEnv(t)
 	writeReleases(t, e, 1, len(bankReleases))
@@ -246,7 +246,7 @@ func bankAt(t *testing.T, n int) (*env, ecsql.SQLServices) {
 }
 
 // account opens an active account with balance cents for a new customer.
-func account(t testing.TB, s ecsql.SQLServices, cents int64) int64 {
+func account(t testing.TB, s ecsql.ISQLService, cents int64) int64 {
 	t.Helper()
 	var id int64
 	err := s.Client().NewRaw(`WITH c AS (INSERT INTO customers (full_name, email) VALUES ('T', gen_random_uuid() || '@t.test') RETURNING id)
@@ -257,7 +257,7 @@ INSERT INTO accounts (customer_id, number, balance_cents) SELECT id, gen_random_
 	return id
 }
 
-func balance(t testing.TB, s ecsql.SQLServices, id int64) int64 {
+func balance(t testing.TB, s ecsql.ISQLService, id int64) int64 {
 	t.Helper()
 	var c int64
 	if err := s.Client().NewRaw("SELECT balance_cents FROM accounts WHERE id = ?", id).Scan(ctxT(t), &c); err != nil {

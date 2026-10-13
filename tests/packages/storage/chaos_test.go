@@ -18,7 +18,7 @@ import (
 // Chaos: the network, the storage server and the download source misbehave.
 
 // running through a proxy, to cut or slow the connection to the server.
-func proxied(t *testing.T, opts ...storage.Option) (storage.StorageServices, string, *proxy) {
+func proxied(t *testing.T, opts ...storage.Option) (storage.IStorageService, string, *proxy) {
 	t.Helper()
 	p := newProxy(t)
 	s, bucket := service(t, p.Addr(), opts...)

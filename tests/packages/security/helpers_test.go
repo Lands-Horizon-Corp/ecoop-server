@@ -17,14 +17,14 @@ const (
 	testKey         = 32
 )
 
-var _ security.SecurityServices = (*security.SecurityService)(nil)
+var _ security.ISecurityService = (*security.SecurityService)(nil)
 
-func newService(t testing.TB) security.SecurityServices {
+func newService(t testing.TB) security.ISecurityService {
 	t.Helper()
 	return newServiceWithSecret(t, testSecret)
 }
 
-func newServiceWithSecret(t testing.TB, secret string) security.SecurityServices {
+func newServiceWithSecret(t testing.TB, secret string) security.ISecurityService {
 	t.Helper()
 	svc := security.NewSecurityService(secret, testMemory, testIterations, testParallelism, testSalt, testKey)
 	if svc == nil {

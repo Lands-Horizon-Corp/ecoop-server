@@ -29,8 +29,6 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
-var _ StorageServices = (*StorageService)(nil)
-
 // StorageService stores files in an S3-compatible bucket: AWS S3 (driver
 // "s3"), MinIO, RustFS or any other server speaking the S3 API.
 type StorageService struct {
@@ -73,7 +71,7 @@ func NewStorageService(
 	ssl bool,
 	inflight *utils.Inflight,
 	opts ...Option,
-) StorageServices {
+) IStorageService {
 	if region == "" {
 		region = DefaultRegion
 	}

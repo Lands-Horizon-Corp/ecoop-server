@@ -46,7 +46,7 @@ type (
 		Vars map[string]string
 	}
 
-	SMSServices interface {
+	ISMSServices interface {
 		Start(ctx context.Context) error
 		Stop(ctx context.Context) error
 		Ping(ctx context.Context) error

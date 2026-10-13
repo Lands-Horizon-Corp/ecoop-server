@@ -71,16 +71,16 @@ type (
 	// Job is a typed job: its type, handler and options set up once with
 	// NewJob, then queued with Deliver.
 	Job[T any] struct {
-		queue    QueueServices
+		queue    IQueueService
 		taskType string
 		opts     []Option
 	}
 
-	// QueueServices is a job queue stored in Valkey, so it works behind a
+	// IQueueService is a job queue stored in Valkey, so it works behind a
 	// load balancer: any instance can enqueue, any instance's worker runs
 	// the next job, and a job interrupted by a shutdown goes back for
 	// another instance.
-	QueueServices interface {
+	IQueueService interface {
 		// Start runs this instance's worker and scheduler; Stop shuts them
 		// down, letting running jobs finish for up to ShutdownTimeout.
 		Start(ctx context.Context) error

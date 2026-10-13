@@ -45,8 +45,8 @@ type (
 	// only once handled or parked, so nothing is lost.
 	Handler func(ctx context.Context, key, value []byte) error
 
-	// BrokerServices publishes to and consumes from Kafka.
-	BrokerServices interface {
+	// IBrokerService publishes to and consumes from Kafka.
+	IBrokerService interface {
 		// Run connects and starts every subscription; Stop waits for the
 		// handlers running, then disconnects. Messages not yet handled are
 		// delivered again after the next Run (here or on another instance).

@@ -37,7 +37,7 @@ type Config struct {
 	Password  string
 }
 
-type CacheServices interface {
+type ICacheService interface {
 	Client() valkey.Client
 	Run(ctx context.Context) error
 	Stop(ctx context.Context) error

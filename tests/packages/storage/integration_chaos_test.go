@@ -21,10 +21,10 @@ import (
 
 // replicas are n services on one bucket, like instances behind a load
 // balancer.
-func replicas(t *testing.T, n int) ([]storage.StorageServices, string) {
+func replicas(t *testing.T, n int) ([]storage.IStorageService, string) {
 	t.Helper()
 	bucket := bucketName(t)
-	out := make([]storage.StorageServices, n)
+	out := make([]storage.IStorageService, n)
 	for i := range out {
 		out[i] = storage.NewStorageService(driver, endpoint, "", accessKey, secretKey, bucket, region, false, nil)
 		if err := out[i].Run(ctxT(t)); err != nil {

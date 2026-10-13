@@ -34,7 +34,7 @@ var (
 	runID                          = time.Now().UnixNano()
 )
 
-var _ cdc.CDCServices = (*cdc.CDCService)(nil)
+var _ cdc.ICDCService = (*cdc.CDCService)(nil)
 
 func TestMain(m *testing.M) {
 	if err := start(); err != nil {
@@ -144,12 +144,12 @@ func skipUnlessDebezium(t testing.TB) {
 }
 
 // newService is a CDC service for the test Kafka, not yet running.
-func newService() cdc.CDCServices {
+func newService() cdc.ICDCService {
 	return cdc.NewCDCService([]string{addr}, fmt.Sprintf("cdc-test-%d", runID), cfg("CDC_TOPIC_PREFIX", "ecoop"))
 }
 
 // service is a CDC service, run until t ends.
-func service(t testing.TB) cdc.CDCServices {
+func service(t testing.TB) cdc.ICDCService {
 	t.Helper()
 	skipUnlessKafka(t)
 	s := newService()

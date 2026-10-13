@@ -99,10 +99,10 @@ func TestZeroValue_NilReceiver(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *broadcast.BroadcasterService
-	var iface broadcast.BroadcasterServices
-	ops := map[string]func(broadcast.BroadcasterServices){
-		"Start":   func(b broadcast.BroadcasterServices) { _ = b.Start(ctx) },
-		"Publish": func(b broadcast.BroadcasterServices) { _ = b.Publish(ctx, "c", "e", 1) },
+	var iface broadcast.IBroadcasterService
+	ops := map[string]func(broadcast.IBroadcasterService){
+		"Start":   func(b broadcast.IBroadcasterService) { _ = b.Start(ctx) },
+		"Publish": func(b broadcast.IBroadcasterService) { _ = b.Publish(ctx, "c", "e", 1) },
 	}
 	for name, op := range ops {
 		t.Run(name+"/nil pointer", func(t *testing.T) { mustPanic(t, name, func() { op(ptr) }) })

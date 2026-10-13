@@ -17,7 +17,7 @@ const (
 
 var (
 	ErrNotStarted  = errors.New("pdf: service not started")
-	ErrNoTracker   = errors.New("pdf: service has no in-flight tracker; create it with NewPDFEngine")
+	ErrNoTracker   = errors.New("pdf: service has no in-flight tracker; create it with NewPDFService")
 	ErrNoURL       = errors.New("pdf: missing engine URL")
 	ErrNoToken     = errors.New("pdf: missing engine token")
 	ErrNoTemplate  = errors.New("pdf: template is empty")
@@ -53,7 +53,7 @@ type (
 		Progress   int32  `json:"progress"`
 	}
 
-	PDFServices interface {
+	IPDFServices interface {
 		Start(ctx context.Context) error
 		Stop(ctx context.Context) error
 		Ping(ctx context.Context) error

@@ -95,7 +95,7 @@ func ctxT(t testing.TB) context.Context {
 }
 
 // newCache is a running cache, stopped when t ends.
-func newCache(t testing.TB) cache.CacheServices {
+func newCache(t testing.TB) cache.ICacheService {
 	t.Helper()
 	if skipReason != "" {
 		t.Skip(skipReason)
@@ -108,13 +108,13 @@ func newCache(t testing.TB) cache.CacheServices {
 	return c
 }
 
-func newSecurity() security.SecurityServices {
+func newSecurity() security.ISecurityService {
 	return security.NewSecurityService("auth-test-secret", 8*1024, 1, 2, 16, 32)
 }
 
 // newAuth is an auth service under an app name unique to t, on c (a new
 // cache if none); every key under that name is deleted when t ends.
-func newAuth(t testing.TB, c ...cache.CacheServices) (auth.AUTHServices[user], cache.CacheServices, string) {
+func newAuth(t testing.TB, c ...cache.ICacheService) (auth.AUTHServices[user], cache.ICacheService, string) {
 	t.Helper()
 	ch := newCache(t)
 	if len(c) > 0 {

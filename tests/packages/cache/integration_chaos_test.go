@@ -61,7 +61,7 @@ return 0`)
 func TestIntegrationChaos_DistributedLockMutualExclusion(t *testing.T) {
 	t.Parallel()
 	p := newProxy(t)
-	nodes := []cache.CacheServices{newRunning(t), newRunning(t), newRunningAt(t, p.Addr())}
+	nodes := []cache.ICacheService{newRunning(t), newRunning(t), newRunningAt(t, p.Addr())}
 	lock := key(t, "lock")
 
 	var holders, maxHolders, acquired atomic.Int64

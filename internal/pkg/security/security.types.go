@@ -25,7 +25,7 @@ const (
 )
 
 type (
-	SecurityServices interface {
+	ISecurityService interface {
 		GeneratePassword(ctx context.Context, password string) (string, error)
 		VerifyPassword(ctx context.Context, hash string, password string) (bool, error)
 		Encrypt(ctx context.Context, data string, ttl time.Duration) (string, error)

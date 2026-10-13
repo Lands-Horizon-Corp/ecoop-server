@@ -27,7 +27,7 @@ type SMSService struct {
 	sender        string
 	maxCharacters int32
 	secured       bool
-	queue         queue.QueueServices
+	queue         queue.IQueueService
 
 	gate   *utils.Gate
 	twilio *twilio.RestClient
@@ -43,8 +43,8 @@ type sendPayload struct {
 // services; nil gives the service its own tracker.
 func NewSMSService(
 	accountSID, authToken, sender string, maxCharacters int32, secured bool,
-	queue queue.QueueServices,
-	inflight *utils.Inflight) SMSServices {
+	queue queue.IQueueService,
+	inflight *utils.Inflight) ISMSServices {
 	return &SMSService{
 		accountSID:    accountSID,
 		authToken:     authToken,

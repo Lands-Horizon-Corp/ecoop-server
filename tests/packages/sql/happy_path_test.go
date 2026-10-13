@@ -275,7 +275,7 @@ func TestHappy_SharedInflightAcrossServices(t *testing.T) {
 	ctx := ctxT(t)
 	sa := ecsql.NewSQLService(a.dsn, 2, 4, a.dir, false, a.out, nil, shared)
 	sb := ecsql.NewSQLService(b.dsn, 2, 4, b.dir, false, b.out, nil, shared)
-	for _, s := range []ecsql.SQLServices{sa, sb} {
+	for _, s := range []ecsql.ISQLService{sa, sb} {
 		if err := s.Start(ctx); err != nil {
 			t.Fatal(err)
 		}

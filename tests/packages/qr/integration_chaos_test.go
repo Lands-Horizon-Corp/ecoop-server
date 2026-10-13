@@ -29,7 +29,7 @@ const (
 func TestIntegrationChaos_ClusterWithRandomFaults(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	nodes := []qr.QRServices{newStarted(t), newStarted(t), newStarted(t)}
+	nodes := []qr.IQRServices{newStarted(t), newStarted(t), newStarted(t)}
 	rogue := newStartedWithSecret(t, "rogue")
 	seed := uint64(time.Now().UnixNano())
 	t.Logf("seed: %d", seed)

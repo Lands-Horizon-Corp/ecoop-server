@@ -199,13 +199,13 @@ func TestZeroValue_NilReceiver(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *ecsql.SQLService
-	var iface ecsql.SQLServices
-	ops := map[string]func(ecsql.SQLServices){
-		"Start":   func(s ecsql.SQLServices) { _ = s.Start(ctx) },
-		"Ping":    func(s ecsql.SQLServices) { _ = s.Ping(ctx) },
-		"Migrate": func(s ecsql.SQLServices) { _ = s.Migrate(ctx) },
-		"Create":  func(s ecsql.SQLServices) { _ = s.Create(ctx, "x") },
-		"Client":  func(s ecsql.SQLServices) { _ = s.Client() },
+	var iface ecsql.ISQLService
+	ops := map[string]func(ecsql.ISQLService){
+		"Start":   func(s ecsql.ISQLService) { _ = s.Start(ctx) },
+		"Ping":    func(s ecsql.ISQLService) { _ = s.Ping(ctx) },
+		"Migrate": func(s ecsql.ISQLService) { _ = s.Migrate(ctx) },
+		"Create":  func(s ecsql.ISQLService) { _ = s.Create(ctx, "x") },
+		"Client":  func(s ecsql.ISQLService) { _ = s.Client() },
 	}
 	for name, op := range ops {
 		t.Run(name+"/nil pointer", func(t *testing.T) { mustPanic(t, name, func() { op(ptr) }) })

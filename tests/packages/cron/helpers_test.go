@@ -33,7 +33,7 @@ var (
 	skipReason     string
 )
 
-var _ cron.CronServices = (*cron.CronService)(nil)
+var _ cron.ICronServices = (*cron.CronService)(nil)
 
 func TestMain(m *testing.M) {
 	if err := startValkey(); err != nil {
@@ -109,7 +109,7 @@ func ctxT(t testing.TB) context.Context {
 // newQueue is a started queue in t's namespace, through addr (Valkey or a
 // proxy to it), stopped when t ends. Queues of one test share work like
 // replicas of one app.
-func newQueue(t testing.TB, addr ...string) queue.QueueServices {
+func newQueue(t testing.TB, addr ...string) queue.IQueueService {
 	t.Helper()
 	requireValkey(t)
 	target := valkeyAddr
@@ -132,7 +132,7 @@ func newQueue(t testing.TB, addr ...string) queue.QueueServices {
 }
 
 // newCron is a started cron service on a new queue, stopped when t ends.
-func newCron(t testing.TB) (cron.CronServices, queue.QueueServices) {
+func newCron(t testing.TB) (cron.ICronServices, queue.IQueueService) {
 	t.Helper()
 	q := newQueue(t)
 	c := cron.NewCronService(q, nil)

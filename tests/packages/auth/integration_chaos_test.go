@@ -16,7 +16,7 @@ func TestIntegrationChaos_Replicas(t *testing.T) {
 	t.Parallel()
 	shared := newCache(t)
 	a, _, name := newAuth(t, shared)
-	b := auth.NewAuthService[user](name, header, false, cache.CacheServices(newCache(t)), newSecurity())
+	b := auth.NewAuthService[user](name, header, false, cache.ICacheService(newCache(t)), newSecurity())
 	token := login(t, a, ana, site)
 	if got, err := b.GetCSRF(ctxT(t), with(token, site)); err != nil || got != ana {
 		t.Fatalf("other instance = %+v, %v", got, err)

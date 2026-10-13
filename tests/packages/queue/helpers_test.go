@@ -33,7 +33,7 @@ var (
 	skipReason     string
 )
 
-var _ queue.QueueServices = (*queue.QueueService)(nil)
+var _ queue.IQueueService = (*queue.QueueService)(nil)
 
 func TestMain(m *testing.M) {
 	os.Exit(runMain(m))
@@ -105,7 +105,7 @@ func requireValkey(t testing.TB) {
 }
 
 // newCache returns a running cache on addr (Valkey, or a proxy to it).
-func newCache(t testing.TB, addr string) cache.CacheServices {
+func newCache(t testing.TB, addr string) cache.ICacheService {
 	t.Helper()
 	ch := cache.NewCacheService([]string{addr}, valkeyPassword, nil)
 	if err := ch.Run(context.Background()); err != nil {
@@ -121,7 +121,7 @@ func ns(t testing.TB) string { return qns.For(t, valkeyAddr, valkeyPassword) }
 
 // newQueue returns a started queue in t's namespace on its own cache
 // connection, stopped when the test ends.
-func newQueue(t testing.TB, addr ...string) queue.QueueServices {
+func newQueue(t testing.TB, addr ...string) queue.IQueueService {
 	t.Helper()
 	requireValkey(t)
 	target := valkeyAddr

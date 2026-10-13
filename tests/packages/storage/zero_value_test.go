@@ -136,11 +136,11 @@ func TestZeroValue_NilReceiver(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *storage.StorageService
-	var iface storage.StorageServices
-	ops := map[string]func(storage.StorageServices){
-		"Run":    func(s storage.StorageServices) { _ = s.Run(ctx) },
-		"Ping":   func(s storage.StorageServices) { _ = s.Ping(ctx) },
-		"Upload": func(s storage.StorageServices) { _, _ = s.UploadFromBinary(ctx, pngBytes, nil) },
+	var iface storage.IStorageService
+	ops := map[string]func(storage.IStorageService){
+		"Run":    func(s storage.IStorageService) { _ = s.Run(ctx) },
+		"Ping":   func(s storage.IStorageService) { _ = s.Ping(ctx) },
+		"Upload": func(s storage.IStorageService) { _, _ = s.UploadFromBinary(ctx, pngBytes, nil) },
 	}
 	for name, op := range ops {
 		t.Run(name+"/nil pointer", func(t *testing.T) { mustPanic(t, name, func() { op(ptr) }) })

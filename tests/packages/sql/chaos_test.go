@@ -15,7 +15,7 @@ import (
 // dropped connections, killed sessions, blocked locks, slow migrations.
 
 // proxied starts a service on e that reaches Postgres through a proxy.
-func proxied(t *testing.T, e *env, p *proxy) ecsql.SQLServices {
+func proxied(t *testing.T, e *env, p *proxy) ecsql.ISQLService {
 	t.Helper()
 	s := ecsql.NewSQLService(p.DSN(e.dsn), 2, 4, e.dir, false, e.out, nil, nil)
 	if err := s.Start(ctxT(t)); err != nil {

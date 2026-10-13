@@ -16,10 +16,10 @@ func TestSad_Settings(t *testing.T) {
 	t.Parallel()
 	requireEngine(t)
 	ctx := ctxT(t)
-	if err := pdf.NewPDFEngine("", "", nil).Start(ctx); !errors.Is(err, pdf.ErrNoURL) || !errors.Is(err, pdf.ErrNoToken) {
+	if err := pdf.NewPDFService("", "", nil).Start(ctx); !errors.Is(err, pdf.ErrNoURL) || !errors.Is(err, pdf.ErrNoToken) {
 		t.Errorf("empty settings: %v", err)
 	}
-	wrongToken := pdf.NewPDFEngine(engineURL(engineHost, enginePort), "not-the-token", nil)
+	wrongToken := pdf.NewPDFService(engineURL(engineHost, enginePort), "not-the-token", nil)
 	if err := wrongToken.Start(ctx); err != nil { // /health needs no token
 		t.Fatal(err)
 	}

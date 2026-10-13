@@ -18,9 +18,9 @@ import (
 
 const replicas = 6
 
-func fleet(t *testing.T, e *env, auto bool, models ...any) []ecsql.SQLServices {
+func fleet(t *testing.T, e *env, auto bool, models ...any) []ecsql.ISQLService {
 	t.Helper()
-	out := make([]ecsql.SQLServices, replicas)
+	out := make([]ecsql.ISQLService, replicas)
 	for i := range out {
 		out[i] = ecsql.NewSQLService(e.dsn, 2, 4, e.dir, auto, e.out, models, nil)
 		if err := out[i].Start(ctxT(t)); err != nil {
@@ -32,7 +32,7 @@ func fleet(t *testing.T, e *env, auto bool, models ...any) []ecsql.SQLServices {
 	return out
 }
 
-func applied(t *testing.T, s ecsql.SQLServices) int {
+func applied(t *testing.T, s ecsql.ISQLService) int {
 	t.Helper()
 	n, err := s.Client().NewSelect().Table(ecsql.GooseTable).Where("version_id > 0").Count(ctxT(t))
 	if err != nil {

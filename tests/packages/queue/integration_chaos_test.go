@@ -108,7 +108,7 @@ func TestIntegrationChaos_OneCronLeaderAndHandover(t *testing.T) {
 	a, b := newQueue(t), newQueue(t)
 	typ := taskType(t, "tick")
 	var r recorder
-	for _, q := range []queue.QueueServices{a, b} {
+	for _, q := range []queue.IQueueService{a, b} {
 		q.Handle(typ, r.handler(nil))
 		if _, err := q.Schedule("@every 1s", typ, nil); err != nil {
 			t.Fatal(err)

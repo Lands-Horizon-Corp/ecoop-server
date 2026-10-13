@@ -38,7 +38,7 @@ type subscription struct {
 // Subscribe. inflight may be shared with other services; nil gives the
 // service its own tracker.
 func NewBrokerService(
-	brokers []string, groupID string, inflight *utils.Inflight) BrokerServices {
+	brokers []string, groupID string, inflight *utils.Inflight) IBrokerService {
 	return &BrokerService{
 		brokers:   brokers,
 		groupID:   groupID,

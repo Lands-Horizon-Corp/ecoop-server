@@ -18,7 +18,7 @@ import (
 func TestZeroValue_ZeroStruct(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	var svc smtp.SMTPServices = &smtp.SMTPService{}
+	var svc smtp.ISMTPService = &smtp.SMTPService{}
 	mustNotPanic(t, "zero struct", func() {
 		if err := svc.Start(ctx); !errors.Is(err, smtp.ErrNoTracker) {
 			t.Errorf("Start = %v, want ErrNoTracker", err)
@@ -161,12 +161,12 @@ func TestZeroValue_NilReceiver(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *smtp.SMTPService
-	var iface smtp.SMTPServices
-	ops := map[string]func(smtp.SMTPServices){
-		"Start": func(s smtp.SMTPServices) { _ = s.Start(ctx) },
-		"Stop":  func(s smtp.SMTPServices) { _ = s.Stop(ctx) },
-		"Ping":  func(s smtp.SMTPServices) { _ = s.Ping(ctx) },
-		"Send":  func(s smtp.SMTPServices) { _ = s.Send(ctx, smtp.SMTPRequest{To: "a@b.co"}) },
+	var iface smtp.ISMTPService
+	ops := map[string]func(smtp.ISMTPService){
+		"Start": func(s smtp.ISMTPService) { _ = s.Start(ctx) },
+		"Stop":  func(s smtp.ISMTPService) { _ = s.Stop(ctx) },
+		"Ping":  func(s smtp.ISMTPService) { _ = s.Ping(ctx) },
+		"Send":  func(s smtp.ISMTPService) { _ = s.Send(ctx, smtp.SMTPRequest{To: "a@b.co"}) },
 	}
 	for name, op := range ops {
 		t.Run(name+"/nil pointer", func(t *testing.T) { mustPanic(t, name, func() { op(ptr) }) })

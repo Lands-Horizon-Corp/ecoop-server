@@ -19,7 +19,7 @@ import (
 )
 
 type QueueService struct {
-	cache    cache.CacheServices
+	cache    cache.ICacheService
 	ns       string // prefixes queue names, the leader lock and rate counters
 	inflight *utils.Inflight
 	id       string   // this instance, for scheduler leadership
@@ -59,7 +59,7 @@ type retryAfterError struct {
 func (e *retryAfterError) Error() string { return e.err.Error() }
 func (e *retryAfterError) Unwrap() error { return e.err }
 
-func NewQueueService(cache cache.CacheServices, opts ...ServiceOption) QueueServices {
+func NewQueueService(cache cache.ICacheService, opts ...ServiceOption) IQueueService {
 	q := &QueueService{
 		cache:    cache,
 		inflight: utils.NewInflight(),
@@ -451,7 +451,7 @@ func JSON[T any](fn func(context.Context, T) error) Handler {
 
 // NewJob registers fn for taskType and returns a Job that queues payloads
 // for it with the same options.
-func NewJob[T any](q QueueServices, taskType string, fn func(context.Context, T) error, opts ...Option) *Job[T] {
+func NewJob[T any](q IQueueService, taskType string, fn func(context.Context, T) error, opts ...Option) *Job[T] {
 	q.Handle(taskType, JSON(fn), opts...)
 	return &Job[T]{queue: q, taskType: taskType, opts: opts}
 }

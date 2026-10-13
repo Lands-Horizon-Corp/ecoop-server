@@ -43,7 +43,7 @@ type (
 		CreatedAt     time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 	}
 
-	CQRSServices[TData any, TResponse any, TRequest any, TID comparable] interface {
+	ICQRSService[TData any, TResponse any, TRequest any, TID comparable] interface {
 		Run(ctx context.Context) error
 		Shutdown(ctx context.Context) error
 

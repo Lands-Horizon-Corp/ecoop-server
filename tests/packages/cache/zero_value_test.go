@@ -17,34 +17,34 @@ import (
 
 type op struct {
 	name string
-	call func(cache.CacheServices) error
+	call func(cache.ICacheService) error
 }
 
 func allOps(ctx context.Context, k string) []op {
 	e := func(_ any, err error) error { return err }
 	return []op{
-		{"Ping", func(s cache.CacheServices) error { return s.Ping(ctx) }},
-		{"Flush", func(s cache.CacheServices) error { return s.Flush(ctx) }},
-		{"Get", func(s cache.CacheServices) error { return e(s.Get(ctx, k)) }},
-		{"Set", func(s cache.CacheServices) error { return s.Set(ctx, k, "v", 0) }},
-		{"SetNX", func(s cache.CacheServices) error { return e(s.SetNX(ctx, k, "v", 0)) }},
-		{"Exists", func(s cache.CacheServices) error { return e(s.Exists(ctx, k)) }},
-		{"Delete", func(s cache.CacheServices) error { return e(s.Delete(ctx, k)) }},
-		{"Keys", func(s cache.CacheServices) error { return e(s.Keys(ctx, k)) }},
-		{"ZAdd", func(s cache.CacheServices) error { return s.ZAdd(ctx, k, 1, "m") }},
-		{"ZRange", func(s cache.CacheServices) error { return e(s.ZRange(ctx, k, 0, -1)) }},
-		{"ZCard", func(s cache.CacheServices) error { return e(s.ZCard(ctx, k)) }},
-		{"ZRem", func(s cache.CacheServices) error { return e(s.ZRem(ctx, k, "m")) }},
-		{"ZRemRangeByScore", func(s cache.CacheServices) error { return e(s.ZRemRangeByScore(ctx, k, "-inf", "+inf")) }},
-		{"Incr", func(s cache.CacheServices) error { return e(s.Incr(ctx, k, time.Second)) }},
-		{"Expire", func(s cache.CacheServices) error { return e(s.Expire(ctx, k, time.Second)) }},
+		{"Ping", func(s cache.ICacheService) error { return s.Ping(ctx) }},
+		{"Flush", func(s cache.ICacheService) error { return s.Flush(ctx) }},
+		{"Get", func(s cache.ICacheService) error { return e(s.Get(ctx, k)) }},
+		{"Set", func(s cache.ICacheService) error { return s.Set(ctx, k, "v", 0) }},
+		{"SetNX", func(s cache.ICacheService) error { return e(s.SetNX(ctx, k, "v", 0)) }},
+		{"Exists", func(s cache.ICacheService) error { return e(s.Exists(ctx, k)) }},
+		{"Delete", func(s cache.ICacheService) error { return e(s.Delete(ctx, k)) }},
+		{"Keys", func(s cache.ICacheService) error { return e(s.Keys(ctx, k)) }},
+		{"ZAdd", func(s cache.ICacheService) error { return s.ZAdd(ctx, k, 1, "m") }},
+		{"ZRange", func(s cache.ICacheService) error { return e(s.ZRange(ctx, k, 0, -1)) }},
+		{"ZCard", func(s cache.ICacheService) error { return e(s.ZCard(ctx, k)) }},
+		{"ZRem", func(s cache.ICacheService) error { return e(s.ZRem(ctx, k, "m")) }},
+		{"ZRemRangeByScore", func(s cache.ICacheService) error { return e(s.ZRemRangeByScore(ctx, k, "-inf", "+inf")) }},
+		{"Incr", func(s cache.ICacheService) error { return e(s.Incr(ctx, k, time.Second)) }},
+		{"Expire", func(s cache.ICacheService) error { return e(s.Expire(ctx, k, time.Second)) }},
 	}
 }
 
 func TestZeroValue_NotRunningReturnsErrNotRunning(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	services := map[string]cache.CacheServices{
+	services := map[string]cache.ICacheService{
 		"constructed only": cache.NewCacheService([]string{"127.0.0.1:1"}, "pw", nil),
 		"zero struct":      &cache.CacheService{},
 	}
@@ -84,7 +84,7 @@ func TestZeroValue_StoppedReturnsErrNotRunning(t *testing.T) {
 func TestZeroValue_StopIsIdempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	for name, svc := range map[string]cache.CacheServices{
+	for name, svc := range map[string]cache.ICacheService{
 		"never run":   cache.NewCacheService(nil, "", nil),
 		"zero struct": &cache.CacheService{},
 	} {
@@ -118,7 +118,7 @@ func TestZeroValue_ConfigIsACopy(t *testing.T) {
 func TestZeroValue_NoAddresses(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	for name, svc := range map[string]cache.CacheServices{
+	for name, svc := range map[string]cache.ICacheService{
 		"nil slice":   cache.NewCacheService(nil, "", nil),
 		"empty slice": cache.NewCacheService([]string{}, "", nil),
 		"zero struct": &cache.CacheService{},
@@ -268,11 +268,11 @@ func TestZeroValue_NilReceiverFailsLoudly(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *cache.CacheService
-	var iface cache.CacheServices
+	var iface cache.ICacheService
 	extra := []op{
-		{"Run", func(s cache.CacheServices) error { return s.Run(ctx) }},
-		{"Stop", func(s cache.CacheServices) error { return s.Stop(ctx) }},
-		{"Client", func(s cache.CacheServices) error { _ = s.Client(); return nil }},
+		{"Run", func(s cache.ICacheService) error { return s.Run(ctx) }},
+		{"Stop", func(s cache.ICacheService) error { return s.Stop(ctx) }},
+		{"Client", func(s cache.ICacheService) error { _ = s.Client(); return nil }},
 	}
 	for _, o := range append(allOps(ctx, "k"), extra...) {
 		t.Run(o.name+"/nil pointer", func(t *testing.T) { mustPanic(t, o.name, func() { _ = o.call(ptr) }) })

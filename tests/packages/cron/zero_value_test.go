@@ -135,11 +135,11 @@ func TestZeroValue_NilReceiver(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *cron.CronService
-	var iface cron.CronServices
-	ops := map[string]func(cron.CronServices){
-		"Start":     func(c cron.CronServices) { _ = c.Start(ctx) },
-		"CreateJob": func(c cron.CronServices) { _ = c.CreateJob(cron.CronJob{}) },
-		"Execute":   func(c cron.CronServices) { _ = c.ExecuteJob(ctx, "x", nil) },
+	var iface cron.ICronServices
+	ops := map[string]func(cron.ICronServices){
+		"Start":     func(c cron.ICronServices) { _ = c.Start(ctx) },
+		"CreateJob": func(c cron.ICronServices) { _ = c.CreateJob(cron.CronJob{}) },
+		"Execute":   func(c cron.ICronServices) { _ = c.ExecuteJob(ctx, "x", nil) },
 	}
 	for name, op := range ops {
 		t.Run(name+"/nil pointer", func(t *testing.T) { mustPanic(t, name, func() { op(ptr) }) })

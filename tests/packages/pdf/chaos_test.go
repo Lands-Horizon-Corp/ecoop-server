@@ -13,10 +13,10 @@ import (
 
 // Chaos: the engine goes away and comes back.
 
-func viaProxy(t *testing.T) (pdf.PDFServices, *proxy) {
+func viaProxy(t *testing.T) (pdf.IPDFServices, *proxy) {
 	t.Helper()
 	p := newProxy(t)
-	s := pdf.NewPDFEngine(p.URL(), token, nil)
+	s := pdf.NewPDFService(p.URL(), token, nil)
 	if err := s.Start(ctxT(t)); err != nil {
 		t.Fatal(err)
 	}

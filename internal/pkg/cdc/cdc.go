@@ -42,7 +42,7 @@ type subscription struct {
 // groupID prefixes each topic's consumer group, and topicPrefix is the
 // Debezium connector's topic.prefix (empty means "ecoop"). Run reports
 // missing addresses; Subscribe a missing group.
-func NewCDCService(brokers []string, groupID, topicPrefix string) CDCServices {
+func NewCDCService(brokers []string, groupID, topicPrefix string) ICDCService {
 	if strings.TrimSpace(topicPrefix) == "" {
 		topicPrefix = defaultTopicPrefix
 	}

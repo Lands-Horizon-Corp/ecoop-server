@@ -21,16 +21,16 @@ type AuthService[T ClaimWithID] struct {
 	csrfHeader string
 	ssl        bool
 
-	cache    cache.CacheServices
-	security security.SecurityServices
+	cache    cache.ICacheService
+	security security.ISecurityService
 }
 
 func NewAuthService[T ClaimWithID](
 	name string,
 	csrfHeader string,
 	ssl bool,
-	cache cache.CacheServices,
-	security security.SecurityServices,
+	cache cache.ICacheService,
+	security security.ISecurityService,
 ) AUTHServices[T] {
 	return &AuthService[T]{
 		name:       name,

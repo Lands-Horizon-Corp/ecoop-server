@@ -23,7 +23,7 @@ type SMTPService struct {
 	from        string
 	secured     bool
 	defaultName string
-	queue       queue.QueueServices
+	queue       queue.IQueueService
 
 	gate   *utils.Gate
 	client *mail.Client
@@ -40,8 +40,8 @@ type sendPayload struct {
 func NewSMTPService(
 	host string, port int, username, password, from,
 	defaultName string, secured bool,
-	queue queue.QueueServices,
-	inflight *utils.Inflight) SMTPServices {
+	queue queue.IQueueService,
+	inflight *utils.Inflight) ISMTPService {
 	return &SMTPService{
 		host:        host,
 		port:        port,

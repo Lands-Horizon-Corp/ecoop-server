@@ -12,7 +12,7 @@ import (
 // Integration chaos: several app instances rendering and storing at once.
 func TestIntegrationChaos_InstancesRenderAtOnce(t *testing.T) {
 	t.Parallel()
-	instances := []pdf.PDFServices{started(t), started(t), started(t)}
+	instances := []pdf.IPDFServices{started(t), started(t), started(t)}
 	var wg sync.WaitGroup
 	for w := range 9 {
 		wg.Go(func() {

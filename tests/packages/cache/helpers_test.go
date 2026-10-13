@@ -30,10 +30,10 @@ var (
 	testAddr     string
 	testPassword string
 	skipReason   string
-	cleaner      cache.CacheServices // deletes each test's keys on cleanup
+	cleaner      cache.ICacheService // deletes each test's keys on cleanup
 )
 
-var _ cache.CacheServices = (*cache.CacheService)(nil)
+var _ cache.ICacheService = (*cache.CacheService)(nil)
 
 func TestMain(m *testing.M) {
 	os.Exit(runMain(m))
@@ -151,12 +151,12 @@ func requireFlush(t testing.TB) {
 	}
 }
 
-func newRunning(t testing.TB) cache.CacheServices {
+func newRunning(t testing.TB) cache.ICacheService {
 	t.Helper()
 	return newRunningAt(t, testAddr)
 }
 
-func newRunningAt(t testing.TB, addr string) cache.CacheServices {
+func newRunningAt(t testing.TB, addr string) cache.ICacheService {
 	t.Helper()
 	requireServer(t)
 	svc := cache.NewCacheService([]string{addr}, testPassword, nil)
@@ -232,7 +232,7 @@ func ctxT(t testing.TB) context.Context {
 	return ctx
 }
 
-func pttl(t testing.TB, svc cache.CacheServices, k string) int64 {
+func pttl(t testing.TB, svc cache.ICacheService, k string) int64 {
 	t.Helper()
 	cl := svc.Client()
 	n, err := cl.Do(context.Background(), cl.B().Pttl().Key(k).Build()).AsInt64()

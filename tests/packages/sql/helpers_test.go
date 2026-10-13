@@ -46,7 +46,7 @@ var (
 	skipReason string
 )
 
-var _ ecsql.SQLServices = (*ecsql.SQLService)(nil)
+var _ ecsql.ISQLService = (*ecsql.SQLService)(nil)
 
 // suiteCleanups undo what fixtures shared by the whole run set up; they run
 // after every test.
@@ -272,12 +272,12 @@ func newEnv(t testing.TB) *env {
 }
 
 // service builds (not started) a service on e with the given models.
-func (e *env) service(models ...any) ecsql.SQLServices {
+func (e *env) service(models ...any) ecsql.ISQLService {
 	return ecsql.NewSQLService(e.dsn, 5, 10, e.dir, false, e.out, models, nil)
 }
 
 // started builds and starts a service, stopped when the test ends.
-func (e *env) started(t testing.TB, models ...any) ecsql.SQLServices {
+func (e *env) started(t testing.TB, models ...any) ecsql.ISQLService {
 	t.Helper()
 	s := e.service(models...)
 	if err := s.Start(ctxT(t)); err != nil {
@@ -302,7 +302,7 @@ func (e *env) write(t testing.TB, version int64, name, up, down string) {
 	}
 }
 
-func tables(t testing.TB, s ecsql.SQLServices) []string {
+func tables(t testing.TB, s ecsql.ISQLService) []string {
 	t.Helper()
 	var out []string
 	err := s.Client().NewRaw("SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename <> ? ORDER BY 1", ecsql.GooseTable).Scan(ctxT(t), &out)
@@ -312,11 +312,11 @@ func tables(t testing.TB, s ecsql.SQLServices) []string {
 	return out
 }
 
-func hasTable(t testing.TB, s ecsql.SQLServices, name string) bool {
+func hasTable(t testing.TB, s ecsql.ISQLService, name string) bool {
 	return slices.Contains(tables(t, s), name)
 }
 
-func columns(t testing.TB, s ecsql.SQLServices, table string) []string {
+func columns(t testing.TB, s ecsql.ISQLService, table string) []string {
 	t.Helper()
 	var out []string
 	err := s.Client().NewRaw("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ? ORDER BY 1", table).Scan(ctxT(t), &out)
@@ -327,7 +327,7 @@ func columns(t testing.TB, s ecsql.SQLServices, table string) []string {
 }
 
 // version returns the applied version Version prints.
-func version(t testing.TB, s ecsql.SQLServices, e *env) string {
+func version(t testing.TB, s ecsql.ISQLService, e *env) string {
 	t.Helper()
 	e.out.Reset()
 	if err := s.Version(ctxT(t)); err != nil {
@@ -458,7 +458,7 @@ func dbName(dsn string) string {
 // statistics, storage options, invalid indexes and extensions, goose's
 // table excluded. Two
 // databases with the same snapshot have the same schema.
-func snapshot(t testing.TB, s ecsql.SQLServices) string {
+func snapshot(t testing.TB, s ecsql.ISQLService) string {
 	t.Helper()
 	snap, err := snapshotOf(ctxT(t), s.Client())
 	if err != nil {
@@ -521,7 +521,7 @@ ORDER BY 1`
 }
 
 // count returns the rows of a SQL count query.
-func count(t testing.TB, s ecsql.SQLServices, query string, args ...any) int {
+func count(t testing.TB, s ecsql.ISQLService, query string, args ...any) int {
 	t.Helper()
 	var n int
 	if err := s.Client().NewRaw(query, args...).Scan(ctxT(t), &n); err != nil {
@@ -530,7 +530,7 @@ func count(t testing.TB, s ecsql.SQLServices, query string, args ...any) int {
 	return n
 }
 
-func execSQL(t testing.TB, s ecsql.SQLServices, query string, args ...any) {
+func execSQL(t testing.TB, s ecsql.ISQLService, query string, args ...any) {
 	t.Helper()
 	if _, err := s.Client().ExecContext(ctxT(t), query, args...); err != nil {
 		t.Fatalf("%s: %v", query, err)

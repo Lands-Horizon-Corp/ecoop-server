@@ -15,14 +15,14 @@ import (
 
 const testSecret = "ecoop-qr-test-secret"
 
-var _ qr.QRServices = (*qr.QRService)(nil)
+var _ qr.IQRServices = (*qr.QRService)(nil)
 
-func newStarted(t testing.TB) qr.QRServices {
+func newStarted(t testing.TB) qr.IQRServices {
 	t.Helper()
 	return newStartedWithSecret(t, testSecret)
 }
 
-func newStartedWithSecret(t testing.TB, secret string) qr.QRServices {
+func newStartedWithSecret(t testing.TB, secret string) qr.IQRServices {
 	t.Helper()
 	svc := qr.NewQRServices(secret, nil)
 	if svc == nil {
@@ -35,7 +35,7 @@ func newStartedWithSecret(t testing.TB, secret string) qr.QRServices {
 	return svc
 }
 
-func mustEncode(t testing.TB, svc qr.QRServices, d *qr.QRData) string {
+func mustEncode(t testing.TB, svc qr.IQRServices, d *qr.QRData) string {
 	t.Helper()
 	s, err := svc.Encode(context.Background(), d)
 	if err != nil {

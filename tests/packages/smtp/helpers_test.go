@@ -47,7 +47,7 @@ var (
 	skipReason    string
 )
 
-var _ smtp.SMTPServices = (*smtp.SMTPService)(nil)
+var _ smtp.ISMTPService = (*smtp.SMTPService)(nil)
 
 func TestMain(m *testing.M) {
 	os.Exit(runMain(m))
@@ -172,7 +172,7 @@ type serviceOpts struct {
 // newSMTP builds (but does not start) a service with its own cache
 // connection. All services share the one email queue, as instances behind a
 // load balancer do; it is cleared when the test ends.
-func newSMTP(t testing.TB, opts serviceOpts) smtp.SMTPServices {
+func newSMTP(t testing.TB, opts serviceOpts) smtp.ISMTPService {
 	t.Helper()
 	requireMailpit(t)
 	host, port := smtpHost, smtpPort
@@ -194,7 +194,7 @@ func newSMTP(t testing.TB, opts serviceOpts) smtp.SMTPServices {
 
 // newService returns a started service that delivers to Mailpit (or to
 // addr if given, e.g. a proxy or a fake server).
-func newService(t testing.TB, addr ...string) smtp.SMTPServices {
+func newService(t testing.TB, addr ...string) smtp.ISMTPService {
 	t.Helper()
 	var opts serviceOpts
 	if len(addr) > 0 {
@@ -203,7 +203,7 @@ func newService(t testing.TB, addr ...string) smtp.SMTPServices {
 	return startService(t, opts)
 }
 
-func startService(t testing.TB, opts serviceOpts) smtp.SMTPServices {
+func startService(t testing.TB, opts serviceOpts) smtp.ISMTPService {
 	t.Helper()
 	svc := newSMTP(t, opts)
 	if err := svc.Start(context.Background()); err != nil {
@@ -214,7 +214,7 @@ func startService(t testing.TB, opts serviceOpts) smtp.SMTPServices {
 }
 
 // mockService runs with secured=false: validates and formats, sends nothing.
-func mockService(t testing.TB) smtp.SMTPServices {
+func mockService(t testing.TB) smtp.ISMTPService {
 	t.Helper()
 	svc := smtp.NewSMTPService("", 0, "", "", "noreply@ecoop.test", "eCoop", false, nil, nil)
 	if err := svc.Start(context.Background()); err != nil {
@@ -225,7 +225,7 @@ func mockService(t testing.TB) smtp.SMTPServices {
 
 // newQueue returns a started queue on a running cache, both stopped (queue
 // first) when the test ends.
-func newQueue(t testing.TB) queue.QueueServices {
+func newQueue(t testing.TB) queue.IQueueService {
 	t.Helper()
 	ch := cache.NewCacheService([]string{queueAddr}, queuePassword, nil)
 	if err := ch.Run(context.Background()); err != nil {

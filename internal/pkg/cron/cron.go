@@ -18,7 +18,7 @@ import (
 // a load balancer: every instance knows every job, the queue's leader
 // enqueues each tick once, and any instance's worker runs it.
 type CronService struct {
-	queue queue.QueueServices
+	queue queue.IQueueService
 	gate  *utils.Gate
 
 	mu   sync.Mutex // guards jobs and loc
@@ -35,7 +35,7 @@ var parser = robfig.NewParser(robfig.Minute | robfig.Hour | robfig.Dom | robfig.
 
 // NewCronService creates the service. inflight may be shared with other
 // services; nil gives the service its own tracker.
-func NewCronService(queue queue.QueueServices, inflight *utils.Inflight) CronServices {
+func NewCronService(queue queue.IQueueService, inflight *utils.Inflight) ICronServices {
 	return &CronService{
 		queue: queue,
 		gate:  utils.NewGate(inflight),

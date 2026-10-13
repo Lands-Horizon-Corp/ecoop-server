@@ -42,7 +42,7 @@ func (c *codecs) close() {
 
 // NewQRServices creates the service. inflight may be shared with other
 // services; nil gives the service its own tracker.
-func NewQRServices(secret string, inflight *utils.Inflight) QRServices {
+func NewQRServices(secret string, inflight *utils.Inflight) IQRServices {
 	if inflight == nil {
 		inflight = utils.NewInflight()
 	}

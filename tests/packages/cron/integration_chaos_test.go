@@ -15,8 +15,8 @@ import (
 // each defining the same jobs, sharing one Valkey.
 
 type instance struct {
-	q queue.QueueServices
-	c cron.CronServices
+	q queue.IQueueService
+	c cron.ICronServices
 }
 
 func instances(t *testing.T, n int, schedule string, r *recorder) []instance {

@@ -20,7 +20,7 @@ import (
 // history in banking_releases_test.go.
 
 // checkBankData verifies the seeded data after the full upgrade.
-func checkBankData(t *testing.T, s ecsql.SQLServices) {
+func checkBankData(t *testing.T, s ecsql.ISQLService) {
 	t.Helper()
 	if n := count(t, s, "SELECT count(*) FROM customers"); n != 200 {
 		t.Errorf("customers = %d, want 200", n)

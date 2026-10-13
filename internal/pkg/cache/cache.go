@@ -24,7 +24,7 @@ type CacheService struct {
 	addresses []string
 }
 
-func NewCacheService(addresses []string, password string, inflight *utils.Inflight) CacheServices {
+func NewCacheService(addresses []string, password string, inflight *utils.Inflight) ICacheService {
 	if inflight == nil {
 		inflight = utils.NewInflight()
 	}

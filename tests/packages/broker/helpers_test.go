@@ -28,7 +28,7 @@ var (
 	runID            = time.Now().UnixNano()
 )
 
-var _ broker.BrokerServices = (*broker.BrokerService)(nil)
+var _ broker.IBrokerService = (*broker.BrokerService)(nil)
 
 func TestMain(m *testing.M) {
 	if err := startKafka(); err != nil {
@@ -88,7 +88,7 @@ func names() (topic, group string) {
 }
 
 // service is a broker in group, run until t ends.
-func service(t testing.TB, group string) broker.BrokerServices {
+func service(t testing.TB, group string) broker.IBrokerService {
 	t.Helper()
 	if skipReason != "" {
 		t.Skip(skipReason)
@@ -133,7 +133,7 @@ func (in *inbox) wait(t testing.TB, n int) []string {
 	return in.all()
 }
 
-func publish(t testing.TB, b broker.BrokerServices, topic string, n int, key string) {
+func publish(t testing.TB, b broker.IBrokerService, topic string, n int, key string) {
 	t.Helper()
 	for i := range n {
 		if err := b.Publish(ctxT(t), topic, []byte(key), []byte(fmt.Sprint(i))); err != nil {

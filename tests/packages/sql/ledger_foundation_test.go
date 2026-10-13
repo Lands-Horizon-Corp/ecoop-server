@@ -38,7 +38,7 @@ type ledgerRelease struct {
 	// file and applies nothing until it is approved.
 	review bool
 	seed   string
-	check  func(t *testing.T, s ecsql.SQLServices)
+	check  func(t *testing.T, s ecsql.ISQLService)
 }
 
 var (
@@ -65,7 +65,7 @@ var (
 
 // rejects checks a statement is refused by the schema, inside a rolled-back
 // transaction.
-func rejects(t *testing.T, s ecsql.SQLServices, why, query string) {
+func rejects(t *testing.T, s ecsql.ISQLService, why, query string) {
 	t.Helper()
 	tx, err := s.Client().BeginTx(ctxT(t), nil)
 	if err != nil {
@@ -85,20 +85,20 @@ INSERT INTO members (name, email) SELECT 'Member ' || g,
   FROM generate_series(1, 50) g;`},
 	{name: "accounts owned by members", models: r2,
 		seed: `INSERT INTO accounts (member_id, number) SELECT id, 'AC' || lpad(id::text, 6, '0') FROM members;`,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			rejects(t, s, "account of an unknown member", "INSERT INTO accounts (member_id, number) VALUES (999, 'X')")
 			rejects(t, s, "duplicate account number", "INSERT INTO accounts (member_id, number) VALUES (1, 'AC000001')")
 		}},
 	{name: "members belong to branches (FK on a populated table)", models: r3,
 		seed: `UPDATE members SET branch_id = 1 + id % 3;`,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			rejects(t, s, "unknown branch", "UPDATE members SET branch_id = 99 WHERE id = 1")
 		}},
 	{name: "ledger entries", models: r4,
 		seed: `INSERT INTO ledger_entries (account_id, amount) SELECT id, 1000 * id FROM accounts UNION ALL SELECT id, 250 FROM accounts;`},
 	{name: "indexes declared on the models (expression index included)", models: r5},
 	{name: "currency NOT NULL with a string default on a populated table", models: r6,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			if n := count(t, s, "SELECT count(*) FROM accounts WHERE currency = 'PHP'"); n != 50 {
 				t.Errorf("existing accounts with the default currency = %d, want 50", n)
 			}
@@ -109,11 +109,11 @@ INSERT INTO members (name, email) SELECT 'Member ' || g,
 		hand: [2]string{`INSERT INTO account_holders (account_id, member_id, role) SELECT id, member_id, 'owner' FROM accounts;`,
 			`DELETE FROM account_holders WHERE role = 'owner';`},
 		seed: `INSERT INTO account_holders (account_id, member_id, role) SELECT id, member_id + 1, 'joint' FROM accounts WHERE id <= 10;`,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			rejects(t, s, "holder twice on one account", "INSERT INTO account_holders (account_id, member_id, role) VALUES (1, 1, 'joint')")
 		}},
 	{name: "rename members.name to full_name", models: r9,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			if n := count(t, s, "SELECT count(*) FROM members WHERE full_name LIKE 'Member %'"); n != 50 {
 				t.Errorf("names kept through the rename = %d, want 50", n)
 			}
@@ -123,7 +123,7 @@ INSERT INTO members (name, email) SELECT 'Member ' || g,
   SELECT member_id, id, 100000, 1200, 12, 'active' FROM accounts WHERE id <= 10;
 WITH e AS (INSERT INTO ledger_entries (account_id, amount) SELECT account_id, -500 FROM loans RETURNING id, account_id)
 INSERT INTO loan_payments (loan_id, entry_id, amount) SELECT l.id, e.id, 500 FROM e JOIN loans l ON l.account_id = e.account_id;`,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			rejects(t, s, "one entry paying twice", "INSERT INTO loan_payments (loan_id, entry_id, amount) SELECT 1, entry_id, 1 FROM loan_payments LIMIT 1")
 		}},
 	{name: "transfers (two foreign keys to accounts) referenced by entries", models: r11,
@@ -131,11 +131,11 @@ INSERT INTO loan_payments (loan_id, entry_id, amount) SELECT l.id, e.id, 500 FRO
   SELECT g, g + 1, 100 FROM generate_series(1, 20) g RETURNING id, from_account_id, to_account_id, amount)
 INSERT INTO ledger_entries (account_id, amount, transfer_id)
   SELECT from_account_id, -amount, id FROM t UNION ALL SELECT to_account_id, amount, id FROM t;`,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			rejects(t, s, "transfer from an unknown account", "INSERT INTO transfers (from_account_id, to_account_id, amount) VALUES (999, 1, 5)")
 		}},
 	{name: "checks and transfer indexes declared on the models", models: r12,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			rejects(t, s, "negative balance", "UPDATE accounts SET balance = -1 WHERE id = 1")
 			rejects(t, s, "zero entry", "INSERT INTO ledger_entries (account_id, amount) VALUES (1, 0)")
 			rejects(t, s, "transfer to itself", "INSERT INTO transfers (from_account_id, to_account_id, amount) VALUES (1, 1, 5)")
@@ -144,7 +144,7 @@ INSERT INTO ledger_entries (account_id, amount, transfer_id)
 		fix: [2]string{`UPDATE members SET email = 'member-' || id || '@coop.invalid' WHERE email IS NULL;
 UPDATE members m SET email = split_part(email, '@', 1) || '+' || id || '@' || split_part(email, '@', 2)
   WHERE id <> (SELECT min(d.id) FROM members d WHERE d.email = m.email);`, `SELECT 1;`},
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			if n := count(t, s, "SELECT count(DISTINCT email) FROM members"); n != 50 {
 				t.Errorf("distinct emails = %d, want 50", n)
 			}
@@ -152,11 +152,11 @@ UPDATE members m SET email = split_part(email, '@', 1) || '+' || id || '@' || sp
 		}},
 	{name: "sub-accounts (self-reference)", models: r14,
 		seed: `INSERT INTO accounts (member_id, number, parent_id) SELECT member_id, number || '-S', id FROM accounts WHERE id <= 5;`,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			rejects(t, s, "unknown parent account", "UPDATE accounts SET parent_id = 9999 WHERE id = 1")
 		}},
 	{name: "rename ledger_entries to journal_entries", models: r15,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			// The id sequence must carry on: a new sequence from 1 would collide.
 			var before, id int64
 			_ = s.Client().NewRaw("SELECT max(id) FROM journal_entries").Scan(ctxT(t), &before)
@@ -166,11 +166,11 @@ UPDATE members m SET email = split_part(email, '@', 1) || '+' || id || '@' || sp
 		}},
 	{name: "idempotency key unique per account (composite unique)", models: r16,
 		seed: `INSERT INTO journal_entries (account_id, amount, external_ref) VALUES (1, 3, 'ref-1'), (2, 3, 'ref-1');`,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			rejects(t, s, "replayed idempotency key", "INSERT INTO journal_entries (account_id, amount, external_ref) VALUES (1, 3, 'ref-1')")
 		}},
 	{name: "loan term widened to bigint", models: r17,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			if n := count(t, s, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'loans' AND column_name = 'term_months' AND data_type = 'bigint'"); n != 1 {
 				t.Error("term_months is not bigint")
 			}
@@ -180,20 +180,20 @@ UPDATE members m SET email = split_part(email, '@', 1) || '+' || id || '@' || sp
 		}},
 	{name: "drop branches.name (reviewed)", models: r18, review: true},
 	{name: "drop accounts.member_id now that holders own accounts (reviewed)", models: r19, review: true,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			if n := count(t, s, "SELECT count(*) FROM accounts a WHERE parent_id IS NULL AND NOT EXISTS (SELECT 1 FROM account_holders h WHERE h.account_id = a.id AND h.role = 'owner')"); n != 0 {
 				t.Errorf("%d accounts lost their owner", n)
 			}
 		}},
 	{name: "monthly statements (composite unique)", models: r20,
 		seed: `INSERT INTO statements (account_id, period, closing) SELECT id, '2026-09', balance FROM accounts;`,
-		check: func(t *testing.T, s ecsql.SQLServices) {
+		check: func(t *testing.T, s ecsql.ISQLService) {
 			rejects(t, s, "two statements for one period", "INSERT INTO statements (account_id, period, closing) VALUES (1, '2026-09', 0)")
 		}},
 }
 
 // entries is the ledger table's name at the current schema.
-func entries(t *testing.T, s ecsql.SQLServices) string {
+func entries(t *testing.T, s ecsql.ISQLService) string {
 	if hasTable(t, s, "journal_entries") {
 		return "journal_entries"
 	}
@@ -204,7 +204,7 @@ func entries(t *testing.T, s ecsql.SQLServices) string {
 }
 
 // rebalance sets every balance to the sum of its entries, as posting does.
-func rebalance(t *testing.T, s ecsql.SQLServices) {
+func rebalance(t *testing.T, s ecsql.ISQLService) {
 	if e := entries(t, s); e != "" {
 		execSQL(t, s, "UPDATE accounts a SET balance = (SELECT coalesce(sum(amount), 0) FROM "+e+" e WHERE e.account_id = a.id)")
 	}
@@ -212,7 +212,7 @@ func rebalance(t *testing.T, s ecsql.SQLServices) {
 
 // ledgerInvariants are true after every release: no table lost rows, every
 // balance equals its entries, and the declared indexes and checks are there.
-func ledgerInvariants(t *testing.T, s ecsql.SQLServices, rows map[string]int, release int) {
+func ledgerInvariants(t *testing.T, s ecsql.ISQLService, rows map[string]int, release int) {
 	t.Helper()
 	for _, tb := range tables(t, s) {
 		n := count(t, s, "SELECT count(*) FROM "+tb)

@@ -17,7 +17,7 @@ import (
 func TestZeroValue_ZeroConfigMustNotPanic(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	cases := map[string]security.SecurityServices{
+	cases := map[string]security.ISecurityService{
 		"all zero":        security.NewSecurityService("", 0, 0, 0, 0, 0),
 		"zero iterations": security.NewSecurityService(testSecret, testMemory, 0, testParallelism, testSalt, testKey),
 		"zero parallel":   security.NewSecurityService(testSecret, testMemory, testIterations, 0, testSalt, testKey),
@@ -201,17 +201,17 @@ func TestZeroValue_NilReceiverFailsLoudly(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *security.SecurityService
-	var iface security.SecurityServices
+	var iface security.ISecurityService
 
-	ops := map[string]func(security.SecurityServices){
-		"GeneratePassword": func(s security.SecurityServices) { _, _ = s.GeneratePassword(ctx, "pw") },
-		"VerifyPassword": func(s security.SecurityServices) {
+	ops := map[string]func(security.ISecurityService){
+		"GeneratePassword": func(s security.ISecurityService) { _, _ = s.GeneratePassword(ctx, "pw") },
+		"VerifyPassword": func(s security.ISecurityService) {
 			_, _ = s.VerifyPassword(ctx, argonHash("argon2id", 19, 8192, 1, 1, "c2FsdA", "aGFzaA"), "pw")
 		},
-		"Encrypt":     func(s security.SecurityServices) { _, _ = s.Encrypt(ctx, "x", time.Minute) },
-		"Decrypt":     func(s security.SecurityServices) { _, _ = s.Decrypt(ctx, "v4.local.AAAA") },
-		"EncryptData": func(s security.SecurityServices) { _, _ = s.EncryptData(ctx, []byte("x")) },
-		"DecryptData": func(s security.SecurityServices) { _, _ = s.DecryptData(ctx, make([]byte, 64)) },
+		"Encrypt":     func(s security.ISecurityService) { _, _ = s.Encrypt(ctx, "x", time.Minute) },
+		"Decrypt":     func(s security.ISecurityService) { _, _ = s.Decrypt(ctx, "v4.local.AAAA") },
+		"EncryptData": func(s security.ISecurityService) { _, _ = s.EncryptData(ctx, []byte("x")) },
+		"DecryptData": func(s security.ISecurityService) { _, _ = s.DecryptData(ctx, make([]byte, 64)) },
 	}
 	for name, op := range ops {
 		t.Run(name+"/nil pointer", func(t *testing.T) { mustPanic(t, name, func() { op(ptr) }) })

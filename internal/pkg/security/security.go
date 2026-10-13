@@ -26,7 +26,7 @@ type SecurityService struct {
 }
 
 func NewSecurityService(
-	secret string, memory uint32, iterations uint32, parallelism uint8, salt uint32, key uint32) SecurityServices {
+	secret string, memory uint32, iterations uint32, parallelism uint8, salt uint32, key uint32) ISecurityService {
 	return &SecurityService{
 		secret:      secret,
 		memory:      memory,

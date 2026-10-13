@@ -106,13 +106,13 @@ func TestZeroValue_NilReceiver(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *otp.OTPService
-	var iface otp.OTPServices
-	ops := map[string]func(otp.OTPServices){
-		"Start":    func(o otp.OTPServices) { _ = o.Start(ctx) },
-		"Stop":     func(o otp.OTPServices) { _ = o.Stop(ctx) },
-		"Generate": func(o otp.OTPServices) { _, _ = o.Generate(ctx, "k") },
-		"Verify":   func(o otp.OTPServices) { _, _ = o.Verify(ctx, "k", "1") },
-		"Revoke":   func(o otp.OTPServices) { _ = o.Revoke(ctx, "k") },
+	var iface otp.IOTPService
+	ops := map[string]func(otp.IOTPService){
+		"Start":    func(o otp.IOTPService) { _ = o.Start(ctx) },
+		"Stop":     func(o otp.IOTPService) { _ = o.Stop(ctx) },
+		"Generate": func(o otp.IOTPService) { _, _ = o.Generate(ctx, "k") },
+		"Verify":   func(o otp.IOTPService) { _, _ = o.Verify(ctx, "k", "1") },
+		"Revoke":   func(o otp.IOTPService) { _ = o.Revoke(ctx, "k") },
 	}
 	for name, op := range ops {
 		t.Run(name+"/nil pointer", func(t *testing.T) { mustPanic(t, name, func() { op(ptr) }) })

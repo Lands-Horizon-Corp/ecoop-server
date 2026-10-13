@@ -44,12 +44,12 @@ var (
 	smtpHost, mailpitAPI       string
 	smtpPort                   int
 	skipReason                 string
-	cleaner                    cache.CacheServices // one connection for all test cleanup
+	cleaner                    cache.ICacheService // one connection for all test cleanup
 )
 
 const secret = "otp-test-pepper"
 
-var _ otp.OTPServices = (*otp.OTPService)(nil)
+var _ otp.IOTPService = (*otp.OTPService)(nil)
 
 func TestMain(m *testing.M) { os.Exit(runMain(m)) }
 
@@ -136,7 +136,7 @@ func ctxT(t testing.TB) context.Context {
 
 // Building blocks.
 
-func newCache(t testing.TB, addr ...string) cache.CacheServices {
+func newCache(t testing.TB, addr ...string) cache.ICacheService {
 	t.Helper()
 	requireInfra(t)
 	target := valkeyAddr
@@ -151,11 +151,11 @@ func newCache(t testing.TB, addr ...string) cache.CacheServices {
 	return ch
 }
 
-func newSecurity() security.SecurityServices {
+func newSecurity() security.ISecurityService {
 	return security.NewSecurityService("otp-test", 8*1024, 1, 2, 16, 32)
 }
 
-func newQueue(t testing.TB, ch cache.CacheServices) queue.QueueServices {
+func newQueue(t testing.TB, ch cache.ICacheService) queue.IQueueService {
 	t.Helper()
 	q := queue.NewQueueService(ch, queue.Namespace(qns.For(t, valkeyAddr, valkeyPassword)))
 	if err := q.Start(context.Background()); err != nil {
@@ -165,7 +165,7 @@ func newQueue(t testing.TB, ch cache.CacheServices) queue.QueueServices {
 	return q
 }
 
-func mockSMTP(t testing.TB) smtp.SMTPServices {
+func mockSMTP(t testing.TB) smtp.ISMTPService {
 	t.Helper()
 	s := smtp.NewSMTPService("", 0, "", "", "noreply@ecoop.test", "eCoop", false, nil, nil)
 	if err := s.Start(context.Background()); err != nil {
@@ -174,7 +174,7 @@ func mockSMTP(t testing.TB) smtp.SMTPServices {
 	return s
 }
 
-func mockSMS(t testing.TB) sms.SMSServices {
+func mockSMS(t testing.TB) sms.ISMSServices {
 	t.Helper()
 	s := sms.NewSMSService("", "", "+15005550006", 160, false, nil, nil)
 	if err := s.Start(context.Background()); err != nil {
@@ -184,7 +184,7 @@ func mockSMS(t testing.TB) sms.SMSServices {
 }
 
 // realSMTP delivers to Mailpit through the queue.
-func realSMTP(t testing.TB, q queue.QueueServices) smtp.SMTPServices {
+func realSMTP(t testing.TB, q queue.IQueueService) smtp.ISMTPService {
 	t.Helper()
 	s := smtp.NewSMTPService(smtpHost, smtpPort, "", "", "noreply@ecoop.test", "eCoop", true, q, nil)
 	if err := s.Start(context.Background()); err != nil {
@@ -218,7 +218,7 @@ func (r redirect) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // realSMS sends through the queue to a fake Twilio server.
-func realSMS(t testing.TB, q queue.QueueServices) (sms.SMSServices, *fakeTwilio) {
+func realSMS(t testing.TB, q queue.IQueueService) (sms.ISMSServices, *fakeTwilio) {
 	t.Helper()
 	fake := &fakeTwilio{bodies: map[string][]string{}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -244,12 +244,12 @@ func realSMS(t testing.TB, q queue.QueueServices) (sms.SMSServices, *fakeTwilio)
 }
 
 // newOTP returns a started OTP service with mock email/SMS on its own cache.
-func newOTP(t testing.TB) otp.OTPServices {
+func newOTP(t testing.TB) otp.IOTPService {
 	t.Helper()
 	return startOTP(t, secret, newCache(t), mockSMTP(t), mockSMS(t))
 }
 
-func startOTP(t testing.TB, pepper string, ch cache.CacheServices, mail smtp.SMTPServices, text sms.SMSServices) otp.OTPServices {
+func startOTP(t testing.TB, pepper string, ch cache.ICacheService, mail smtp.ISMTPService, text sms.ISMSServices) otp.IOTPService {
 	t.Helper()
 	o := otp.NewOTPService(pepper, newSecurity(), ch, mail, text, nil)
 	if err := o.Start(context.Background()); err != nil {

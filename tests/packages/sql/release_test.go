@@ -16,7 +16,7 @@ import (
 // for canary rollouts, on the banking history.
 
 // rowsDigest summarises the banking data, to compare before and after.
-func rowsDigest(t testing.TB, s ecsql.SQLServices) string {
+func rowsDigest(t testing.TB, s ecsql.ISQLService) string {
 	t.Helper()
 	var d string
 	err := s.Client().NewRaw(`SELECT md5(

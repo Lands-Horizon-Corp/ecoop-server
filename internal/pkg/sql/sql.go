@@ -24,7 +24,7 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
-var _ SQLServices = (*SQLService)(nil)
+var _ ISQLService = (*SQLService)(nil)
 
 type SQLService struct {
 	dsn         string
@@ -61,7 +61,7 @@ func NewSQLService(
 	output io.Writer,
 	models []any,
 	inflight *utils.Inflight,
-) SQLServices {
+) ISQLService {
 	if output == nil {
 		output = os.Stdout
 	}

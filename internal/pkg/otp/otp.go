@@ -13,23 +13,23 @@ import (
 
 type OTPService struct {
 	secret string
-	sec    security.SecurityServices
-	ch     cache.CacheServices
+	sec    security.ISecurityService
+	ch     cache.ICacheService
 
-	smtp smtp.SMTPServices
-	sms  sms.SMSServices
+	smtp smtp.ISMTPService
+	sms  sms.ISMSServices
 
 	gate *utils.Gate
 }
 
 func NewOTPService(
 	secret string,
-	sec security.SecurityServices,
-	ch cache.CacheServices,
-	smtp smtp.SMTPServices,
-	sms sms.SMSServices,
+	sec security.ISecurityService,
+	ch cache.ICacheService,
+	smtp smtp.ISMTPService,
+	sms sms.ISMSServices,
 	inflight *utils.Inflight,
-) OTPServices {
+) IOTPService {
 	return &OTPService{
 		secret: secret,
 		sec:    sec,
@@ -40,7 +40,7 @@ func NewOTPService(
 	}
 }
 
-// Start implements [OTPServices].
+// Start implements [IOTPService].
 func (o *OTPService) Start(ctx context.Context) error {
 	var errs []error
 	if o.secret == "" {

@@ -13,7 +13,7 @@ import (
 func TestZeroValue_UnstartedServiceReturnsErrors(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	cases := map[string]qr.QRServices{
+	cases := map[string]qr.IQRServices{
 		"constructed only": qr.NewQRServices(testSecret, nil),
 		"zero struct":      &qr.QRService{},
 	}
@@ -145,12 +145,12 @@ func TestZeroValue_NilReceiverFailsLoudly(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *qr.QRService
-	var iface qr.QRServices
-	ops := map[string]func(qr.QRServices){
-		"Start":  func(s qr.QRServices) { _ = s.Start(ctx) },
-		"Stop":   func(s qr.QRServices) { _ = s.Stop(ctx) },
-		"Encode": func(s qr.QRServices) { _, _ = s.Encode(ctx, &qr.QRData{}) },
-		"Decode": func(s qr.QRServices) { _, _ = s.Decode(ctx, "AAAA") },
+	var iface qr.IQRServices
+	ops := map[string]func(qr.IQRServices){
+		"Start":  func(s qr.IQRServices) { _ = s.Start(ctx) },
+		"Stop":   func(s qr.IQRServices) { _ = s.Stop(ctx) },
+		"Encode": func(s qr.IQRServices) { _, _ = s.Encode(ctx, &qr.QRData{}) },
+		"Decode": func(s qr.IQRServices) { _, _ = s.Decode(ctx, "AAAA") },
 	}
 	for name, op := range ops {
 		t.Run(name+"/nil pointer", func(t *testing.T) { mustPanic(t, name, func() { op(ptr) }) })

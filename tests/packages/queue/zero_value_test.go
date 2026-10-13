@@ -135,13 +135,13 @@ func TestZeroValue_NilReceiver(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var ptr *queue.QueueService
-	var iface queue.QueueServices
-	ops := map[string]func(queue.QueueServices){
-		"Start":   func(q queue.QueueServices) { _ = q.Start(ctx) },
-		"Stop":    func(q queue.QueueServices) { _ = q.Stop(ctx) },
-		"Ping":    func(q queue.QueueServices) { _ = q.Ping(ctx) },
-		"Handle":  func(q queue.QueueServices) { q.Handle("t", nil) },
-		"Enqueue": func(q queue.QueueServices) { _, _ = q.Enqueue(ctx, "t", nil) },
+	var iface queue.IQueueService
+	ops := map[string]func(queue.IQueueService){
+		"Start":   func(q queue.IQueueService) { _ = q.Start(ctx) },
+		"Stop":    func(q queue.IQueueService) { _ = q.Stop(ctx) },
+		"Ping":    func(q queue.IQueueService) { _ = q.Ping(ctx) },
+		"Handle":  func(q queue.IQueueService) { q.Handle("t", nil) },
+		"Enqueue": func(q queue.IQueueService) { _, _ = q.Enqueue(ctx, "t", nil) },
 	}
 	for name, op := range ops {
 		t.Run(name+"/nil pointer", func(t *testing.T) { mustPanic(t, name, func() { op(ptr) }) })

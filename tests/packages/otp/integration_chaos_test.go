@@ -33,7 +33,7 @@ func TestIntegrationChaos_GenerateOnOneVerifyOnAnother(t *testing.T) {
 
 func TestIntegrationChaos_OneWinnerAcrossInstances(t *testing.T) {
 	t.Parallel()
-	var instances []otp.OTPServices
+	var instances []otp.IOTPService
 	for range otp.MaxAttempts {
 		instances = append(instances, startOTP(t, secret, newCache(t), mockSMTP(t), mockSMS(t)))
 	}

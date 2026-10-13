@@ -62,14 +62,14 @@ func oneHeavyTest(t testing.TB) {
 }
 
 // pg100Env is a new database with the 100 migrations in its folder.
-func pg100Env(t testing.TB) (*env, ecsql.SQLServices) {
+func pg100Env(t testing.TB) (*env, ecsql.ISQLService) {
 	t.Helper()
 	e := newEnv(t)
 	copyMigrations(t, pg100Source(t), e)
 	return e, e.started(t)
 }
 
-func versionInt(t testing.TB, s ecsql.SQLServices, e *env) int {
+func versionInt(t testing.TB, s ecsql.ISQLService, e *env) int {
 	t.Helper()
 	v, err := strconv.Atoi(version(t, s, e))
 	if err != nil {
@@ -80,7 +80,7 @@ func versionInt(t testing.TB, s ecsql.SQLServices, e *env) int {
 
 // upTo applies migrations one by one until version v, retrying a step that
 // lost a lock wait (lock_timeout) or a deadlock, as a deploy would.
-func upTo(t testing.TB, s ecsql.SQLServices, e *env, v int) {
+func upTo(t testing.TB, s ecsql.ISQLService, e *env, v int) {
 	t.Helper()
 	for cur := versionInt(t, s, e); cur < v; cur++ {
 		var err error
@@ -131,7 +131,7 @@ const pg100Digest = `SELECT md5(
   (SELECT string_agg(concat_ws('|', id, user_id, number, balance, currency, created_at), ',' ORDER BY id) FROM accounts) ||
   (SELECT string_agg(concat_ws('|', id, account_id, amount, kind, created_at, description), ',' ORDER BY id) FROM transactions))`
 
-func digest(t testing.TB, s ecsql.SQLServices) string {
+func digest(t testing.TB, s ecsql.ISQLService) string {
 	t.Helper()
 	var d string
 	if err := s.Client().NewRaw(pg100Digest).Scan(ctxT(t), &d); err != nil {
@@ -140,7 +140,7 @@ func digest(t testing.TB, s ecsql.SQLServices) string {
 	return d
 }
 
-func sum(t testing.TB, s ecsql.SQLServices, query string) int64 {
+func sum(t testing.TB, s ecsql.ISQLService, query string) int64 {
 	t.Helper()
 	var n int64
 	if err := s.Client().NewRaw(query).Scan(ctxT(t), &n); err != nil {
@@ -153,7 +153,7 @@ func sum(t testing.TB, s ecsql.SQLServices, query string) int64 {
 // columns exist then: accounts hold exactly what their transactions add up
 // to, and both hold what was put in (plus, under load, the net of the
 // workload, which keeps both sides equal).
-func pg100Money(t testing.TB, s ecsql.SQLServices, v int, exact bool) {
+func pg100Money(t testing.TB, s ecsql.ISQLService, v int, exact bool) {
 	t.Helper()
 	acct, tx := "round(balance * 100)", "round(amount * 100)"
 	if v >= 40 {
@@ -463,7 +463,7 @@ func (l *loadStats) record(start time.Time, err error) {
 // transaction and credit the account, atomically), reversals of its own
 // deposits, statement reads, logins and sign-ups. Only what every version
 // from v050 on supports.
-func workload(ctx context.Context, s ecsql.SQLServices, worker int, stop <-chan struct{}, l *loadStats) {
+func workload(ctx context.Context, s ecsql.ISQLService, worker int, stop <-chan struct{}, l *loadStats) {
 	db := s.Client()
 	r := rand.New(rand.NewPCG(uint64(worker), 42))
 	type deposit struct{ id, account, cents int64 }

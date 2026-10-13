@@ -19,7 +19,7 @@ func TestSadPath_RunFailures(t *testing.T) {
 	cancel()
 
 	cases := map[string]struct {
-		svc cache.CacheServices
+		svc cache.ICacheService
 		ctx context.Context
 	}{
 		"wrong password":  {cache.NewCacheService([]string{testAddr}, "wrong-"+testPassword, nil), ctxT(t)},

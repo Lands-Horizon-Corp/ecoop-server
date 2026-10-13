@@ -36,7 +36,7 @@ var (
 	skipReason                            string
 )
 
-var _ pdf.PDFServices = (*pdf.PDFEngineService)(nil)
+var _ pdf.IPDFServices = (*pdf.PDFEngineService)(nil)
 
 func TestMain(m *testing.M) {
 	if err := startEngine(); err != nil {
@@ -117,10 +117,10 @@ func ctxT(t testing.TB) context.Context {
 func engineURL(h, p string) string { return "http://" + net.JoinHostPort(h, p) }
 
 // started is a started service, stopped when t ends.
-func started(t testing.TB) pdf.PDFServices {
+func started(t testing.TB) pdf.IPDFServices {
 	t.Helper()
 	requireEngine(t)
-	s := pdf.NewPDFEngine(engineURL(engineHost, enginePort), token, nil)
+	s := pdf.NewPDFService(engineURL(engineHost, enginePort), token, nil)
 	if err := s.Start(ctxT(t)); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -142,7 +142,7 @@ func invoice() pdf.RenderOptions {
 }
 
 // render generates opts and returns the PDF bytes, checking they are one.
-func render(t testing.TB, s pdf.PDFServices, opts pdf.RenderOptions) []byte {
+func render(t testing.TB, s pdf.IPDFServices, opts pdf.RenderOptions) []byte {
 	t.Helper()
 	body, err := s.Generate(ctxT(t), opts)
 	if err != nil {

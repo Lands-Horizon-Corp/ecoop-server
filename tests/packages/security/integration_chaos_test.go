@@ -27,7 +27,7 @@ const (
 )
 
 // pipeline: hash password -> seal hash bytes -> wrap in token -> unwrap -> open -> verify.
-func runPipeline(ctx context.Context, issuer, reader security.SecurityServices, pw string, fault stage, r *rand.Rand) error {
+func runPipeline(ctx context.Context, issuer, reader security.ISecurityService, pw string, fault stage, r *rand.Rand) error {
 	hash, err := issuer.GeneratePassword(ctx, pw)
 	if err != nil {
 		return fmt.Errorf("hash: %w", err)

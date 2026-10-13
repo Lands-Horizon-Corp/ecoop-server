@@ -73,8 +73,8 @@ type (
 	// and the stream moves on.
 	Handler func(ctx context.Context, key json.RawMessage, event ChangeEvent) error
 
-	// CDCServices streams Debezium row changes from Kafka.
-	CDCServices interface {
+	// ICDCService streams Debezium row changes from Kafka.
+	ICDCService interface {
 		// Run connects and starts every subscription. Stop waits for the
 		// handlers running, then disconnects; changes not yet handled are
 		// delivered again after the next Run, here or on another instance.

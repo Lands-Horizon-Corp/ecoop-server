@@ -24,7 +24,7 @@ type (
 		Type string `json:"type"`
 	}
 
-	QRServices interface {
+	IQRServices interface {
 		Start(ctx context.Context) error
 		Stop(ctx context.Context) error
 		Encode(ctx context.Context, data *QRData) (string, error)

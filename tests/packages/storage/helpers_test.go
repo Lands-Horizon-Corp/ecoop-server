@@ -44,7 +44,7 @@ var (
 	bucketSeq  atomic.Int64
 )
 
-var _ storage.StorageServices = (*storage.StorageService)(nil)
+var _ storage.IStorageService = (*storage.StorageService)(nil)
 
 func TestMain(m *testing.M) {
 	if err := startStorage(); err != nil {
@@ -155,14 +155,14 @@ func removeBucket(name string) {
 
 // service builds (not running) a service on its own bucket, through addr
 // (the server, or a proxy to it).
-func service(t testing.TB, addr string, opts ...storage.Option) (storage.StorageServices, string) {
+func service(t testing.TB, addr string, opts ...storage.Option) (storage.IStorageService, string) {
 	t.Helper()
 	bucket := bucketName(t)
 	return storage.NewStorageService(driver, addr, "", accessKey, secretKey, bucket, region, false, nil, opts...), bucket
 }
 
 // running is a running service on its own bucket, stopped when t ends.
-func running(t testing.TB, opts ...storage.Option) (storage.StorageServices, string) {
+func running(t testing.TB, opts ...storage.Option) (storage.IStorageService, string) {
 	t.Helper()
 	requireServer(t)
 	s, bucket := service(t, endpoint, opts...)

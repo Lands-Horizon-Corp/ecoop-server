@@ -44,7 +44,7 @@ func TestIntegrationChaos_RateLimitIsSharedAcrossInstances(t *testing.T) {
 	ctx := ctxT(t)
 	a := newSMTP(t, serviceOpts{})
 	b := newSMTP(t, serviceOpts{})
-	for _, svc := range []smtp.SMTPServices{a, b} {
+	for _, svc := range []smtp.ISMTPService{a, b} {
 		if err := svc.Start(ctx); err != nil {
 			t.Fatal(err)
 		}
