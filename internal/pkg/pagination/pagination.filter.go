@@ -114,12 +114,12 @@ func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string, kind 
 		if f.Value == nil {
 			return nil, fmt.Errorf("%w: mode %q requires a non-nil list value", ErrInvalidFilter, f.Mode)
 		}
-		if k := reflect.ValueOf(f.Value).Kind(); k != reflect.Slice && k != reflect.Array {
+		list, isList := utils.AsList(f.Value)
+		if !isList {
 			return nil, fmt.Errorf("%w: mode %q requires a list value, got %T", ErrInvalidFilter, f.Mode, f.Value)
 		}
-		list := reflect.ValueOf(f.Value)
-		for i := range list.Len() {
-			if e := list.Index(i); e.Kind() == reflect.Interface && e.IsNil() {
+		for i, item := range list {
+			if item == nil {
 				return nil, fmt.Errorf("%w: mode %q does not accept null list items (item %d)", ErrInvalidFilter, f.Mode, i)
 			}
 		}
@@ -178,12 +178,12 @@ func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string, kind 
 	case ModeEndsWith:
 		return q.Where("? LIKE ?", col, "%"+utils.EscapeLike(fmt.Sprint(f.Value))), nil
 	case ModeInside:
-		if reflect.ValueOf(f.Value).Len() == 0 {
+		if list, _ := utils.AsList(f.Value); len(list) == 0 {
 			return q.Where("1 = 0"), nil // IN () matches nothing
 		}
 		return q.Where("? IN (?)", col, bun.List(f.Value)), nil
 	case ModeOutside:
-		if reflect.ValueOf(f.Value).Len() == 0 {
+		if list, _ := utils.AsList(f.Value); len(list) == 0 {
 			return q.Where("1 = 1"), nil // NOT IN () excludes nothing
 		}
 		return q.Where("? NOT IN (?)", col, bun.List(f.Value)), nil

@@ -103,3 +103,5 @@ ecoop-server
 
 # Railway IaC local tooling (only needed for editor type-checking / CLI)
 .railway/node_modules
+# make test-*-errors logs
+.test-logs/

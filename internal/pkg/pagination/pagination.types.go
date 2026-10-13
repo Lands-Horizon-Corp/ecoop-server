@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
 )
@@ -41,6 +42,11 @@ const (
 
 	SortOrderAsc  SortOrder = "asc"
 	SortOrderDesc SortOrder = "desc"
+
+	kindInstant     colKind = iota // unknown or timestamp: compared as instants
+	kindDate                       // date: a calendar day with no zone
+	kindTimestampTZ                // timestamptz
+	kindClock                      // time, timetz: a time of day with no date
 )
 
 var (
@@ -67,6 +73,7 @@ var (
 	ErrInvalidFilter      = errors.New("pagination: invalid filter")
 	ErrInvalidCursor      = errors.New("pagination: invalid cursor")
 	ErrRowLockUnsupported = errors.New("pagination: row locking is not supported with mixed-direction cursor pagination")
+	ErrNotDate            = utils.ErrNotDate
 )
 
 type (
@@ -74,6 +81,16 @@ type (
 	DataType  string
 	Logic     string
 	SortOrder string
+	colKind   int
+
+	clockValue struct {
+		lit string
+		off *int
+	}
+	DateValue struct {
+		t       time.Time
+		hasTime bool
+	}
 
 	RangeNumber struct {
 		From float64 `json:"from"`
