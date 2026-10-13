@@ -2,47 +2,13 @@ package cqrs
 
 import (
 	"context"
-	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
 )
 
-const (
-	ChangeTypeCreated ChangeType = iota + 1
-	ChangeTypeUpdated
-	ChangeTypeDeleted
-)
-
-func (t ChangeType) String() string {
-	switch t {
-	case ChangeTypeCreated:
-		return "created"
-	case ChangeTypeUpdated:
-		return "updated"
-	case ChangeTypeDeleted:
-		return "deleted"
-	}
-	return "unknown"
-}
-
 type (
-	ChangeType int
-
-	CQRSQueuePayload[TData any] struct {
-		EventID    string     `json:"event_id"`
-		ChangeType ChangeType `json:"change_type"`
-		Payload    TData      `json:"payload"`
-	}
-
-	ProcessedEvent struct {
-		bun.BaseModel `bun:"table:processed_events,alias:pe"`
-		EventID       string    `bun:"event_id,pk"`
-		Channel       string    `bun:"channel,notnull"`
-		CreatedAt     time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	}
-
 	ICQRSService[TData any, TResponse any, TRequest any, TID comparable] interface {
 		Run(ctx context.Context) error
 		Shutdown(ctx context.Context) error
