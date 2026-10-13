@@ -1,4 +1,4 @@
-package sql
+package utils
 
 import (
 	"context"
@@ -12,9 +12,114 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/schema"
 	"golang.org/x/text/unicode/norm"
 )
 
+var (
+	ErrNilTx       = errors.New("sql: transaction is nil or was never started")
+	ErrUnsafeText  = errors.New("sql: text contains a replacement, control or BiDi override character")
+	ErrInvalidText = errors.New("sql: text is not valid UTF-8 or contains a NUL byte")
+)
+
+type (
+	tenantKey struct{}
+	noLockKey struct{}
+
+	// TextPolicy decides how CleanText treats valid text. Invalid UTF-8 (including truncated and overlong
+	// sequences) and NUL bytes are always refused: Postgres cannot store them and bun inlines values into
+	// the SQL text, where a NUL cuts the statement short.
+	TextPolicy struct {
+		// Normalize rewrites strings to NFC, so "Müller" typed as u + U+0308 and as U+00FC is one value.
+		Normalize bool
+		// RejectUnsafe refuses U+FFFD (the trace of a lossy conversion), C0/C1 control characters other
+		// than tab, newline and carriage return, and the BiDi embedding, override and isolate characters
+		// (U+202A..U+202E, U+2066..U+2069). Other format characters, such as the zero-width joiner inside
+		// emoji sequences, stay allowed.
+		RejectUnsafe bool
+	}
+)
+
+func ResolvePreload(preload []string, defaultPreloads []string) []string {
+	if preload == nil {
+		preload = defaultPreloads
+	}
+	if len(preload) == 0 {
+		preload = defaultPreloads
+	}
+	if len(preload) == 1 && preload[0] == "" {
+		preload = []string{}
+	}
+	return preload
+}
+
+func ValidPreloads[TData any](db bun.IDB, preload []string) (valid, dropped []string) {
+	table := db.Dialect().Tables().Get(reflect.TypeFor[TData]())
+	for _, raw := range preload {
+		if raw == "" {
+			continue
+		}
+		resolved, ok := resolveRelationPath(table, raw)
+		if !ok {
+			dropped = append(dropped, raw)
+			continue
+		}
+		valid = append(valid, resolved)
+	}
+	return valid, dropped
+}
+
+func resolveRelationPath(table *schema.Table, raw string) (resolved string, ok bool) {
+	segments := strings.Split(raw, ".")
+	names := make([]string, 0, len(segments))
+	current := table
+	for _, seg := range segments {
+		if current == nil {
+			return "", false
+		}
+		name := ToPascalCase(seg)
+		if name == "" {
+			return "", false
+		}
+		rel, exists := current.Relations[name]
+		if !exists {
+			return "", false
+		}
+		names = append(names, name)
+		current = rel.JoinTable
+	}
+	return strings.Join(names, "."), true
+}
+
+func ApplyPreloadsMany[TData any](
+	ctx context.Context,
+	db bun.IDB,
+	data *[]TData,
+	defaultPreloads []string,
+	preload ...string,
+) (dropped []string, err error) {
+	resolved := ResolvePreload(preload, defaultPreloads)
+	if len(resolved) == 0 || len(*data) == 0 {
+		return nil, nil
+	}
+	valid, dropped := ValidPreloads[TData](db, resolved)
+	if len(valid) == 0 {
+		return dropped, nil
+	}
+	q := db.NewSelect().Model(data).WherePK()
+	for _, rel := range valid {
+		q = q.Relation(rel)
+	}
+	if err := q.Scan(ctx); err != nil {
+		return dropped, fmt.Errorf("loading preloads %v: %w", valid, err)
+	}
+	return dropped, nil
+}
+
+func RowLocksDisabled(ctx context.Context) bool {
+	off, _ := ctx.Value(noLockKey{}).(bool)
+	return off
+}
 func TenantFrom(ctx context.Context) (string, bool) {
 	id, ok := ctx.Value(tenantKey{}).(string)
 	return id, ok && id != ""
@@ -172,4 +277,5 @@ func cleanString(s string, p TextPolicy) (string, error) {
 		return norm.NFC.String(s), nil
 	}
 	return s, nil
+
 }

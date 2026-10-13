@@ -64,21 +64,6 @@ var (
 )
 
 type (
-	tenantKey struct{}
-
-	// TextPolicy decides how CleanText treats valid text. Invalid UTF-8 (including truncated and overlong
-	// sequences) and NUL bytes are always refused: Postgres cannot store them and bun inlines values into
-	// the SQL text, where a NUL cuts the statement short.
-	TextPolicy struct {
-		// Normalize rewrites strings to NFC, so "Müller" typed as u + U+0308 and as U+00FC is one value.
-		Normalize bool
-		// RejectUnsafe refuses U+FFFD (the trace of a lossy conversion), C0/C1 control characters other
-		// than tab, newline and carriage return, and the BiDi embedding, override and isolate characters
-		// (U+202A..U+202E, U+2066..U+2069). Other format characters, such as the zero-width joiner inside
-		// emoji sequences, stay allowed.
-		RejectUnsafe bool
-	}
-
 	ISQLService interface {
 		Start(ctx context.Context) error
 		Run(ctx context.Context) error

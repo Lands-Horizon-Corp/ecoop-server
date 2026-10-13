@@ -121,6 +121,11 @@ type (
 		PageSize       int     `json:"pageSize"`
 	}
 
+	cursorPayload struct {
+		Values   []string `json:"v"`
+		Null     []bool   `json:"n,omitempty"`
+		Backward bool     `json:"b,omitempty"`
+	}
 	IPaginationService[TData any, TID comparable] interface {
 		Paginate(ctx context.Context, pagination Pagination) (PaginationResult[TData], error)
 		PaginateFilter(ctx context.Context, filter StructuredFilter, pagination Pagination) (PaginationResult[TData], error)

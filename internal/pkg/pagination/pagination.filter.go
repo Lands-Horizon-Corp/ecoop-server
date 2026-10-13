@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
 )
@@ -68,7 +67,7 @@ func (c *PaginationService[TData, TID]) applyTerm(q *bun.SelectQuery, f Filter) 
 
 func applyFilterTerm(q *bun.SelectQuery, f Filter, columnDefaultID string) (*bun.SelectQuery, error) {
 	if f.Value != nil {
-		clean, err := sql.CleanText(reflect.ValueOf(f.Value), sql.TextPolicy{Normalize: true})
+		clean, err := utils.CleanText(reflect.ValueOf(f.Value), utils.TextPolicy{Normalize: true})
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidFilter, err)
 		}

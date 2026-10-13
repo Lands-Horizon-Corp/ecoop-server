@@ -86,3 +86,22 @@ func (c *PaginationService[TData, TID]) normalizeFilters(
 	}
 	return normalized
 }
+
+func (p *Pagination) Parse(ctx *app.RequestContext) error {
+	if err := ctx.BindAndValidate(p); err != nil {
+		return fmt.Errorf("invalid pagination parameters: %w", err)
+	}
+	filter, err := parseFilter(ctx)
+	if err != nil {
+		return err
+	}
+	p.Filter = filter
+	sortFields, err := parseSort(ctx)
+	if err != nil {
+		return err
+	}
+	if sortFields != nil {
+		p.Filter.SortFields = sortFields
+	}
+	return nil
+}
