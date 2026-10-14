@@ -28,7 +28,7 @@ TEST_FLAGS = $(RACE) $(VERBOSE) -count=1 -timeout $(TIMEOUT) \
 
 .DEFAULT_GOAL := help
 .PHONY: help build vet fmt fmt-check check \
-	test test-unit test-integration test-pagination test-sql test-all \
+	test test-unit test-integration test-pagination test-sql test-cqrs test-heavy test-all \
 	test-errors test-unit-errors test-pagination-errors report \
 	services-up services-down
 
@@ -70,6 +70,15 @@ test-pagination: ## pagination integration suite, -race -v
 
 test-sql: ## sql service integration suite, -race -v
 	$(GO) test -tags integration $(TEST_FLAGS) ./tests/packages/sql/...
+
+# The cqrs, sql and pagination suites hammer one shared Postgres. Their TestMain
+# takes a lock (tests/internal/suitelock) so they queue even under `go test ./...`;
+# -p 1 also keeps them from competing for CPU while they wait.
+test-heavy: ## cqrs + sql + pagination integration suites, one at a time
+	$(GO) test -tags integration -p 1 $(TEST_FLAGS) ./tests/packages/cqrs/... ./tests/packages/sql/... ./tests/packages/pagination/...
+
+test-cqrs: ## cqrs integration suite, -race -v
+	$(GO) test -tags integration $(TEST_FLAGS) ./tests/packages/cqrs/...
 
 # ---- failures only ---------------------------------------------------------
 # Same runs as above, but the full -v output goes to $(LOGDIR)/<name>.log and

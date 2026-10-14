@@ -24,6 +24,7 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	ecsql "github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
+	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/suitelock"
 )
 
 // The suite runs against the compose Postgres (docker compose up postgres),
@@ -63,10 +64,18 @@ type fixture struct {
 
 func TestMain(m *testing.M) {
 	code := 0
+	// The heavy suites share one Postgres: take turns with them.
+	release, lockErr := suitelock.Acquire("pagination tests", 2*time.Hour)
+	if lockErr != nil {
+		fmt.Fprintln(os.Stderr, "pagination tests:", lockErr)
+		os.Exit(1)
+	}
 	if err := startPostgres(); err != nil {
 		skipReason = "no Postgres: " + err.Error()
 		fmt.Fprintln(os.Stderr, "pagination tests:", skipReason)
-		os.Exit(m.Run())
+		code = m.Run()
+		release()
+		os.Exit(code)
 	}
 	var cleanup func()
 	var err error
@@ -87,6 +96,7 @@ func TestMain(m *testing.M) {
 		cleanup()
 	}
 	_ = admin.Close()
+	release()
 	os.Exit(code)
 }
 

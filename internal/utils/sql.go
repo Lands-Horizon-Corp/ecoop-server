@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/schema"
 	"golang.org/x/text/unicode/norm"
 )
@@ -159,6 +160,52 @@ func SetTenant(ctx context.Context, tx bun.IDB) error {
 	_, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', ?, true)`, id)
 	return err
 }
+
+// SetReplicator marks tx as the replicator, for the length of the transaction
+// only (set_config's third argument), so row-level security lets it write
+// every tenant's rows into the read model. A policy opts in with
+//
+//	current_setting('app.replicator', true) = 'on'
+//
+// It is a session setting, not a role, so it cannot outlive the transaction
+// and leak onto the next user of a pooled connection.
+func SetReplicator(ctx context.Context, tx bun.IDB) error {
+	if tx == nil {
+		return ErrNilTx
+	}
+	_, err := tx.ExecContext(ctx, `SELECT set_config('app.replicator', 'on', true)`)
+	return err
+}
+
+// BunFieldIndex is the index path (for reflect's FieldByIndex) of the field of
+// TData that bun maps to column, or nil when there is none or TData is not a
+// struct. It asks bun itself, so a column named by default (the snake_case of
+// the field name) is found as well as one named in a tag, and a field inside
+// an embedded struct has a path longer than one.
+func BunFieldIndex[TData any](column string) []int {
+	t := reflect.TypeFor[TData]()
+	if column == "" || t == nil || t.Kind() != reflect.Struct {
+		return nil
+	}
+	f := bunTables.Get(t).LookupField(column)
+	if f == nil || len(f.Index) == 0 {
+		return nil
+	}
+	return append([]int(nil), f.Index...)
+}
+
+// BunTable is bun's table layout of TData (its columns, primary keys and
+// schema), or nil when TData is not a struct.
+func BunTable[TData any]() *schema.Table {
+	t := reflect.TypeFor[TData]()
+	if t == nil || t.Kind() != reflect.Struct {
+		return nil
+	}
+	return bunTables.Get(t)
+}
+
+// bunTables resolves struct layouts the way the pg dialect does.
+var bunTables = schema.NewTables(pgdialect.New())
 
 func IsStaleSession(err error) bool {
 	if err == nil {

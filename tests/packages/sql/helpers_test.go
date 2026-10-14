@@ -29,6 +29,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	ecsql "github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
+	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/suitelock"
 )
 
 // The suite runs against the compose Postgres (docker compose up postgres),
@@ -55,6 +56,13 @@ var suiteCleanups []func()
 func TestMain(m *testing.M) { os.Exit(runMain(m)) }
 
 func runMain(m *testing.M) (code int) {
+	// The heavy suites share one Postgres: take turns with them.
+	release, lockErr := suitelock.Acquire("sql tests", 2*time.Hour)
+	if lockErr != nil {
+		fmt.Fprintln(os.Stderr, "sql tests:", lockErr)
+		return 1
+	}
+	defer release()
 	if err := startPostgres(); err != nil {
 		skipReason = "no Postgres: " + err.Error()
 		fmt.Fprintln(os.Stderr, "sql tests:", skipReason)

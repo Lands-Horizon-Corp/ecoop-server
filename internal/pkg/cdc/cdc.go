@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,12 +26,26 @@ type CDCService struct {
 	mu       sync.Mutex
 	producer *kgo.Client
 	subs     map[string]*subscription
+
+	// runCtx lives from Run to Stop (it keeps Run's values but not its
+	// cancellation, so a short startup context cannot kill the consumers).
+	// loops tracks every consumer goroutine so Stop leaves none behind.
+	runCtx    context.Context
+	cancelRun context.CancelFunc
+	loops     sync.WaitGroup
 }
 
 type subscription struct {
 	topic   string
 	handler Handler
+	batch   BatchHandler
+	opts    BatchOptions
 	client  *kgo.Client
+
+	// Batch subscriptions only: cancel ends the consumer loop, done closes
+	// when it has ended.
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 func NewCDCService(brokers []string, groupID, topicPrefix string) ICDCService {
@@ -72,6 +85,7 @@ func (c *CDCService) Run(ctx context.Context) error {
 		return errors.Join(ErrConnect, err)
 	}
 	c.producer = producer
+	c.runCtx, c.cancelRun = context.WithCancel(context.WithoutCancel(ctx))
 	c.gate.Open()
 	for _, s := range c.subs {
 		if err := c.consume(s); err != nil {
@@ -87,17 +101,69 @@ func (c *CDCService) Stop(ctx context.Context) error {
 	if c == nil || c.gate == nil {
 		return nil
 	}
+	// No new work from here on; what is running gets until ctx ends to finish.
+	// A batch handler that keeps failing stops retrying as soon as the gate is
+	// closed, so this cannot wait on it forever.
 	err := c.gate.Close(ctx)
+
+	// Order matters. A batch consumer that polls again after the clients start
+	// closing blocks rebalances once more, and leaving the group then waits on a
+	// rebalance that can never happen. So first end the run context (the loops
+	// stop polling), wait for the batch loops, and only then close the clients.
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.closeLocked()
+	if c.cancelRun != nil {
+		c.cancelRun()
+	}
+	var batchDone []chan struct{}
+	for _, s := range c.subs {
+		if s.done != nil {
+			batchDone = append(batchDone, s.done)
+		}
+	}
+	c.mu.Unlock()
+	for _, d := range batchDone {
+		select {
+		case <-d:
+		case <-ctx.Done():
+			if err == nil {
+				err = ctx.Err()
+			}
+		}
+	}
+
+	c.mu.Lock()
+	c.closeLocked() // also aborts whatever outlived ctx
+	c.mu.Unlock()
+	if werr := waitLoops(ctx, &c.loops); err == nil {
+		err = werr
+	}
 	return err
 }
 
+// waitLoops waits for every consumer goroutine, or returns ctx.Err().
+func waitLoops(ctx context.Context, wg *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (c *CDCService) closeLocked() {
+	if c.cancelRun != nil {
+		c.cancelRun()
+		c.cancelRun, c.runCtx = nil, nil
+	}
 	for _, s := range c.subs {
 		if s.client != nil {
-			s.client.Close()
+			// Close alone hangs on a client that polled and has rebalances blocked.
+			s.client.CloseAllowingRebalance()
 			s.client = nil
 		}
 	}
@@ -151,6 +217,9 @@ func (c *CDCService) group(topic string) string {
 }
 
 func (c *CDCService) consume(s *subscription) error {
+	if s.batch != nil {
+		return c.consumeBatch(s)
+	}
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(c.brokers...),
 		kgo.ConsumerGroup(c.group(s.topic)),
@@ -163,7 +232,7 @@ func (c *CDCService) consume(s *subscription) error {
 		return errors.Join(ErrConnect, err)
 	}
 	s.client = client
-	go c.loop(client, s.handler)
+	c.loops.Go(func() { c.loop(client, s.handler) })
 	return nil
 }
 
@@ -182,10 +251,10 @@ func (c *CDCService) loop(client *kgo.Client, handler Handler) {
 				stopped = true
 				return
 			}
-			if err := client.CommitRecords(context.Background(), r); err != nil {
-				stopped = true
-				return
-			}
+			// A failed commit (a rebalance, a broker blip) only means the record is
+			// delivered again later, which the contract allows. It must not end
+			// the loop: that would silently stop this topic for good.
+			_ = client.CommitRecords(context.Background(), r)
 		})
 		if stopped {
 			return
@@ -236,20 +305,7 @@ func (c *CDCService) deadLetter(r *kgo.Record, cause error) bool {
 	if producer == nil {
 		return false
 	}
-	dead := &kgo.Record{
-		Topic: r.Topic + c.dlqSuffix,
-		Key:   r.Key,
-		Value: r.Value,
-		Headers: append(append([]kgo.RecordHeader(nil), r.Headers...),
-			kgo.RecordHeader{Key: HeaderDLQTopic, Value: []byte(r.Topic)},
-			kgo.RecordHeader{Key: HeaderDLQPartition, Value: []byte(strconv.Itoa(int(r.Partition)))},
-			kgo.RecordHeader{Key: HeaderDLQOffset, Value: []byte(strconv.FormatInt(r.Offset, 10))},
-			kgo.RecordHeader{Key: HeaderDLQError, Value: []byte(cause.Error())},
-			kgo.RecordHeader{Key: HeaderDLQAttempts, Value: []byte(strconv.Itoa(c.attempts))},
-			kgo.RecordHeader{Key: HeaderDLQGroup, Value: []byte(c.group(r.Topic))},
-			kgo.RecordHeader{Key: HeaderDLQFailedAt, Value: []byte(time.Now().UTC().Format(time.RFC3339Nano))},
-		),
-	}
+	dead := c.dlqRecord(r.Topic, r.Partition, r.Offset, r.Key, r.Value, r.Headers, cause, c.attempts)
 	wait := c.backoff
 	for c.gate.IsOpen() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

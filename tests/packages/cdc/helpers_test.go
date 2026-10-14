@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cdc"
+	"github.com/Lands-Horizon-Corp/ecoop-server/tests/internal/suitelock"
 )
 
 // Tests run against the compose stack, configured from .env or the
@@ -37,6 +39,13 @@ var (
 var _ cdc.ICDCService = (*cdc.CDCService)(nil)
 
 func TestMain(m *testing.M) {
+	// The cdc suite writes to the shared Postgres and restarts Debezium through
+	// Docker, which starves the other heavy suites: take turns with them.
+	release, lockErr := suitelock.Acquire("cdc tests", 2*time.Hour)
+	if lockErr != nil {
+		fmt.Fprintln(os.Stderr, "cdc tests:", lockErr)
+		os.Exit(1)
+	}
 	if err := start(); err != nil {
 		skipReason = "no Kafka: " + err.Error()
 		fmt.Fprintln(os.Stderr, "cdc tests:", skipReason)
@@ -44,7 +53,9 @@ func TestMain(m *testing.M) {
 		debeziumSkip = "no Debezium: " + err.Error()
 		fmt.Fprintln(os.Stderr, "cdc tests:", debeziumSkip)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	release()
+	os.Exit(code)
 }
 
 func start() error {
@@ -83,7 +94,22 @@ func startDebezium() error {
 	if err := compose("up", "-d", "--wait", "postgres", "debezium"); err != nil {
 		return err
 	}
-	return compose("up", "debezium-setup") // idempotent: PUTs the connector config
+	// The realtime tests write to public.users; the stack does not ship that table.
+	if err := compose("exec", "-T", "postgres", "psql", "-v", "ON_ERROR_STOP=1",
+		"-U", cfg("POSTGRES_USER", "ecoop"), "-d", cfg("POSTGRES_DB", "ecoop"), "-c",
+		`CREATE TABLE IF NOT EXISTS users (id bigserial PRIMARY KEY, name text NOT NULL)`); err != nil {
+		return err
+	}
+	if err := compose("up", "debezium-setup"); err != nil { // idempotent: PUTs the connector config
+		return err
+	}
+	// A task that started before the table existed stays FAILED; restart it.
+	url := fmt.Sprintf("http://localhost:%s/connectors/%s/restart?includeTasks=true&onlyFailed=true",
+		cfg("CDC_PORT", "8083"), cfg("CDC_CONNECTOR_NAME", "ecoop-postgres"))
+	if resp, err := http.Post(url, "application/json", nil); err == nil {
+		resp.Body.Close()
+	}
+	return nil
 }
 
 func compose(args ...string) error {
@@ -227,7 +253,7 @@ func header(r *kgo.Record, key string) string {
 }
 
 // event is a Debezium value (no schema wrapper) for row id.
-func event(op string, id int, name string) []byte {
+func event(op cdc.ChangeType, id int, name string) []byte {
 	row := fmt.Sprintf(`{"id":%d,"name":%q}`, id, name)
 	before, after := "null", row
 	switch op {
@@ -243,7 +269,7 @@ func key(id int) []byte { return fmt.Appendf(nil, `{"id":%d}`, id) }
 
 type got struct {
 	Key   string
-	Op    string
+	Op    cdc.ChangeType
 	ID    int64
 	Name  string
 	After json.RawMessage

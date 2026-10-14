@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	ecsql "github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
 )
@@ -258,7 +259,13 @@ type ledgerHistory struct {
 func buildLedger(t *testing.T) ledgerHistory {
 	t.Helper()
 	e := newEnv(t)
-	ctx := ctxT(t)
+	// Eight of these builds run at once (one test builds two), each applying twenty
+	// releases with a planning pass per release. Under the race detector that takes
+	// well over the 2 minutes ctxT allows, and the failure looks like a database
+	// timeout at release 19 or 20. The build gets a budget of its own; what each
+	// test does afterwards still runs under ctxT.
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	t.Cleanup(cancel)
 	rows := map[string]int{}
 	h := ledgerHistory{env: e}
 	for i, r := range ledgerReleases {

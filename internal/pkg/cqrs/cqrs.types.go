@@ -3,11 +3,37 @@ package cqrs
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
+)
+
+const (
+	// CheckpointTable is the read-database table that records, per consumer
+	// group, topic and partition, how far the change stream has been applied.
+	CheckpointTable = "cqrs_checkpoints"
+
+	// RowStateTable is the read-database table that remembers, per row, the WAL
+	// position (LSN) of the last change applied to it, and whether that change was
+	// a delete. Only a service with OrderByLSN uses it.
+	RowStateTable = "cqrs_row_state"
+
+	// unavailableValue is what Debezium puts in place of an unchanged TOAST
+	// column it cannot read (see REPLICA IDENTITY FULL).
+	unavailableValue = "__debezium_unavailable_value"
+
+	defaultSchema       = "public"
+	defaultBatchSize    = 100
+	defaultApplyTimeout = 30 * time.Second
+	defaultRetryBackoff = 100 * time.Millisecond
+	defaultMaxBackoff   = 5 * time.Second
+	defaultHookWorkers  = 16
+	hookTimeout         = 10 * time.Second
+	deadLetterTimeout   = 10 * time.Second
+	upsertChunk         = 500
 )
 
 var (
@@ -21,12 +47,52 @@ var (
 	ErrInvalidText                 = utils.ErrInvalidText
 	ErrUnsafeText                  = utils.ErrUnsafeText
 	ErrNilTx                       = utils.ErrNilTx
+
+	ErrNotConstructed     = errors.New("cqrs: service is not set up; create it with NewCQRS")
+	ErrNilContext         = errors.New("cqrs: nil context")
+	ErrCDCNotInitialized  = errors.New("cqrs: cdc service is not initialized")
+	ErrModelNotStruct     = errors.New("cqrs: the model must be a struct")
+	ErrNoPrimaryKey       = errors.New("cqrs: no usable primary key")
+	ErrReplicaIdentity    = errors.New("cqrs: the write table must have REPLICA IDENTITY FULL")
+	ErrReadTableMissing   = errors.New("cqrs: the table, or some of its columns, does not exist in the read db")
+	ErrWriteTableMissing  = errors.New("cqrs: the table does not exist in the write db")
+	ErrMalformedChange    = errors.New("cqrs: malformed change event")
+	ErrUnavailableValue   = errors.New("cqrs: column value unavailable (an unchanged TOAST column; set REPLICA IDENTITY FULL)")
+	ErrStopped            = errors.New("cqrs: service is stopped")
+	ErrConnectionNotReady = errors.New("cqrs: database connection is not ready")
+	ErrUnsupportedColumn  = errors.New("cqrs: unsupported column type")
+	ErrOffsetRegression   = errors.New("cqrs: the topic's offsets went back behind the checkpoint (the topic was probably recreated); " +
+		"replication is paused so no change is skipped; delete this topic's rows from cqrs_checkpoints to resume from the start of the topic")
+	ErrBadBatch = errors.New("cqrs: malformed batch")
 )
+
+// Checkpoint records how far one partition of a topic has been applied to the
+// read database. It is written in the same transaction as the rows it covers,
+// so the rows and the position never disagree, whatever crashes or restarts.
+type Checkpoint struct {
+	bun.BaseModel `bun:"table:cqrs_checkpoints"`
+
+	Group        string     `bun:"consumer_group,pk"`
+	Topic        string     `bun:"topic,pk"`
+	Partition    int32      `bun:"partition,pk"`
+	NextOffset   int64      `bun:"next_offset,notnull"`
+	LastRecordAt *time.Time `bun:"last_record_at"`
+	UpdatedAt    time.Time  `bun:"updated_at,notnull"`
+}
 
 type (
 	ICQRSService[TData any, TResponse any, TRequest any, TID comparable] interface {
+		// Run checks that the write and read databases and the model's tables are
+		// ready, then starts replicating the model's Debezium topic into the read
+		// database. It returns once replication is running (it does not block);
+		// Stop ends it. Run is a no-op while already running. The CDC service
+		// itself is started separately (CDCService.Run), before or after.
 		Run(ctx context.Context) error
+		// Stop ends replication: the batch being applied finishes or rolls back
+		// whole, its change hooks are waited for, and ctx bounds the wait.
 		Stop(ctx context.Context) error
+		// Stats is the running totals of the replication.
+		Stats() Stats
 
 		StartTx(ctx context.Context) (bun.Tx, error)
 		EndTx(ctx context.Context, tx bun.Tx, err error) error

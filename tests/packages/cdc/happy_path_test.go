@@ -22,7 +22,7 @@ func TestHappy_OrderPerRowAndWrapper(t *testing.T) {
 	_ = p.Publish(ctxT(t), topic, key(1), event(cdc.OpUpdate, 1, "b"))
 	_ = p.Publish(ctxT(t), topic, key(1), []byte(fmt.Sprintf(`{"schema":{},"payload":%s}`, event(cdc.OpDelete, 1, "b"))))
 	got := in.wait(t, 3)
-	for i, op := range []string{cdc.OpCreate, cdc.OpUpdate, cdc.OpDelete} {
+	for i, op := range []cdc.ChangeType{cdc.OpCreate, cdc.OpUpdate, cdc.OpDelete} {
 		if got[i].Op != op {
 			t.Fatalf("change %d = %q, want %q", i, got[i].Op, op)
 		}
@@ -58,7 +58,7 @@ func TestHappy_Realtime(t *testing.T) {
 	psql(t, fmt.Sprintf(`INSERT INTO users(name) VALUES ('%[1]s'); UPDATE users SET name='%[1]s-2' WHERE name='%[1]s'; DELETE FROM users WHERE name='%[1]s-2'`, name))
 	var id int64
 	in.waitUntil(t, "create, update, delete", func(all []got) bool {
-		seen := map[string]bool{}
+		seen := map[cdc.ChangeType]bool{}
 		for _, m := range all {
 			switch {
 			case m.Op == cdc.OpCreate && m.Name == name:

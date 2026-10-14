@@ -1,4 +1,3 @@
-
 name: ecoop
 
 services:
@@ -24,7 +23,32 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      test: [ "CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\"" ]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # The CQRS read model: a second Postgres the app replicates into from the
+  # Debezium topics. It is not a CDC source, so it needs no logical WAL.
+  postgres-read:
+    image: postgres:18-alpine
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_READ_MAX_CONNECTIONS:-200}
+    environment:
+      POSTGRES_USER: ${POSTGRES_READ_USER:-ecoop}
+      POSTGRES_PASSWORD: ${POSTGRES_READ_PASSWORD:-ecoop}
+      POSTGRES_DB: ${POSTGRES_READ_DB:-ecoop_read}
+    ports:
+      - "${POSTGRES_READ_HOST:-127.0.0.1}:${POSTGRES_READ_PORT:-5433}:5432"
+    volumes:
+      - postgres-read-data:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\"" ]
       interval: 1s
       timeout: 3s
       retries: 30
@@ -34,7 +58,7 @@ services:
 
   valkey:
     image: valkey/valkey:8.1-alpine
-    command: ["sh", "-c", "exec valkey-server --requirepass \"$$CACHE_PASSWORD\""]
+    command: [ "sh", "-c", "exec valkey-server --requirepass \"$$CACHE_PASSWORD\"" ]
     environment:
       CACHE_PASSWORD: ${CACHE_PASSWORD:-ecoop}
     ports:
@@ -42,7 +66,7 @@ services:
     volumes:
       - valkey-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "valkey-cli -a \"$$CACHE_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      test: [ "CMD-SHELL", "valkey-cli -a \"$$CACHE_PASSWORD\" --no-auth-warning ping | grep -q PONG" ]
       interval: 1s
       timeout: 3s
       retries: 30
@@ -95,7 +119,7 @@ services:
     ports:
       - "${BROADCAST_HOST:-127.0.0.1}:${BROADCAST_PORT:-6001}:6001"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:6001/up || exit 1"]
+      test: [ "CMD-SHELL", "curl -fs http://localhost:6001/up || exit 1" ]
       interval: 1s
       timeout: 3s
       retries: 30
@@ -112,7 +136,7 @@ services:
     environment:
       API_PORT: "6767"
       API_BEARER_TOKEN: ${PDF_ENGINE_API_BEARER_TOKEN:-change-me}
-      STORAGE_URL: http://storage:9000 
+      STORAGE_URL: http://storage:9000
       STORAGE_BUCKET: ${PDF_BUCKET:-pdfs}
       STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-ecoop}
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-ecoop-secret}
@@ -121,14 +145,14 @@ services:
     ports:
       - "${PDF_ENGINE_API_HOST:-127.0.0.1}:${PDF_ENGINE_API_PORT:-6767}:6767"
     healthcheck:
-      test: ["CMD", "pdf-engine", "healthcheck"] 
+      test: [ "CMD", "pdf-engine", "healthcheck" ]
       interval: 1s
       timeout: 3s
       retries: 30
     restart: unless-stopped
     networks:
       - app-network
-      
+
   pdf-storage-setup:
     image: amazon/aws-cli:${PDF_SETUP_IMAGE_TAG:-latest}
     depends_on:
@@ -168,7 +192,7 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1" ]
       interval: 2s
       timeout: 10s
       retries: 60
@@ -200,7 +224,7 @@ services:
     ports:
       - "${CDC_HOST:-127.0.0.1}:${CDC_PORT:-8083}:8083"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:8083/connectors >/dev/null"]
+      test: [ "CMD-SHELL", "curl -fs http://localhost:8083/connectors >/dev/null" ]
       interval: 3s
       timeout: 5s
       retries: 60
@@ -228,10 +252,11 @@ services:
       PUBLICATION_NAME: ${CDC_PUBLICATION_NAME:-ecoop_debezium}
       SNAPSHOT_MODE: ${CDC_SNAPSHOT_MODE:-initial}
       TOPIC_REPLICATION_FACTOR: ${CDC_REPLICATION_FACTOR:-1}
-      TOPIC_PARTITIONS: ${CDC_TOPIC_PARTITIONS:-1}
+      TOPIC_PARTITIONS: ${CDC_TOPIC_PARTITIONS:-3}
+      REPLICA_IDENTITY_AUTOSET: ${CDC_REPLICA_IDENTITY_AUTOSET:-.*:FULL}
     volumes:
       - ./docker/debezium/register.sh:/register.sh:ro
-    entrypoint: ["sh", "/register.sh"]
+    entrypoint: [ "sh", "/register.sh" ]
     networks:
       - app-network
 
@@ -251,4 +276,5 @@ volumes:
   kafka-data:
   storage-data:
   postgres-data:
+  postgres-read-data:
   valkey-data:

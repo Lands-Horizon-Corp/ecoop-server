@@ -14,7 +14,7 @@ import (
 )
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) writeDB() (*bun.DB, error) {
-	if c.WriteSQLService == nil {
+	if utils.IsNil(c.WriteSQLService) {
 		return nil, ErrWriteDBNotInitialized
 	}
 	db := c.WriteSQLService.Client()
