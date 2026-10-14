@@ -56,11 +56,11 @@ func (s *CQRSService[TData, TResponse, TRequest, TID]) FindOneWithTxFormat(ctx c
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) Count(ctx context.Context, filter pagination.StructuredFilter) (int64, error) {
-	panic("not implemented")
+	return s.PaginationService.Count(ctx, filter)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CountWithTx(ctx context.Context, tx *bun.Tx, filter pagination.StructuredFilter) (int64, error) {
-	panic("not implemented")
+	return s.PaginationService.CountWithTx(ctx, tx, filter)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) Exists(ctx context.Context, filter pagination.StructuredFilter) (bool, error) {

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"net/url"
+	"reflect"
 	"strings"
 )
 
@@ -55,4 +56,33 @@ func RequestHost(origin, referer, host string) string {
 		return u.Hostname()
 	}
 	return ""
+}
+
+func TextFieldIndexes[TData any]() []int {
+	t := reflect.TypeFor[TData]()
+	if t == nil {
+		return nil
+	}
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	var out []int
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+
+		ft := f.Type
+		if ft.Kind() == reflect.Pointer || ft.Kind() == reflect.Slice {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.String || ft.Kind() == reflect.Map {
+			out = append(out, i)
+		}
+	}
+	return out
 }

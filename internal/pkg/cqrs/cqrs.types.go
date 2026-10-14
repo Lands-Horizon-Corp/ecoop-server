@@ -2,10 +2,25 @@ package cqrs
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
+)
+
+var (
+	ErrFromRequestNotSet           = errors.New("cqrs: FromRequest must be set to use *WithValidation methods")
+	ErrMessageBrokerNotInitialized = errors.New("cqrs: message broker service is not initialized")
+	ErrReadDBNotInitialized        = errors.New("cqrs: read db is not initialized")
+	ErrWriteDBNotInitialized       = errors.New("cqrs: write db is not initialized")
+	ErrWriteDBUnreachable          = errors.New("cqrs: write db is not reachable")
+	ErrReadDBUnreachable           = errors.New("cqrs: read db is not reachable")
+	ErrUnknownField                = errors.New("cqrs: unknown field")
+	ErrInvalidText                 = utils.ErrInvalidText
+	ErrUnsafeText                  = utils.ErrUnsafeText
+	ErrNilTx                       = utils.ErrNilTx
 )
 
 type (

@@ -15,9 +15,21 @@ func (s *CQRSService[TData, TResponse, TRequest, TID]) OnDeleted(ctx context.Con
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) ToModel(data *TData) *TResponse {
-	panic("not implemented")
+	if data == nil {
+		return nil
+	}
+	return s.ToResource(data)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) ToModels(data []*TData) []*TResponse {
-	panic("not implemented")
+	if data == nil {
+		return []*TResponse{}
+	}
+	out := make([]*TResponse, 0, len(data))
+	for _, item := range data {
+		if m := s.ToModel(item); m != nil {
+			out = append(out, m)
+		}
+	}
+	return out
 }

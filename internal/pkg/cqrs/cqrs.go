@@ -44,6 +44,8 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 
 	stringSlicePool *utils.BufferPool[string]
 	stringSetPool   *utils.MapPool[string, bool]
+
+	textFields []int
 }
 
 func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
@@ -103,8 +105,6 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		WriteSQLService:   c.WriteSQLService,
 		CDCService:        c.CDCService,
 		Validator:         c.Validator,
-		stringSlicePool:   utils.NewBufferPool[string](),
-		stringSetPool:     utils.NewMapPool[string, bool](),
 
 		BatchSize:     c.BatchSize,
 		FlushInterval: c.FlushInterval,
@@ -115,5 +115,9 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		RetryBackoff:      c.RetryBackoff,
 		DLQTopic:          c.DLQTopic,
 		PaginationService: c.PaginationService,
+
+		textFields:      utils.TextFieldIndexes[TData](),
+		stringSlicePool: utils.NewBufferPool[string](),
+		stringSetPool:   utils.NewMapPool[string, bool](),
 	}
 }
