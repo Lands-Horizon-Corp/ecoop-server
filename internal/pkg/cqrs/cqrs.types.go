@@ -26,7 +26,7 @@ var (
 type (
 	ICQRSService[TData any, TResponse any, TRequest any, TID comparable] interface {
 		Run(ctx context.Context) error
-		Shutdown(ctx context.Context) error
+		Stop(ctx context.Context) error
 
 		StartTx(ctx context.Context) (bun.Tx, error)
 		EndTx(ctx context.Context, tx bun.Tx, err error) error

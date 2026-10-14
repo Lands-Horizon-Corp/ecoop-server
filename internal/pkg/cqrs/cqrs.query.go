@@ -9,25 +9,55 @@ import (
 )
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) Paginate(ctx context.Context, page pagination.Pagination) (pagination.PaginationResult[TData], error) {
-	panic("not implemented")
+	return s.PaginationService.Paginate(ctx, page)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) PaginateFormat(ctx context.Context, page pagination.Pagination) (pagination.PaginationResult[TResponse], error) {
-	panic("not implemented")
+	paginationResult, err := s.PaginationService.Paginate(ctx, page)
+	if err != nil {
+		return pagination.PaginationResult[TResponse]{}, err
+	}
+	return pagination.PaginationResult[TResponse]{
+		Data:           s.ToModels(paginationResult.Data),
+		CurrentCursor:  paginationResult.CurrentCursor,
+		NextCursor:     paginationResult.NextCursor,
+		PreviousCursor: paginationResult.PreviousCursor,
+		PageSize:       paginationResult.PageSize,
+	}, nil
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) PaginateFilter(ctx context.Context, filter pagination.StructuredFilter, page pagination.Pagination) (pagination.PaginationResult[TData], error) {
-	panic("not implemented")
+	return s.PaginationService.PaginateFilter(ctx, filter, page)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) PaginateFilterFormat(ctx context.Context, filter pagination.StructuredFilter, page pagination.Pagination) (pagination.PaginationResult[TResponse], error) {
-	panic("not implemented")
+	paginationResult, err := s.PaginationService.PaginateFilter(ctx, filter, page)
+	if err != nil {
+		return pagination.PaginationResult[TResponse]{}, err
+	}
+	return pagination.PaginationResult[TResponse]{
+		Data:           s.ToModels(paginationResult.Data),
+		CurrentCursor:  paginationResult.CurrentCursor,
+		NextCursor:     paginationResult.NextCursor,
+		PreviousCursor: paginationResult.PreviousCursor,
+		PageSize:       paginationResult.PageSize,
+	}, nil
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) PaginateWithHertz(ctx context.Context, tx *bun.Tx, filter pagination.StructuredFilter, reqCtx *app.RequestContext) (pagination.PaginationResult[TData], error) {
-	panic("not implemented")
+	return s.PaginationService.PaginateWithHertz(ctx, tx, filter, reqCtx)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) PaginateWithHertzFormat(ctx context.Context, tx *bun.Tx, filter pagination.StructuredFilter, reqCtx *app.RequestContext) (pagination.PaginationResult[TResponse], error) {
-	panic("not implemented")
+	paginationResult, err := s.PaginationService.PaginateWithHertz(ctx, tx, filter, reqCtx)
+	if err != nil {
+		return pagination.PaginationResult[TResponse]{}, err
+	}
+	return pagination.PaginationResult[TResponse]{
+		Data:           s.ToModels(paginationResult.Data),
+		CurrentCursor:  paginationResult.CurrentCursor,
+		NextCursor:     paginationResult.NextCursor,
+		PreviousCursor: paginationResult.PreviousCursor,
+		PageSize:       paginationResult.PageSize,
+	}, nil
 }

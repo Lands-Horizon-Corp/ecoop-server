@@ -6,14 +6,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (s *CQRSService[TData, TResponse, TRequest, TID]) Run(ctx context.Context) error {
-	panic("not implemented")
-}
-
-func (s *CQRSService[TData, TResponse, TRequest, TID]) Shutdown(ctx context.Context) error {
-	panic("not implemented")
-}
-
 func (s *CQRSService[TData, TResponse, TRequest, TID]) StartTx(ctx context.Context) (bun.Tx, error) {
 	panic("not implemented")
 }

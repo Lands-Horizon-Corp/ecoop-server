@@ -92,37 +92,82 @@ func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithTx(ctx cont
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithTxFormat(ctx context.Context, tx bun.Tx, data []TData, preload ...string) ([]*TResponse, error) {
-	panic("not implemented")
+	result, err := s.CreateManyWithTx(ctx, tx, data, preload...)
+	if err != nil {
+		return nil, err
+	}
+	if s.ToResource == nil {
+		return nil, nil
+	}
+	return s.ToModels(result), nil
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateWithValidation(ctx context.Context, request TRequest, preload ...string) (*TData, error) {
-	panic("not implemented")
+	data, err := s.dataFromRequest(ctx, request, 0)
+	if err != nil {
+		return nil, err
+	}
+	return s.insertOne(ctx, s.WriteSQLService.Client(), data, preload)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateWithValidationFormat(ctx context.Context, request TRequest, preload ...string) (*TResponse, error) {
-	panic("not implemented")
+	result, err := s.CreateWithValidation(ctx, request, preload...)
+	if err != nil {
+		return nil, err
+	}
+	return s.ToModel(result), nil
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithValidation(ctx context.Context, requests []TRequest, preload ...string) ([]*TData, error) {
-	panic("not implemented")
+	if len(requests) == 0 {
+		return []*TData{}, nil
+	}
+	data, err := s.dataFromRequests(ctx, requests)
+	if err != nil {
+		return nil, err
+	}
+	return s.insertMany(ctx, s.WriteSQLService.Client(), data, preload)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithValidationFormat(ctx context.Context, requests []TRequest, preload ...string) ([]*TResponse, error) {
-	panic("not implemented")
+	result, err := s.CreateManyWithValidation(ctx, requests, preload...)
+	if err != nil {
+		return nil, err
+	}
+	return s.ToModels(result), nil
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateWithValidationTx(ctx context.Context, tx bun.Tx, request TRequest, preload ...string) (*TData, error) {
-	panic("not implemented")
+	data, err := s.dataFromRequest(ctx, request, 0)
+	if err != nil {
+		return nil, err
+	}
+	return s.insertOne(ctx, tx, data, preload)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateWithValidationTxFormat(ctx context.Context, tx bun.Tx, request TRequest, preload ...string) (*TResponse, error) {
-	panic("not implemented")
+	result, err := s.CreateWithValidationTx(ctx, tx, request, preload...)
+	if err != nil {
+		return nil, err
+	}
+	return s.ToModel(result), nil
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithValidationTx(ctx context.Context, tx bun.Tx, requests []TRequest, preload ...string) ([]*TData, error) {
-	panic("not implemented")
+	if len(requests) == 0 {
+		return []*TData{}, nil
+	}
+	data, err := s.dataFromRequests(ctx, requests)
+	if err != nil {
+		return nil, err
+	}
+	return s.insertMany(ctx, tx, data, preload)
 }
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) CreateManyWithValidationTxFormat(ctx context.Context, tx bun.Tx, requests []TRequest, preload ...string) ([]*TResponse, error) {
-	panic("not implemented")
+	result, err := s.CreateManyWithValidationTx(ctx, tx, requests, preload...)
+	if err != nil {
+		return nil, err
+	}
+	return s.ToModels(result), nil
 }

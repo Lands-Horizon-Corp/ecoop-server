@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
 )
@@ -233,4 +234,10 @@ func (s *CQRSService[TData, TResponse, TRequest, TID]) dataFromRequests(
 		out[i] = d
 	}
 	return out, nil
+}
+
+func (s *CQRSService[TData, TResponse, TRequest, TID]) idFilter(id TID) pagination.StructuredFilter {
+	return pagination.StructuredFilter{
+		Filters: []pagination.Filter{{Field: s.ColumnDefaultID, Mode: pagination.ModeEqual, Value: id}},
+	}
 }

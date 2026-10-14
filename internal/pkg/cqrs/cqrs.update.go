@@ -28,9 +28,6 @@ func (s *CQRSService[TData, TResponse, TRequest, TID]) UpdateByIDFormat(ctx cont
 	if err != nil {
 		return nil, err
 	}
-	if s.ToResource == nil {
-		return nil, nil
-	}
 	return s.ToModel(result), nil
 }
 
@@ -48,9 +45,7 @@ func (s *CQRSService[TData, TResponse, TRequest, TID]) UpdateByIDWithTxFormat(ct
 	if err != nil {
 		return nil, err
 	}
-	if s.ToResource == nil {
-		return nil, nil
-	}
+
 	return s.ToModel(result), nil
 }
 
@@ -80,9 +75,6 @@ func (s *CQRSService[TData, TResponse, TRequest, TID]) UpdateManyFormat(ctx cont
 	if err != nil {
 		return nil, err
 	}
-	if s.ToResource == nil {
-		return nil, nil
-	}
 	responses := make([]*TResponse, 0, len(result))
 	for _, d := range result {
 		if res := s.ToModel(d); res != nil {
@@ -111,9 +103,6 @@ func (s *CQRSService[TData, TResponse, TRequest, TID]) UpdateManyWithTxFormat(ct
 	result, err := s.UpdateManyWithTx(ctx, tx, data, preload...)
 	if err != nil {
 		return nil, err
-	}
-	if s.ToResource == nil {
-		return nil, nil
 	}
 	responses := make([]*TResponse, 0, len(result))
 	for _, d := range result {
