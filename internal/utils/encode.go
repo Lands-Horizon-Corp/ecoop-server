@@ -11,7 +11,10 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-var ErrNilValue = errors.New("value is nil")
+var (
+	ErrNilValue = errors.New("value is nil")
+	ErrInvalid  = errors.New("invalid value")
+)
 
 func Encode(value any) (string, error) {
 	switch v := value.(type) {
@@ -68,4 +71,25 @@ func EncodeQueryParam[T any](v T) (string, error) {
 		return "", fmt.Errorf("JSON marshalling failed: %w", err)
 	}
 	return url.QueryEscape(base64.StdEncoding.EncodeToString(raw)), nil
+}
+
+func Decode[T any](value []byte) (*T, error) {
+	if len(value) == 0 {
+		return nil, nil
+	}
+	var wrapped struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(value, &wrapped); err != nil {
+		return nil, errors.Join(ErrInvalid, err)
+	}
+	targetBytes := value
+	if len(wrapped.Payload) > 0 {
+		targetBytes = wrapped.Payload
+	}
+	var result T
+	if err := json.Unmarshal(targetBytes, &result); err != nil {
+		return nil, errors.Join(ErrInvalid, err)
+	}
+	return &result, nil
 }

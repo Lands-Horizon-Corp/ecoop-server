@@ -24,27 +24,17 @@ type (
 		ToModels(data []*TData) []*TResponse
 
 		Create(ctx context.Context, data TData, preload ...string) (*TData, error)
-		CreateFormat(ctx context.Context, data TData, preload ...string) (*TResponse, error)
 		CreateMany(ctx context.Context, data []TData, preload ...string) ([]*TData, error)
-		CreateManyFormat(ctx context.Context, data []TData, preload ...string) ([]*TResponse, error)
 		CreateWithTx(ctx context.Context, tx bun.Tx, data TData, preload ...string) (*TData, error)
-		CreateWithTxFormat(ctx context.Context, tx bun.Tx, data TData, preload ...string) (*TResponse, error)
 		CreateManyWithTx(ctx context.Context, tx bun.Tx, data []TData, preload ...string) ([]*TData, error)
-		CreateManyWithTxFormat(ctx context.Context, tx bun.Tx, data []TData, preload ...string) ([]*TResponse, error)
 
 		CreateWithValidation(ctx context.Context, request TRequest, preload ...string) (*TData, error)
-		CreateWithValidationFormat(ctx context.Context, request TRequest, preload ...string) (*TResponse, error)
 		CreateManyWithValidation(ctx context.Context, requests []TRequest, preload ...string) ([]*TData, error)
-		CreateManyWithValidationFormat(ctx context.Context, requests []TRequest, preload ...string) ([]*TResponse, error)
 		CreateWithValidationTx(ctx context.Context, tx bun.Tx, request TRequest, preload ...string) (*TData, error)
-		CreateWithValidationTxFormat(ctx context.Context, tx bun.Tx, request TRequest, preload ...string) (*TResponse, error)
 		CreateManyWithValidationTx(ctx context.Context, tx bun.Tx, requests []TRequest, preload ...string) ([]*TData, error)
-		CreateManyWithValidationTxFormat(ctx context.Context, tx bun.Tx, requests []TRequest, preload ...string) ([]*TResponse, error)
 
 		UpdateByID(ctx context.Context, id TID, data TData, preload ...string) (*TData, error)
-		UpdateByIDFormat(ctx context.Context, id TID, data TData, preload ...string) (*TResponse, error)
 		UpdateByIDWithTx(ctx context.Context, tx bun.Tx, id TID, data TData, preload ...string) (*TData, error)
-		UpdateByIDWithTxFormat(ctx context.Context, tx bun.Tx, id TID, data TData, preload ...string) (*TResponse, error)
 		UpdateMany(ctx context.Context, data []TData, preload ...string) ([]*TData, error)
 		UpdateManyFormat(ctx context.Context, data []TData, preload ...string) ([]*TResponse, error)
 		UpdateManyWithTx(ctx context.Context, tx bun.Tx, data []TData, preload ...string) ([]*TData, error)

@@ -14,9 +14,6 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
-// CDCService reads Debezium change events from Kafka. It owns everything
-// between Kafka and the handler: connection, decoding, retries, the
-// dead-letter topic and offset commits.
 type CDCService struct {
 	brokers []string
 	groupID string
@@ -28,20 +25,16 @@ type CDCService struct {
 	backoff   time.Duration
 
 	mu       sync.Mutex
-	producer *kgo.Client // writes dead letters
+	producer *kgo.Client
 	subs     map[string]*subscription
 }
 
 type subscription struct {
 	topic   string
 	handler Handler
-	client  *kgo.Client // nil while not running
+	client  *kgo.Client
 }
 
-// NewCDCService creates the service. brokers are Kafka's addresses,
-// groupID prefixes each topic's consumer group, and topicPrefix is the
-// Debezium connector's topic.prefix (empty means "ecoop"). Run reports
-// missing addresses; Subscribe a missing group.
 func NewCDCService(brokers []string, groupID, topicPrefix string) ICDCService {
 	if strings.TrimSpace(topicPrefix) == "" {
 		topicPrefix = defaultTopicPrefix
@@ -78,8 +71,6 @@ func (c *CDCService) Run(ctx context.Context) error {
 		producer.Close()
 		return errors.Join(ErrConnect, err)
 	}
-	// Open before consuming: a backlog is handled the moment a consumer
-	// starts, and a closed gate would end its loop.
 	c.producer = producer
 	c.gate.Open()
 	for _, s := range c.subs {
@@ -96,14 +87,13 @@ func (c *CDCService) Stop(ctx context.Context) error {
 	if c == nil || c.gate == nil {
 		return nil
 	}
-	err := c.gate.Close(ctx) // no new changes; running handlers finish
+	err := c.gate.Close(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.closeLocked()
 	return err
 }
 
-// closeLocked disconnects every client; the caller holds mu.
 func (c *CDCService) closeLocked() {
 	for _, s := range c.subs {
 		if s.client != nil {
@@ -147,7 +137,7 @@ func (c *CDCService) Subscribe(ctx context.Context, topic string, handler Handle
 		return ErrDuplicateSubscription
 	}
 	s := &subscription{topic: topic, handler: handler}
-	if c.producer != nil { // running: start now
+	if c.producer != nil {
 		if err := c.consume(s); err != nil {
 			return err
 		}
@@ -156,14 +146,10 @@ func (c *CDCService) Subscribe(ctx context.Context, topic string, handler Handle
 	return nil
 }
 
-// group is the consumer group of topic: one per topic, so a topic's offsets
-// move independently, while every instance consuming it shares them.
 func (c *CDCService) group(topic string) string {
 	return c.groupID + "." + topic
 }
 
-// consume starts s's consumer; the caller holds mu. A new group starts from
-// the topic's beginning, so nothing published before it joined is missed.
 func (c *CDCService) consume(s *subscription) error {
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(c.brokers...),
@@ -181,9 +167,6 @@ func (c *CDCService) consume(s *subscription) error {
 	return nil
 }
 
-// loop handles each record in order and commits it once handled or parked.
-// When the service stops mid-batch the rest stays uncommitted, to be
-// delivered again.
 func (c *CDCService) loop(client *kgo.Client, handler Handler) {
 	for {
 		fetches := client.PollFetches(context.Background())
@@ -199,8 +182,10 @@ func (c *CDCService) loop(client *kgo.Client, handler Handler) {
 				stopped = true
 				return
 			}
-			// One commit per record: a crash replays at most this one.
-			_ = client.CommitRecords(context.Background(), r)
+			if err := client.CommitRecords(context.Background(), r); err != nil {
+				stopped = true
+				return
+			}
 		})
 		if stopped {
 			return
@@ -208,10 +193,6 @@ func (c *CDCService) loop(client *kgo.Client, handler Handler) {
 	}
 }
 
-// handle decodes r and runs handler, retrying with backoff, then parks r on
-// its dead-letter topic if it never succeeds. It reports false when the
-// service is stopping and r is neither handled nor parked, so it is not
-// committed.
 func (c *CDCService) handle(handler Handler, r *kgo.Record) bool {
 	done, ok := c.gate.Enter()
 	if !ok {
@@ -232,27 +213,22 @@ func (c *CDCService) handle(handler Handler, r *kgo.Record) bool {
 	return c.deadLetter(r, err)
 }
 
-// apply decodes r and calls handler, turning a panic into an error so one
-// bad change cannot crash the consumer. A tombstone is skipped.
 func apply(handler Handler, r *kgo.Record) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = errors.New("cdc: handler panicked")
 		}
 	}()
-	event, err := Decode(r.Value)
+	event, err := utils.Decode[ChangeEvent](r.Value)
 	if err != nil {
 		return err
 	}
-	if event == nil { // tombstone
+	if event == nil {
 		return nil
 	}
 	return handler(context.Background(), json.RawMessage(r.Key), *event)
 }
 
-// deadLetter publishes r to <topic><suffix> and waits until Kafka has it.
-// While the DLQ is unreachable it keeps trying rather than dropping r; it
-// gives up (false, r stays uncommitted) only when the service stops.
 func (c *CDCService) deadLetter(r *kgo.Record, cause error) bool {
 	c.mu.Lock()
 	producer := c.producer
@@ -286,31 +262,4 @@ func (c *CDCService) deadLetter(r *kgo.Record, cause error) bool {
 		wait = min(wait*2, maxDLQBackoff)
 	}
 	return false
-}
-
-// Decode parses a Debezium JSON value, with or without the
-// {"schema":…,"payload":…} wrapper. An empty value is the tombstone sent
-// after a delete: it returns (nil, nil). Anything else that is not a change
-// event returns ErrNotChangeEvent.
-func Decode(value []byte) (*ChangeEvent, error) {
-	if len(value) == 0 {
-		return nil, nil
-	}
-	var wrapped struct {
-		Payload json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(value, &wrapped); err != nil {
-		return nil, errors.Join(ErrNotChangeEvent, err)
-	}
-	if len(wrapped.Payload) > 0 {
-		value = wrapped.Payload
-	}
-	var event ChangeEvent
-	if err := json.Unmarshal(value, &event); err != nil {
-		return nil, errors.Join(ErrNotChangeEvent, err)
-	}
-	if event.Op == "" {
-		return nil, ErrNotChangeEvent
-	}
-	return &event, nil
 }
