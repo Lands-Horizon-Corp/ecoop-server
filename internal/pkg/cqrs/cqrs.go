@@ -46,12 +46,13 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 
 	stringSlicePool *utils.BufferPool[string]
 	stringSetPool   *utils.MapPool[string, bool]
+	gate            *utils.Gate
 
 	textFields []int
 }
 
 func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
-	c CQRSService[TData, TResponse, TRequest, TID],
+	c CQRSService[TData, TResponse, TRequest, TID], inflight *utils.Inflight,
 ) ICQRSService[TData, TResponse, TRequest, TID] {
 	if c.WriteSQLService == nil {
 		panic("WriteSQLService must be initialized")
