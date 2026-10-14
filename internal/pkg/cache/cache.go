@@ -35,7 +35,6 @@ func NewCacheService(addresses []string, password string, inflight *utils.Inflig
 	}
 }
 
-// Run connects to Valkey. Calling it while already running does nothing.
 func (c *CacheService) Run(ctx context.Context) error {
 	if len(c.addresses) == 0 {
 		return ErrNoAddresses
@@ -57,9 +56,6 @@ func (c *CacheService) Run(ctx context.Context) error {
 	return nil
 }
 
-// Stop refuses new operations, waits for in-flight ones, then closes the
-// connection. If ctx ends first it returns an error and closes in the
-// background.
 func (c *CacheService) Stop(ctx context.Context) error {
 	c.mu.Lock()
 	client := c.client
@@ -76,8 +72,6 @@ func (c *CacheService) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Config returns the settings the cache was created with, for services that
-// open their own connection to the same Valkey.
 func (c *CacheService) Config() Config {
 	return Config{Addresses: slices.Clone(c.addresses), Password: c.password}
 }
@@ -174,9 +168,6 @@ func (c *CacheService) Exists(ctx context.Context, key string) (bool, error) {
 	return n > 0, err
 }
 
-// Delete removes key and reports whether it existed. Only one of several
-// concurrent Deletes of the same key gets true, which makes it usable to
-// consume something exactly once.
 func (c *CacheService) Delete(ctx context.Context, key string) (bool, error) {
 	client, done, err := c.running()
 	if err != nil {

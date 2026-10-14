@@ -57,6 +57,5 @@ type ICacheService interface {
 	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
 	Expire(ctx context.Context, key string, ttl time.Duration) (bool, error)
 
-	// Config returns the settings the cache was created with.
 	Config() Config
 }
