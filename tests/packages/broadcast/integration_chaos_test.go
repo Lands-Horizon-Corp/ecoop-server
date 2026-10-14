@@ -27,7 +27,7 @@ func TestIntegrationChaos_ManyPublishersManySubscribers(t *testing.T) {
 		subs[i] = connect(t)
 		subs[i].subscribe(t, c)
 	}
-	instances := make([]broadcast.IBroadcasterService, 4)
+	instances := make([]broadcast.IBroadcastService, 4)
 	for i := range instances {
 		instances[i] = started(t)
 	}

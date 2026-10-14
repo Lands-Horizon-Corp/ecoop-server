@@ -39,7 +39,7 @@ var (
 	channelSeq                           atomic.Int64
 )
 
-var _ broadcast.IBroadcasterService = (*broadcast.BroadcasterService)(nil)
+var _ broadcast.IBroadcastService = (*broadcast.BroadcasterService)(nil)
 
 func TestMain(m *testing.M) {
 	if err := startSockudo(); err != nil {
@@ -126,7 +126,7 @@ func channel(prefix ...string) string {
 }
 
 // service builds (not started) a service reaching Sockudo at h:p.
-func service(h, p string, payloadKB ...int) broadcast.IBroadcasterService {
+func service(h, p string, payloadKB ...int) broadcast.IBroadcastService {
 	kb := maxPayloadKB
 	if len(payloadKB) > 0 {
 		kb = payloadKB[0]
@@ -135,7 +135,7 @@ func service(h, p string, payloadKB ...int) broadcast.IBroadcasterService {
 }
 
 // started is a started service, stopped when t ends.
-func started(t testing.TB, payloadKB ...int) broadcast.IBroadcasterService {
+func started(t testing.TB, payloadKB ...int) broadcast.IBroadcastService {
 	t.Helper()
 	requireServer(t)
 	b := service(host, port, payloadKB...)

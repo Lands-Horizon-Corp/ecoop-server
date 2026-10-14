@@ -13,7 +13,7 @@ import (
 
 // Chaos: the server disappears, slows down or drops connections.
 
-func viaProxy(t *testing.T) (broadcast.IBroadcasterService, *proxy) {
+func viaProxy(t *testing.T) (broadcast.IBroadcastService, *proxy) {
 	t.Helper()
 	p := newProxy(t)
 	b := service(p.HostPort())

@@ -38,7 +38,7 @@ func NewBroadcastService(
 	secured bool,
 	maxPayloadKB int,
 	inflight *utils.Inflight,
-) IBroadcasterService {
+) IBroadcastService {
 	if maxPayloadKB <= 0 {
 		maxPayloadKB = DefaultMaxPayloadKB
 	}

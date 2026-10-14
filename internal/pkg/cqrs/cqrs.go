@@ -3,6 +3,7 @@ package cqrs
 import (
 	"time"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broadcast"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cdc"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
@@ -32,6 +33,7 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	ReadSQLService    sql.ISQLService
 	WriteSQLService   sql.ISQLService
 	CDCService        cdc.ICDCService
+	BroadcastService  broadcast.IBroadcastService
 	PaginationService pagination.IPaginationService[TData, TID]
 
 	BatchSize     int

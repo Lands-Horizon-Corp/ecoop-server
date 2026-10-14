@@ -9,11 +9,11 @@ import (
 
 // Debezium operation codes (the envelope's "op").
 const (
-	OpCreate   = "c"
-	OpUpdate   = "u"
-	OpDelete   = "d"
-	OpRead     = "r" // a row read during the initial snapshot
-	OpTruncate = "t"
+	OpCreate   ChangeType = "c"
+	OpUpdate   ChangeType = "u"
+	OpDelete   ChangeType = "d"
+	OpRead     ChangeType = "r" // a row read during the initial snapshot
+	OpTruncate ChangeType = "t"
 )
 
 // Delivery settings.
@@ -49,12 +49,9 @@ var (
 )
 
 type (
-	// ChangeEvent is one Debezium row change. Before is null for creates and
-	// snapshot reads; After is null for deletes. With Postgres's default
-	// replica identity, Before holds only the primary key on updates and
-	// deletes.
+	ChangeType  string
 	ChangeEvent struct {
-		Op     string          `json:"op"`
+		Op     ChangeType      `json:"op"`
 		Before json.RawMessage `json:"before"`
 		After  json.RawMessage `json:"after"`
 		Source struct {
