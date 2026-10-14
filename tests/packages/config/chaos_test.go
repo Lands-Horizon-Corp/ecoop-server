@@ -28,6 +28,7 @@ func TestChaos_RandomEditsAgainstAModel(t *testing.T) {
 		port int
 	}{"n0", 1}
 
+	exists := true
 	for i := 1; i <= 120; i++ {
 		var (
 			body    string
@@ -35,7 +36,11 @@ func TestChaos_RandomEditsAgainstAModel(t *testing.T) {
 			name    = fmt.Sprintf("n%d", i)
 			port    = 1 + rng.IntN(60000)
 		)
-		switch rng.IntN(5) {
+		kind := rng.IntN(5)
+		if kind == 4 && !exists {
+			kind = 0 // nothing to delete; make a good edit
+		}
+		switch kind {
 		case 0, 1: // a good edit
 			body = fmt.Sprintf("%sAPP_NAME=%s\nPORT=%d\n", baseEnv, name, port)
 		case 2: // a value that does not parse
@@ -46,10 +51,11 @@ func TestChaos_RandomEditsAgainstAModel(t *testing.T) {
 			if err := os.Remove(config.EnvFile); err != nil {
 				t.Fatal(err)
 			}
-			wantErr = true
+			wantErr, exists = true, false
 		}
 		if body != "" {
 			write(t, config.EnvFile, body)
+			exists = true
 		}
 		err := nextReload(t, reloads)
 		if wantErr != (err != nil) {

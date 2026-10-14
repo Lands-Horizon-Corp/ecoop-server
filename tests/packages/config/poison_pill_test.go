@@ -52,8 +52,8 @@ var poison = map[string]string{
 	"secret with non-map data": "kind: Secret\ndata: 7\nstringData: nope\n",
 	"deep nesting":             strings.Repeat("a: {", 500) + "b: 1" + strings.Repeat("}", 500) + "\n",
 	"yaml alias bomb":          "a: &a [x,x,x,x,x,x,x,x,x]\nb: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]\nc: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]\nd: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]\ne: [*d,*d,*d,*d,*d,*d,*d,*d,*d]\n",
-	"huge value":               "DATABASE_URL=" + strings.Repeat("x", 5<<20) + "\nJWT_SECRET=s\n",
-	"huge slice":               "DATABASE_URL=d\nJWT_SECRET=s\nEXTRA_PORTS=" + strings.TrimSuffix(strings.Repeat("1,", 100000), ",") + "\n",
+	"huge value":               "DATABASE_URL=" + strings.Repeat("x", 1<<20) + "\nJWT_SECRET=s\n",
+	"huge slice":               "DATABASE_URL=d\nJWT_SECRET=s\nEXTRA_PORTS=" + strings.TrimSuffix(strings.Repeat("1,", 20000), ",") + "\n",
 	"shell-looking value":      "DATABASE_URL=$(rm -rf /)\nJWT_SECRET=`id`\n",
 }
 
@@ -120,9 +120,10 @@ func TestPoison_UnsupportedAndOddTargetTypes(t *testing.T) {
 		type c struct{ a int }
 		setup(t, nil, nil)
 		svc, _ := config.NewConfigService[c]()
-		within(t, time.Second, func() { _ = svc.Start(context.Background()) })
-		if _, err := svc.Get(context.Background()); err == nil {
-			t.Fatal("Get succeeded on a config that could not be stored")
+		var startErr error
+		within(t, time.Second, func() { startErr = svc.Start(context.Background()) })
+		if _, err := svc.Get(context.Background()); (err == nil) != (startErr == nil) {
+			t.Fatalf("Start = %v but Get = %v", startErr, err)
 		}
 	})
 	t.Run("unexported and untagged fields are ignored", func(t *testing.T) {

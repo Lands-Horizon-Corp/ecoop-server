@@ -1,13 +1,12 @@
 package config
 
 import (
-	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -152,12 +151,12 @@ func (c *ConfigService[T]) load() error {
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
-	var plain bytes.Buffer
-	if err := gob.NewEncoder(&plain).Encode(cfg); err != nil {
+	plain, err := json.Marshal(cfg)
+	if err != nil {
 		return fmt.Errorf("encoding config: %w", err)
 	}
-	sealed, err := c.encrypt(plain.Bytes())
-	clear(plain.Bytes())
+	sealed, err := c.encrypt(plain)
+	clear(plain)
 	if err != nil {
 		return fmt.Errorf("encrypting config: %w", err)
 	}
@@ -181,8 +180,7 @@ func (c *ConfigService[T]) Get(ctx context.Context) (T, error) {
 	}
 	defer clear(plainBytes)
 	var cfg T
-	buf := bytes.NewReader(plainBytes)
-	if err := gob.NewDecoder(buf).Decode(&cfg); err != nil {
+	if err := json.Unmarshal(plainBytes, &cfg); err != nil {
 		return zero, fmt.Errorf("decoding config failed: %w", err)
 	}
 	return cfg, nil
