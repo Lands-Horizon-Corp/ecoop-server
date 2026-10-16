@@ -131,13 +131,13 @@ func TestSad_PaginateDropsUnknownFieldSilently(t *testing.T) {
 	}
 }
 
-// Documents current behavior: Count swallows every error and reports 0, so
-// "no matches" and "the query failed" look the same.
-func TestSad_CountSwallowsErrors(t *testing.T) {
+// Count reports a failed query as an error, like Exists: "no matches" (0, nil)
+// and "the query failed" must never look the same.
+func TestSad_CountReportsErrors(t *testing.T) {
 	fx := need(t)
 	n, err := fx.svc.Count(ctxT(t), and(f("nope", pagination.ModeEqual, 1)))
-	if err != nil || n != 0 {
-		t.Fatalf("Count = %d, %v; want 0, nil (current behavior)", n, err)
+	if !errors.Is(err, pagination.ErrUnknownField) || n != 0 {
+		t.Fatalf("Count = %d, %v; want 0, ErrUnknownField", n, err)
 	}
 	if _, err := fx.svc.Exists(ctxT(t), and(f("nope", pagination.ModeEqual, 1))); !errors.Is(err, pagination.ErrUnknownField) {
 		t.Fatalf("Exists err = %v, want ErrUnknownField", err)

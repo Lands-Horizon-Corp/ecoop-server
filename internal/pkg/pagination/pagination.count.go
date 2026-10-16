@@ -29,13 +29,11 @@ func (c *PaginationService[TData, TID]) Count(
 func (c *PaginationService[TData, TID]) count(
 	ctx context.Context, db bun.IDB, filter StructuredFilter,
 ) (int64, error) {
-	// started := time.Now()
 	total, err := utils.Scoped(ctx, db, func(q bun.IDB) (int64, error) {
 		return c.countQuery(ctx, q, filter)
 	})
 	if err != nil {
-		// return 0, c.report(ctx, "count", started, err, nil, filter)
-		return 0, nil
+		return 0, err
 	}
 	return total, nil
 }

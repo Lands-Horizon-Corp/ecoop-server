@@ -29,10 +29,8 @@ func (c *PaginationService[TData, TID]) ExistsWithTx(
 func (c *PaginationService[TData, TID]) exists(
 	ctx context.Context, db bun.IDB, filter StructuredFilter,
 ) (bool, error) {
-	// started := time.Now()
 	ok, err := utils.Scoped(ctx, db, func(q bun.IDB) (bool, error) { return c.existsQuery(ctx, q, filter) })
 	if err != nil {
-		// return false, c.report(ctx, "exists", started, err, nil, filter)
 		return false, err
 	}
 	return ok, nil
