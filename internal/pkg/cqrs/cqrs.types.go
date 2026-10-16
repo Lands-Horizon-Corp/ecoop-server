@@ -3,6 +3,7 @@ package cqrs
 import (
 	"context"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
@@ -34,6 +35,16 @@ const (
 	hookTimeout         = 10 * time.Second
 	deadLetterTimeout   = 10 * time.Second
 	upsertChunk         = 500
+
+	// regressionSlack is how far a record already covered by the checkpoint may be
+	// "from the future" of the last record applied before the offsets are taken to
+	// have gone backwards. Producers stamp records when they create them, so a few
+	// records can be out of order by milliseconds; minutes cannot be.
+	regressionSlack = 5 * time.Minute
+
+	noteTombstone = "tombstone"
+	noteTruncate  = "truncate"
+	noteOther     = "unsupported operation"
 )
 
 var (
@@ -64,6 +75,8 @@ var (
 	ErrOffsetRegression   = errors.New("cqrs: the topic's offsets went back behind the checkpoint (the topic was probably recreated); " +
 		"replication is paused so no change is skipped; delete this topic's rows from cqrs_checkpoints to resume from the start of the topic")
 	ErrBadBatch = errors.New("cqrs: malformed batch")
+
+	timeType = reflect.TypeFor[time.Time]()
 )
 
 // Checkpoint records how far one partition of a topic has been applied to the

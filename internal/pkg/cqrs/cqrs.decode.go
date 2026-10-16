@@ -37,12 +37,6 @@ type item[TData any] struct {
 	note   string
 }
 
-const (
-	noteTombstone = "tombstone"
-	noteTruncate  = "truncate"
-	noteOther     = "unsupported operation"
-)
-
 // prepare decodes a batch. It never fails as a whole: a record that cannot
 // be decoded becomes a dead item, so one poison record cannot stop the rest.
 func (m *model[TData]) prepare(batch []cdc.Record) []item[TData] {

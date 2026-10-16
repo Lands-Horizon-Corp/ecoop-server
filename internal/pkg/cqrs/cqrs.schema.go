@@ -13,8 +13,6 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
-var timeType = reflect.TypeFor[time.Time]()
-
 // model is what replication needs to know about TData, read once from its bun
 // layout: which column is the key, which one orders versions, and how every
 // column is typed. Building it validates the model, so a model replication

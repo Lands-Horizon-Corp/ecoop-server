@@ -15,12 +15,6 @@ import (
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
-// regressionSlack is how far a record already covered by the checkpoint may be
-// "from the future" of the last record applied before the offsets are taken to
-// have gone backwards. Producers stamp records when they create them, so a few
-// records can be out of order by milliseconds; minutes cannot be.
-const regressionSlack = 5 * time.Minute
-
 // outcome is what a batch did, kept across the attempts at it: a hook must
 // fire once for a change that committed in an attempt that later failed, so
 // the retry (which sees that change as a duplicate) must not forget it.
