@@ -91,6 +91,12 @@
       "skillPath": "plugins/observability-monitoring/skills/grafana-dashboards/SKILL.md",
       "computedHash": "e6954b1fef26562b416c0debd6aace9dd96c3bc265e1215a5971065690531739"
     },
+    "grill-me": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/grill-me/SKILL.md",
+      "computedHash": "9cdbb4b8f7a3aeaef82e6230c9e823500d4a8a1214c726cf342cf9829d34fc7d"
+    },
     "kpi-dashboard-design": {
       "source": "wshobson/agents",
       "sourceType": "github",
