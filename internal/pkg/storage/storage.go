@@ -226,12 +226,12 @@ func (s *StorageService) UploadFromPath(ctx context.Context, p string, cb Progre
 	}
 	f, err := os.Open(p)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storage: opening %s: %w", p, err)
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storage: reading %s: %w", p, err)
 	}
 	return s.UploadFromStream(ctx, f, info.Size(), filepath.Base(p), mime.TypeByExtension(filepath.Ext(p)), cb)
 }
@@ -277,7 +277,7 @@ func (s *StorageService) UploadFromHeader(ctx context.Context, header *multipart
 	}
 	f, err := header.Open()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storage: opening the uploaded file: %w", err)
 	}
 	defer f.Close()
 	return s.UploadFromStream(ctx, f, header.Size, header.Filename, header.Header.Get("Content-Type"), cb)

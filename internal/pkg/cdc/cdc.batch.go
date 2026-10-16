@@ -211,7 +211,7 @@ func (c *CDCService) batchLoop(ctx context.Context, client *kgo.Client, s *subsc
 		}
 		keepGoing := true
 		fetches.EachPartition(func(p kgo.FetchTopicPartition) {
-			for chunk := range chunks(p.Records, s.opts.MaxBatch) {
+			for chunk := range utils.Chunks(p.Records, s.opts.MaxBatch) {
 				if !keepGoing {
 					return
 				}
@@ -222,19 +222,6 @@ func (c *CDCService) batchLoop(ctx context.Context, client *kgo.Client, s *subsc
 			return
 		}
 		client.AllowRebalance()
-	}
-}
-
-// chunks splits records into runs of at most size, keeping their order.
-func chunks(records []*kgo.Record, size int) func(yield func([]*kgo.Record) bool) {
-	return func(yield func([]*kgo.Record) bool) {
-		for len(records) > 0 {
-			n := min(size, len(records))
-			if !yield(records[:n]) {
-				return
-			}
-			records = records[n:]
-		}
 	}
 }
 

@@ -25,3 +25,13 @@ func IsValidFilePath(p string) error {
 	}
 	return nil
 }
+
+// WriteNew creates file with content and fails if the file already exists.
+func WriteNew(file, content string) error {
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(content)
+	return errors.Join(err, f.Close())
+}

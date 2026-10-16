@@ -7,13 +7,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
-	"github.com/twmb/franz-go/pkg/kmsg"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 // DeadLetters implements ICDCService.
-func (c *CDCService) DeadLetters(ctx context.Context, topic string, max int) ([]Record, error) {
+func (c *CDCService) DeadLetters(ctx context.Context, topic string, limit int) ([]Record, error) {
 	if c == nil || c.subs == nil {
 		return nil, ErrNoService
 	}
@@ -26,8 +26,8 @@ func (c *CDCService) DeadLetters(ctx context.Context, topic string, max int) ([]
 	if len(c.brokers) == 0 {
 		return nil, ErrNoBrokers
 	}
-	if max <= 0 {
-		max = DefaultMaxDeadLetters
+	if limit <= 0 {
+		limit = DefaultMaxDeadLetters
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
@@ -44,18 +44,18 @@ func (c *CDCService) DeadLetters(ctx context.Context, topic string, max int) ([]
 		return nil, errors.Join(ErrConnect, err)
 	}
 	defer admin.Close()
-	parts, err := topicPartitions(ctx, admin, dlq)
+	parts, err := utils.TopicPartitions(ctx, admin, dlq)
 	if err != nil {
 		return nil, fmt.Errorf("cdc: reading the layout of %s: %w", dlq, err)
 	}
 	if len(parts) == 0 {
 		return nil, nil
 	}
-	first, err := listOffsets(ctx, admin, dlq, parts, -2)
+	first, err := utils.ListOffsets(ctx, admin, dlq, parts, utils.Earliest)
 	if err != nil {
 		return nil, fmt.Errorf("cdc: reading the start offsets of %s: %w", dlq, err)
 	}
-	last, err := listOffsets(ctx, admin, dlq, parts, -1)
+	last, err := utils.ListOffsets(ctx, admin, dlq, parts, utils.Latest)
 	if err != nil {
 		return nil, fmt.Errorf("cdc: reading the end offsets of %s: %w", dlq, err)
 	}
@@ -72,8 +72,8 @@ func (c *CDCService) DeadLetters(ctx context.Context, topic string, max int) ([]
 	if total == 0 {
 		return nil, nil
 	}
-	if total > int64(max) {
-		return nil, fmt.Errorf("%w: %s holds %d records, the limit is %d", ErrTooManyDeadLetters, dlq, total, max)
+	if total > int64(limit) {
+		return nil, fmt.Errorf("%w: %s holds %d records, the limit is %d", ErrTooManyDeadLetters, dlq, total, limit)
 	}
 
 	reader, err := kgo.NewClient(kgo.SeedBrokers(c.brokers...),
@@ -114,66 +114,5 @@ func (c *CDCService) DeadLetters(ctx context.Context, topic string, max int) ([]
 		}
 		return 0
 	})
-	return out, nil
-}
-
-// topicPartitions is the partitions of topic, or none when the topic does not exist.
-func topicPartitions(ctx context.Context, cl *kgo.Client, topic string) ([]int32, error) {
-	req := kmsg.NewPtrMetadataRequest()
-	rt := kmsg.NewMetadataRequestTopic()
-	rt.Topic = new(topic)
-	req.Topics = append(req.Topics, rt)
-	req.AllowAutoTopicCreation = false // asking must never create the topic
-	resp, err := req.RequestWith(ctx, cl)
-	if err != nil {
-		return nil, err
-	}
-	var parts []int32
-	for _, t := range resp.Topics {
-		if err := kerr.ErrorForCode(t.ErrorCode); err != nil {
-			if errors.Is(err, kerr.UnknownTopicOrPartition) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		for _, p := range t.Partitions {
-			parts = append(parts, p.Partition)
-		}
-	}
-	slices.Sort(parts)
-	return parts, nil
-}
-
-// listOffsets asks the brokers for an offset of every partition: -2 is the
-// earliest still held, -1 the next one to be written.
-func listOffsets(ctx context.Context, cl *kgo.Client, topic string, parts []int32, at int64) (map[int32]int64, error) {
-	req := kmsg.NewPtrListOffsetsRequest()
-	rt := kmsg.NewListOffsetsRequestTopic()
-	rt.Topic = topic
-	for _, p := range parts {
-		rp := kmsg.NewListOffsetsRequestTopicPartition()
-		rp.Partition = p
-		rp.Timestamp = at
-		rt.Partitions = append(rt.Partitions, rp)
-	}
-	req.Topics = append(req.Topics, rt)
-	resp, err := req.RequestWith(ctx, cl)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[int32]int64, len(parts))
-	for _, t := range resp.Topics {
-		for _, p := range t.Partitions {
-			if err := kerr.ErrorForCode(p.ErrorCode); err != nil {
-				return nil, fmt.Errorf("partition %d: %w", p.Partition, err)
-			}
-			out[p.Partition] = p.Offset
-		}
-	}
-	for _, p := range parts {
-		if _, ok := out[p]; !ok {
-			return nil, fmt.Errorf("partition %d: the broker did not answer", p)
-		}
-	}
 	return out, nil
 }

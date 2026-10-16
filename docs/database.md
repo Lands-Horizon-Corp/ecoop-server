@@ -2,6 +2,8 @@
 
 This document explains the database-facing packages of ecoop-server: **how they work, why they are built that way, what the tests prove, and where the honest limits are.** Each section ends with a production-readiness verdict, because "the tests pass" is not the same as "safe to run".
 
+For the end-to-end picture of Kafka, Debezium, CDC and CQRS (failure handling, the dead-letter topic, repair, and what happens when each component is down), see [cdc-cqrs-architecture.md](cdc-cqrs-architecture.md).
+
 ## Contents
 
 1. [At a glance](#1-at-a-glance)

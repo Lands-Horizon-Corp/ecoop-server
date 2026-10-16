@@ -198,9 +198,6 @@ func singleDateCondition(col bun.Ident, mode Mode, d DateValue, kind colKind) (s
 	}
 }
 
-// clockValue is a parsed time of day: the clock as written, and the offset it
-// was written in, if it named one.
-
 // parseTimeValue reads a time of day from a string in any layout
 // utils.ParseTimeOfDay knows, or from a time.Time's clock.
 func parseTimeValue(v any) (clockValue, error) {

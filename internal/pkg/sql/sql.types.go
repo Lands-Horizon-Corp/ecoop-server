@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 const (
@@ -58,9 +60,9 @@ var (
 	ErrNotConverged     = errors.New("sql: the schema still differs from the models after migrating")
 	ErrInvalidPool      = errors.New("sql: max open and max idle connections must be zero or more")
 
-	ErrNilTx       = errors.New("sql: transaction is nil or was never started")
-	ErrUnsafeText  = errors.New("sql: text contains a replacement, control or BiDi override character")
-	ErrInvalidText = errors.New("sql: text is not valid UTF-8 or contains a NUL byte")
+	ErrNilTx       = utils.ErrNilTx
+	ErrUnsafeText  = utils.ErrUnsafeText
+	ErrInvalidText = utils.ErrInvalidText
 )
 
 type (
@@ -93,10 +95,10 @@ type (
 		// the up steps command applies the specified number of migrations
 		UpSteps(ctx context.Context, steps int) error
 
-		// the down steps command reverts the specified number of migrations
+		// the status command shows the current status of migrations
 		Status(ctx context.Context) error
 
-		// the status command shows the current status of migrations
+		// the version command shows the current migration version
 		Version(ctx context.Context) error
 	}
 )

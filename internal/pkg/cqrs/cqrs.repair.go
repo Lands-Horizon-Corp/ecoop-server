@@ -129,18 +129,8 @@ func (rs *repairState) resolve(rows []dueRow, failed map[string]struct{}, now ti
 			continue
 		}
 		e.attempts++
-		e.due = now.Add(repairBackoff(interval, e.attempts))
+		e.due = now.Add(utils.Backoff(interval, e.attempts, maxRepairBackoff))
 	}
-}
-
-// repairBackoff is the wait after attempts refusals: the interval, doubled each
-// time, up to maxRepairBackoff.
-func repairBackoff(interval time.Duration, attempts int) time.Duration {
-	d := interval
-	for i := 0; i < attempts && d < maxRepairBackoff; i++ {
-		d *= 2
-	}
-	return min(d, maxRepairBackoff)
 }
 
 // repairOn reports whether the service repairs parked rows by itself.
@@ -300,7 +290,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) repairChunk(ctx context.C
 		}
 		return c.repairChunk(ctx, ids[mid:], failed)
 	}
-	key := keyString(reflect.ValueOf(ids[0]))
+	key := utils.KeyString(reflect.ValueOf(ids[0]))
 	failed[key] = struct{}{}
 	c.log.Warn("row still rejected by the read db", "key", key, "cause", safeErr(err))
 	return nil
@@ -373,7 +363,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) repairOnce(ctx context.Co
 		var upserts, deletes []*change[TData]
 		seen := make(map[string]struct{}, len(ids))
 		for _, id := range ids {
-			key := keyString(reflect.ValueOf(id))
+			key := utils.KeyString(reflect.ValueOf(id))
 			if _, dup := seen[key]; dup {
 				continue
 			}

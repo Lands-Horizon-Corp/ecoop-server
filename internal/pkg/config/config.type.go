@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	ErrNotStruct    = errors.New("config target must be a struct")
-	ErrNotLoaded    = errors.New("configuration not loaded")
-	ErrMissing      = errors.New("missing required environment variable")
-	ErrInvalidValue = errors.New("invalid field value")
-	ErrNoSecurity   = errors.New("config needs a security service to encrypt values in memory")
+	ErrNotStruct    = errors.New("config: target must be a struct")
+	ErrNotLoaded    = errors.New("config: not loaded")
+	ErrMissing      = errors.New("config: missing required environment variable")
+	ErrInvalidValue = errors.New("config: invalid field value")
+	ErrNoSecurity   = errors.New("config: needs a security service to encrypt values in memory")
 
 	textUnmarshaler = reflect.TypeFor[encoding.TextUnmarshaler]()
 	durationType    = reflect.TypeFor[time.Duration]()

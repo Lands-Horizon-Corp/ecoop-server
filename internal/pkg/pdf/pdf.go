@@ -162,11 +162,11 @@ func form(render RenderOptions) (*bytes.Buffer, string, error) {
 			continue
 		}
 		if err := w.WriteField(f[0], f[1]); err != nil {
-			return nil, "", err
+			return nil, "", fmt.Errorf("pdf: writing form field %q: %w", f[0], err)
 		}
 	}
 	if err := w.Close(); err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("pdf: closing form: %w", err)
 	}
 	return &buf, w.FormDataContentType(), nil
 }

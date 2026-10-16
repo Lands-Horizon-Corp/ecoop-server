@@ -3,6 +3,7 @@ package otp
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/security"
@@ -92,17 +93,17 @@ func (o *OTPService) Generate(ctx context.Context, key string) (string, error) {
 	}
 	code, err := utils.RandomDigits(CodeLength)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("otp: generating code: %w", err)
 	}
 	hash, err := o.sec.GeneratePassword(ctx, utils.Pepper(o.secret, code))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("otp: hashing code: %w", err)
 	}
 	if err := o.ch.Set(ctx, KeyPrefix+key, hash, CodeTTL); err != nil {
-		return "", err
+		return "", fmt.Errorf("otp: storing code: %w", err)
 	}
 	if _, err := o.ch.Delete(ctx, AttemptsPrefix+key); err != nil {
-		return "", err
+		return "", fmt.Errorf("otp: resetting attempts: %w", err)
 	}
 	return code, nil
 }
@@ -142,7 +143,7 @@ func (o *OTPService) Verify(ctx context.Context, key, code string) (bool, error)
 	}
 	attempts, err := o.ch.Incr(ctx, AttemptsPrefix+key, CodeTTL)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("otp: counting attempts: %w", err)
 	}
 	if attempts > MaxAttempts {
 		return false, errors.Join(ErrTooManyAttempts, o.revoke(ctx, key))
@@ -152,17 +153,26 @@ func (o *OTPService) Verify(ctx context.Context, key, code string) (bool, error)
 		return false, ErrCodeNotFound
 	}
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("otp: reading code: %w", err)
 	}
 	match, err := o.sec.VerifyPassword(ctx, string(hash), utils.Pepper(o.secret, code))
-	if err != nil || !match {
-		return false, err
+	if err != nil {
+		return false, fmt.Errorf("otp: checking code: %w", err)
 	}
-	if consumed, err := o.ch.Delete(ctx, KeyPrefix+key); err != nil || !consumed {
-		return false, err
+	if !match {
+		return false, nil
 	}
-	_, err = o.ch.Delete(ctx, AttemptsPrefix+key)
-	return true, err
+	consumed, err := o.ch.Delete(ctx, KeyPrefix+key)
+	if err != nil {
+		return false, fmt.Errorf("otp: consuming code: %w", err)
+	}
+	if !consumed {
+		return false, nil
+	}
+	if _, err := o.ch.Delete(ctx, AttemptsPrefix+key); err != nil {
+		return true, fmt.Errorf("otp: clearing attempts: %w", err)
+	}
+	return true, nil
 }
 
 func (o *OTPService) Revoke(ctx context.Context, key string) error {

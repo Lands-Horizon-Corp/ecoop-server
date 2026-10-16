@@ -211,8 +211,8 @@ func IsStaleSession(err error) bool {
 	if err == nil {
 		return false
 	}
-	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
-		return pg.Code == "57P01" || pg.Code == "57P02" || pg.Code == "57P03"
+	if code := SQLState(err); code != "" {
+		return code == "57P01" || code == "57P02" || code == "57P03"
 	}
 	return pgconn.SafeToRetry(err) || errors.Is(err, driver.ErrBadConn) || strings.Contains(err.Error(), "conn closed")
 }

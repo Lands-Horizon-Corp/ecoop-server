@@ -50,7 +50,6 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) resolvePreload(preload []
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) warnDroppedPreloads(ctx context.Context, dropped []string) {
 	for _, d := range dropped {
-		// c.warn(ctx, "unknown preload relation dropped", "relation", d)
-		fmt.Println(d)
+		c.log.WarnContext(ctx, "preload dropped: unknown relation", "relation", d)
 	}
 }

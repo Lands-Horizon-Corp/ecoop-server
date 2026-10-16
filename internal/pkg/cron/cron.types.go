@@ -22,6 +22,7 @@ var (
 	ErrJobNotFound     = errors.New("cron: no job with this id")
 	ErrUnknownTask     = errors.New("cron: no job runs this task name")
 	ErrNilLocation     = errors.New("cron: location is nil")
+	ErrJobPanicked     = errors.New("cron: job panicked")
 )
 
 type (

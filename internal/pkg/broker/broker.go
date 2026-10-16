@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,7 +79,7 @@ func (b *BrokerService) Run(ctx context.Context) error {
 		if err := b.consume(s); err != nil {
 			b.closeLocked()
 			_ = b.gate.Close(context.Background())
-			return err
+			return fmt.Errorf("broker: consuming %s: %w", s.topic, err)
 		}
 	}
 	return nil
@@ -152,7 +153,7 @@ func (b *BrokerService) Subscribe(ctx context.Context, topic string, handler fun
 	s := &subscription{topic: topic, handler: handler}
 	if b.producer != nil { // running: start now
 		if err := b.consume(s); err != nil {
-			return err
+			return fmt.Errorf("broker: consuming %s: %w", topic, err)
 		}
 	}
 	b.subs[topic] = s

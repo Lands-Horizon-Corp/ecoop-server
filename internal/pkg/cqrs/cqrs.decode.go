@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/uptrace/bun/schema"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cdc"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 // change is one row change of the stream, decoded and keyed.
@@ -116,7 +116,7 @@ func (m *model[TData]) decodeRow(raw json.RawMessage) (TData, error) {
 	}
 	var cols map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &cols); err != nil {
-		return out, fmt.Errorf("%w: the row is not a JSON object: %v", ErrMalformedChange, err)
+		return out, fmt.Errorf("%w: the row is not a JSON object: %w", ErrMalformedChange, err)
 	}
 	if inner, ok := cols["payload"]; ok && m.fields["payload"] == nil && len(cols) <= 2 {
 		return m.decodeRow(inner) // a key or value wrapped with its schema
@@ -173,59 +173,18 @@ func toSource(f *schema.Field, raw json.RawMessage) (any, error) {
 		if t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8 {
 			b, err := base64.StdEncoding.DecodeString(s) // bytea reaches us base64-encoded
 			if err != nil {
-				return nil, fmt.Errorf("bytea is not base64: %v", err)
+				return nil, fmt.Errorf("bytea is not base64: %w", err)
 			}
 			return b, nil
 		}
 		return s, nil
 	case '{', '[':
-		if !isJSONColumn(f) {
+		if !utils.IsJSONColumn(f) {
 			return nil, fmt.Errorf("an object or array for a %s column", f.IndirectType)
 		}
 		return append([]byte(nil), raw...), nil // json and jsonb
 	}
 	return numberSource(f, raw)
-}
-
-// isJSONColumn reports whether the field holds a JSON document: a jsonb or json
-// column, or a Go type that is a document (a map, a struct, a slice that is not
-// bytes) rather than a scalar.
-func isJSONColumn(f *schema.Field) bool {
-	if strings.Contains(strings.ToLower(f.CreateTableSQLType), "json") {
-		return true
-	}
-	t := f.IndirectType
-	switch t.Kind() {
-	case reflect.Map, reflect.Struct, reflect.Interface:
-		return t != timeType
-	case reflect.Slice:
-		return t.Elem().Kind() != reflect.Uint8
-	}
-	return false
-}
-
-// fitsInteger reports whether n can be held by the integer kind k without
-// wrapping around. bun's scanners convert with SetInt/SetUint, which silently
-// truncate: 40000 in an int16 would become -25536 and the read model would
-// quietly hold a number that never existed.
-func fitsInteger(k reflect.Kind, n int64) bool {
-	switch k {
-	case reflect.Int8:
-		return n >= math.MinInt8 && n <= math.MaxInt8
-	case reflect.Int16:
-		return n >= math.MinInt16 && n <= math.MaxInt16
-	case reflect.Int32:
-		return n >= math.MinInt32 && n <= math.MaxInt32
-	case reflect.Uint8:
-		return n >= 0 && n <= math.MaxUint8
-	case reflect.Uint16:
-		return n >= 0 && n <= math.MaxUint16
-	case reflect.Uint32:
-		return n >= 0 && n <= math.MaxUint32
-	case reflect.Uint, reflect.Uint64, reflect.Uintptr:
-		return n >= 0
-	}
-	return true // int, int64: every int64 fits
 }
 
 // numberSource converts a JSON number. Integers stay integers (exact up to
@@ -249,7 +208,7 @@ func numberSource(f *schema.Field, raw json.RawMessage) (any, error) {
 		return x, nil
 	}
 	if intErr == nil {
-		if !fitsInteger(t.Kind(), n) {
+		if !utils.FitsInteger(t.Kind(), n) {
 			return nil, fmt.Errorf("a number outside the range of a %s", t)
 		}
 		return n, nil
@@ -261,7 +220,7 @@ func numberSource(f *schema.Field, raw json.RawMessage) (any, error) {
 			return u, nil
 		}
 	}
-	if isIntegerKind(t.Kind()) {
+	if utils.IsIntegerKind(t.Kind()) {
 		return nil, fmt.Errorf("not an integer that fits a %s", t)
 	}
 	x, err := strconv.ParseFloat(text, 64)
@@ -269,13 +228,4 @@ func numberSource(f *schema.Field, raw json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("not a number")
 	}
 	return x, nil
-}
-
-func isIntegerKind(k reflect.Kind) bool {
-	switch k {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return true
-	}
-	return false
 }

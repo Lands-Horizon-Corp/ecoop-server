@@ -50,19 +50,9 @@ const (
 )
 
 var (
-	ErrNotInitialized       = errors.New("sql: database connection is not initialized")
-	ErrNoMigrationsDir      = errors.New("sql: no migrations directory was provided")
-	ErrInvalidMigrationsDir = errors.New("sql: migrations directory is not usable")
-	ErrInvalidSteps         = errors.New("sql: steps must be greater than zero")
-	ErrTooManySteps         = errors.New("sql: more steps requested than migrations available")
-	ErrNoModels             = errors.New("sql: at least one model is required")
-	ErrInvalidName          = errors.New("sql: migration name must contain a letter or digit")
-	ErrPendingMigrations    = errors.New("sql: apply pending migrations before generating a new one")
-	ErrInvalidMigration     = errors.New("sql: generated migration is not valid")
-
-	ErrNilTx       = errors.New("sql: transaction is nil or was never started")
-	ErrInvalidText = errors.New("sql: text is not valid UTF-8 or contains a NUL byte")
-	ErrUnsafeText  = errors.New("sql: text contains a replacement, control or BiDi override character")
+	ErrNilTx       = utils.ErrNilTx
+	ErrInvalidText = utils.ErrInvalidText
+	ErrUnsafeText  = utils.ErrUnsafeText
 
 	ErrReadServiceRequired    = errors.New("pagination: ReadSQLService must be set")
 	ErrReadDBNotInitialized   = errors.New("pagination: read db is not initialized")
@@ -83,6 +73,8 @@ type (
 	SortOrder string
 	colKind   int
 
+	// clockValue is a parsed time of day: the clock as written, and the offset
+	// it was written in, if it named one.
 	clockValue struct {
 		lit string
 		off *int

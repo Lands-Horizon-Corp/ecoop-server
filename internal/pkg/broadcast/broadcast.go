@@ -165,7 +165,7 @@ func (b *BroadcasterService) Dispatch(ctx context.Context, channels []string, ev
 	}
 	data, err := b.encode(payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("broadcast: %w", err)
 	}
 	var errs []error
 	for batch := range slices.Chunk(channels, MaxChannelsPerTrigger) {

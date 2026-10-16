@@ -177,11 +177,11 @@ type (
 		// and headers (the dlq.* headers say where it came from and why it was
 		// parked); Topic, Partition and Offset are those of the dead-letter
 		// topic. A topic with no dead-letter topic yet has none: nil, nil. At most
-		// max records are returned (DefaultMaxDeadLetters if max <= 0); a topic
+		// limit records are returned (DefaultMaxDeadLetters if limit <= 0); a topic
 		// holding more fails with ErrTooManyDeadLetters rather than being cut
 		// short. It reads what is there when it starts and does not consume or
 		// remove anything, so it can be called again. It needs no Run.
-		DeadLetters(ctx context.Context, topic string, max int) ([]Record, error)
+		DeadLetters(ctx context.Context, topic string, limit int) ([]Record, error)
 
 		// GroupID is the consumer group prefix; the group of a topic is
 		// GroupID()+"."+topic. A consumer can key its own checkpoints on it.

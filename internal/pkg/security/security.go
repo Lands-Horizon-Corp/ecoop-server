@@ -43,7 +43,7 @@ func (s *SecurityService) GeneratePassword(ctx context.Context, password string)
 	}
 	salt := make([]byte, s.salt)
 	if _, err := rand.Read(salt); err != nil {
-		return "", fmt.Errorf("failed to generate salt: %w", err)
+		return "", fmt.Errorf("security: generating salt: %w", err)
 	}
 	hash := argon2.IDKey([]byte(password), salt, s.iterations, s.memory, s.parallelism, s.key)
 	b64Salt := base64.RawStdEncoding.EncodeToString(salt)
@@ -63,21 +63,21 @@ func (s *SecurityService) VerifyPassword(ctx context.Context, hash string, passw
 	var m, t uint32
 	var p uint8
 	if _, err := fmt.Sscanf(vals[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: reading parameters: %w", ErrInvalidHash, err)
 	}
 	if t < 1 || p < 1 {
-		return false, fmt.Errorf("invalid hash parameters")
+		return false, fmt.Errorf("%w: parameters must be at least 1", ErrInvalidHash)
 	}
 	if m > maxVerifyMemory || t > maxVerifyIterations || p > maxVerifyParallelism {
-		return false, fmt.Errorf("hash parameters exceed allowed limits")
+		return false, fmt.Errorf("%w: parameters exceed the allowed limits", ErrInvalidHash)
 	}
 	salt, err := base64.RawStdEncoding.Strict().DecodeString(vals[4])
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: salt: %w", ErrInvalidHash, err)
 	}
 	expectedHash, err := base64.RawStdEncoding.Strict().DecodeString(vals[5])
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: hash: %w", ErrInvalidHash, err)
 	}
 	if subtle.ConstantTimeCompare(
 		expectedHash, argon2.IDKey([]byte(password), salt, t, m, p, s.key)) == 1 {
@@ -102,11 +102,11 @@ func (s *SecurityService) Decrypt(ctx context.Context, tokenString string) (stri
 	parser.AddRule(paseto.ValidAt(time.Now()))
 	token, err := parser.ParseV4Local(s.pasetoKey(), tokenString, nil)
 	if err != nil {
-		return "", fmt.Errorf("token validation failed: %w", err)
+		return "", fmt.Errorf("%w: validating token: %w", ErrDecrypt, err)
 	}
 	payload, err := token.GetString("payload")
 	if err != nil {
-		return "", fmt.Errorf("failed to extract payload from token: %w", err)
+		return "", fmt.Errorf("%w: reading token payload: %w", ErrDecrypt, err)
 	}
 	return payload, nil
 }
@@ -143,13 +143,18 @@ func (s *SecurityService) aead() (cipher.AEAD, error) {
 	key := sha256.Sum256([]byte("ecoop/security/data/v1:" + s.secret))
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating AES cipher: %w", err)
 	}
-	return cipher.NewGCM(block)
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("creating GCM: %w", err)
+	}
+	return gcm, nil
 }
 
 func (s *SecurityService) pasetoKey() paseto.V4SymmetricKey {
 	hash := sha256.Sum256([]byte(s.secret))
+	// A SHA-256 sum is always the 32 bytes a V4 key needs, so this cannot fail.
 	key, _ := paseto.V4SymmetricKeyFromBytes(hash[:])
 	return key
 }

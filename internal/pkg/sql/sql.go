@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -100,7 +99,10 @@ func (s *SQLService) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	mig, _ := connector(s.dsn, pgdriver.WithReadTimeout(0))
+	mig, err := connector(s.dsn, pgdriver.WithReadTimeout(0))
+	if err != nil {
+		return err
+	}
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
 	if s.gate.IsOpen() {
@@ -131,17 +133,7 @@ func (s *SQLService) Start(ctx context.Context) error {
 // out keeps running to completion. A DSN that sets the parameter itself, or
 // that cannot be parsed, is left alone.
 func withClientCheck(dsn string) string {
-	u, err := url.Parse(dsn)
-	if err != nil || u.Scheme == "" {
-		return dsn
-	}
-	q := u.Query()
-	if q.Has("client_connection_check_interval") {
-		return dsn
-	}
-	q.Set("client_connection_check_interval", "1000")
-	u.RawQuery = q.Encode()
-	return u.String()
+	return utils.WithQueryDefault(dsn, "client_connection_check_interval", "1000")
 }
 
 func connector(dsn string, opts ...pgdriver.Option) (c *pgdriver.Connector, err error) {
@@ -283,7 +275,7 @@ func (s *SQLService) Create(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := writeNew(filepath.Join(dir, fmt.Sprintf("%d_%s.sql", version, slug)), migrationTemplate); err != nil {
+	if err := utils.WriteNew(filepath.Join(dir, fmt.Sprintf("%d_%s.sql", version, slug)), migrationTemplate); err != nil {
 		return fmt.Errorf("sql: create %q: %w", name, err)
 	}
 	return nil
@@ -533,15 +525,6 @@ func validModels(models []any) error {
 		}
 	}
 	return nil
-}
-
-func writeNew(file, content string) error {
-	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return err
-	}
-	_, err = f.WriteString(content)
-	return errors.Join(err, f.Close())
 }
 
 func pendingReview(dir, body string) (string, error) {

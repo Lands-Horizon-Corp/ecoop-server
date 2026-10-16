@@ -3,6 +3,7 @@ package pagination
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"reflect"
 	"strings"
@@ -135,8 +136,7 @@ func (c *PaginationService[TData, TID]) paginateQuery(
 
 	droppedPreloads, err := utils.ApplyPreloadsMany(ctx, db, &data, c.Preloads, preloads...)
 	for _, d := range droppedPreloads {
-		// c.warn(ctx, "preload dropped: unknown relation", "relation", d)
-		fmt.Println("dropped", d)
+		slog.WarnContext(ctx, "preload dropped: unknown relation", "component", "pagination", "relation", d)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("loading preloads: %w", err)

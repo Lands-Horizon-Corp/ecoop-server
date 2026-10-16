@@ -189,15 +189,15 @@ func (c *ConfigService[T]) Get(ctx context.Context) (T, error) {
 func (c *ConfigService[T]) encrypt(plaintext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(c.key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating AES cipher: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating GCM: %w", err)
 	}
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generating nonce: %w", err)
 	}
 	return gcm.Seal(nonce, nonce, plaintext, nil), nil
 }
@@ -205,15 +205,19 @@ func (c *ConfigService[T]) encrypt(plaintext []byte) ([]byte, error) {
 func (c *ConfigService[T]) decrypt(ciphertext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(c.key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating AES cipher: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating GCM: %w", err)
 	}
 	if len(ciphertext) < gcm.NonceSize() {
 		return nil, errors.New("ciphertext too short")
 	}
 	nonce, sealed := ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():]
-	return gcm.Open(nil, nonce, sealed, nil)
+	plain, err := gcm.Open(nil, nonce, sealed, nil)
+	if err != nil {
+		return nil, fmt.Errorf("opening sealed config: %w", err)
+	}
+	return plain, nil
 }

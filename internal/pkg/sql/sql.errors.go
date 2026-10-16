@@ -1,12 +1,6 @@
 package sql
 
-import (
-	"errors"
-	"fmt"
-
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/uptrace/bun/driver/pgdriver"
-)
+import "github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 
 // IsPermanent reports whether err is the database rejecting the data itself:
 // running the same statement with the same data again can never succeed.
@@ -29,7 +23,7 @@ func IsPermanent(err error) bool {
 	if err == nil {
 		return false
 	}
-	code := sqlState(err)
+	code := utils.SQLState(err)
 	if len(code) != 5 {
 		return false
 	}
@@ -58,7 +52,7 @@ func IsTransient(err error) bool {
 	if err == nil {
 		return false
 	}
-	code := sqlState(err)
+	code := utils.SQLState(err)
 	if len(code) != 5 {
 		return true
 	}
@@ -71,46 +65,15 @@ func IsTransient(err error) bool {
 
 // ErrorColumn is the column a PostgreSQL error is about (a NOT NULL or type
 // violation names one), or "" when there is none.
-func ErrorColumn(err error) string {
-	if pg, ok := errors.AsType[pgdriver.Error](err); ok {
-		return pg.Field('c')
-	}
-	if pg, ok := errors.AsType[*pgconn.PgError](err); ok && pg != nil {
-		return pg.ColumnName
-	}
-	return ""
-}
+func ErrorColumn(err error) string { return utils.SQLErrorColumn(err) }
 
 // SQLState returns the five-character SQLSTATE of the PostgreSQL error in
 // err's chain, or "" when there is none (a network error, a context error).
-func SQLState(err error) string { return sqlState(err) }
+func SQLState(err error) string { return utils.SQLState(err) }
 
 // Describe is err as text that is safe to log or to put on a dead-letter
 // record: for a PostgreSQL error only its SQLSTATE and where it happened
 // (table, column, constraint), never its message or detail, which can quote
 // the offending row. Any other error is its own text. Keep the original err
 // for errors.Is and IsPermanent; Describe is only for people.
-func Describe(err error) string {
-	if err == nil {
-		return ""
-	}
-	if pg, ok := errors.AsType[pgdriver.Error](err); ok {
-		return fmt.Sprintf("postgres %s SQLSTATE %s table=%q column=%q constraint=%q",
-			pg.Field('S'), pg.Field('C'), pg.Field('t'), pg.Field('c'), pg.Field('n'))
-	}
-	if pg, ok := errors.AsType[*pgconn.PgError](err); ok && pg != nil {
-		return fmt.Sprintf("postgres %s SQLSTATE %s table=%q column=%q constraint=%q",
-			pg.Severity, pg.Code, pg.TableName, pg.ColumnName, pg.ConstraintName)
-	}
-	return err.Error()
-}
-
-func sqlState(err error) string {
-	if pg, ok := errors.AsType[pgdriver.Error](err); ok {
-		return pg.Field('C')
-	}
-	if pg, ok := errors.AsType[*pgconn.PgError](err); ok && pg != nil {
-		return pg.Code
-	}
-	return ""
-}
+func Describe(err error) string { return utils.DescribeSQLError(err) }

@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/uptrace/bun/schema"
 
@@ -85,7 +83,7 @@ func newModel[TData any](idCol, verCol string) (*model[TData], error) {
 		switch {
 		case vf == nil:
 			return nil, fmt.Errorf("%w: %s has no version column %q", ErrUnsupportedColumn, tbl.TypeName, verCol)
-		case !orderable(vf.IndirectType):
+		case !utils.Orderable(vf.IndirectType):
 			return nil, fmt.Errorf("%w: version column %q is a %s; it must be an integer or time.Time",
 				ErrUnsupportedColumn, verCol, vf.IndirectType)
 		}
@@ -105,55 +103,12 @@ func checkColumn(tbl *schema.Table, f *schema.Field) error {
 		return fmt.Errorf("%w: %s.%s is an array; Debezium sends it as a JSON array, which cannot be "+
 			"written back as a Postgres array (store it as jsonb)", ErrUnsupportedColumn, tbl.TypeName, f.Name)
 	}
-	if ambiguousTemporal(f.CreateTableSQLType) {
+	if utils.AmbiguousTemporal(f.CreateTableSQLType) {
 		return fmt.Errorf("%w: %s.%s is %s; use timestamptz (a plain timestamp, time or interval reaches the "+
 			"read model as a number whose unit depends on the column's precision)",
 			ErrUnsupportedColumn, tbl.TypeName, f.Name, f.CreateTableSQLType)
 	}
 	return nil
-}
-
-// ambiguousTemporal reports whether sqlType is a timestamp without time zone,
-// a time of day or an interval: Debezium sends these as integers in a unit
-// (milliseconds or microseconds) chosen by the column's precision.
-func ambiguousTemporal(sqlType string) bool {
-	t := strings.ToLower(strings.TrimSpace(sqlType))
-	if strings.Contains(t, "timestamptz") || strings.Contains(t, "timetz") ||
-		(strings.Contains(t, "with time zone") && !strings.Contains(t, "without")) {
-		return false
-	}
-	base, _, _ := strings.Cut(t, "(")
-	switch strings.TrimSpace(base) {
-	case "timestamp", "timestamp without time zone", "time", "time without time zone", "interval":
-		return true
-	}
-	return false
-}
-
-// orderable reports whether a type can be a version: values that only grow.
-func orderable(t reflect.Type) bool {
-	switch t.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint8, reflect.Uint16, reflect.Uint32:
-		return true
-	}
-	return t == timeType
-}
-
-// peek is the value at idx inside v, or false when a pointer on the way there
-// is nil. Unlike bun's own accessor it never allocates, so reading a model
-// whose embedded struct is a nil pointer neither panics nor changes it.
-func peek(v reflect.Value, idx []int) (reflect.Value, bool) {
-	for _, i := range idx {
-		for v.Kind() == reflect.Pointer {
-			if v.IsNil() {
-				return reflect.Value{}, false
-			}
-			v = v.Elem()
-		}
-		v = v.Field(i)
-	}
-	return v, true
 }
 
 // identify is the primary key of data as a map key and as a query argument.
@@ -163,36 +118,11 @@ func (m *model[TData]) identify(data *TData) (key string, id any, err error) {
 	if data == nil {
 		return "", nil, fmt.Errorf("%w: nil row", ErrMalformedChange)
 	}
-	v, ok := peek(reflect.ValueOf(data).Elem(), m.idField.Index)
+	v, ok := utils.Peek(reflect.ValueOf(data).Elem(), m.idField.Index)
 	if !ok || v.IsZero() || !v.CanInterface() {
 		return "", nil, fmt.Errorf("%w: the row has no %q", ErrMalformedChange, m.idCol)
 	}
-	return keyString(v), v.Interface(), nil
-}
-
-// keyString renders a key value as a stable string for grouping.
-func keyString(v reflect.Value) string {
-	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
-		if v.IsNil() {
-			return ""
-		}
-		v = v.Elem()
-	}
-	switch v.Kind() {
-	case reflect.String:
-		return v.String()
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(v.Int(), 10)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return strconv.FormatUint(v.Uint(), 10)
-	}
-	if v.CanInterface() {
-		if t, ok := v.Interface().(time.Time); ok {
-			return t.UTC().Format(time.RFC3339Nano)
-		}
-		return fmt.Sprint(v.Interface())
-	}
-	return ""
+	return utils.KeyString(v), v.Interface(), nil
 }
 
 // version is the row's version as a number, and whether it has one. A nil
@@ -202,11 +132,11 @@ func (m *model[TData]) version(data *TData) (int64, bool) {
 	if m.verField == nil || data == nil {
 		return 0, false
 	}
-	v, ok := peek(reflect.ValueOf(data).Elem(), m.verField.Index)
+	v, ok := utils.Peek(reflect.ValueOf(data).Elem(), m.verField.Index)
 	if !ok {
 		return 0, true
 	}
-	return versionKey(v)
+	return utils.VersionKey(v)
 }
 
 // versionKnown reports whether the row says what version it was: versioning is
@@ -222,31 +152,4 @@ func (m *model[TData]) versionNewer(a, b *TData) bool {
 	va, okA := m.version(a)
 	vb, okB := m.version(b)
 	return okA && okB && va > vb
-}
-
-// versionKey turns an integer or time version into an exactly comparable
-// number. Times count microseconds (what Postgres stores), which cannot
-// overflow for any date Postgres accepts, unlike nanoseconds.
-func versionKey(v reflect.Value) (int64, bool) {
-	if v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return 0, true
-		}
-		v = v.Elem()
-	}
-	switch v.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return v.Int(), true
-	case reflect.Uint8, reflect.Uint16, reflect.Uint32:
-		return int64(v.Uint()), true
-	}
-	if v.CanInterface() {
-		if t, ok := v.Interface().(time.Time); ok {
-			if t.IsZero() {
-				return 0, true // no time at all is the oldest version
-			}
-			return t.UnixMicro(), true
-		}
-	}
-	return 0, false
 }

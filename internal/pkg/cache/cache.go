@@ -88,7 +88,10 @@ func (c *CacheService) Ping(ctx context.Context) error {
 		return err
 	}
 	defer done()
-	return client.Do(ctx, client.B().Ping().Build()).Error()
+	if err := client.Do(ctx, client.B().Ping().Build()).Error(); err != nil {
+		return fmt.Errorf("cache: ping: %w", err)
+	}
+	return nil
 }
 
 func (c *CacheService) Flush(ctx context.Context) error {
@@ -116,7 +119,10 @@ func (c *CacheService) Get(ctx context.Context, key string) ([]byte, error) {
 	if valkey.IsValkeyNil(err) {
 		return nil, ErrNotFound
 	}
-	return val, err
+	if err != nil {
+		return nil, fmt.Errorf("cache: get: %w", err)
+	}
+	return val, nil
 }
 
 func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
@@ -127,13 +133,18 @@ func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.
 	defer done()
 	val, err := utils.Encode(value)
 	if err != nil {
-		return err
+		return fmt.Errorf("cache: encoding value: %w", err)
 	}
 	cmd := client.B().Set().Key(key).Value(val)
 	if ttl > 0 {
-		return client.Do(ctx, cmd.PxMilliseconds(utils.TTLMillis(ttl)).Build()).Error()
+		err = client.Do(ctx, cmd.PxMilliseconds(utils.TTLMillis(ttl)).Build()).Error()
+	} else {
+		err = client.Do(ctx, cmd.Build()).Error()
 	}
-	return client.Do(ctx, cmd.Build()).Error()
+	if err != nil {
+		return fmt.Errorf("cache: set: %w", err)
+	}
+	return nil
 }
 
 func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error) {
@@ -144,7 +155,7 @@ func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl tim
 	defer done()
 	val, err := utils.Encode(value)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("cache: encoding value: %w", err)
 	}
 	cmd := client.B().Set().Key(key).Value(val).Nx()
 	if ttl > 0 {
@@ -155,7 +166,10 @@ func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl tim
 	if valkey.IsValkeyNil(err) {
 		return false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, fmt.Errorf("cache: setnx: %w", err)
+	}
+	return true, nil
 }
 
 func (c *CacheService) Exists(ctx context.Context, key string) (bool, error) {
@@ -165,7 +179,10 @@ func (c *CacheService) Exists(ctx context.Context, key string) (bool, error) {
 	}
 	defer done()
 	n, err := client.Do(ctx, client.B().Exists().Key(key).Build()).AsInt64()
-	return n > 0, err
+	if err != nil {
+		return false, fmt.Errorf("cache: exists: %w", err)
+	}
+	return n > 0, nil
 }
 
 func (c *CacheService) Delete(ctx context.Context, key string) (bool, error) {
@@ -175,7 +192,10 @@ func (c *CacheService) Delete(ctx context.Context, key string) (bool, error) {
 	}
 	defer done()
 	n, err := client.Do(ctx, client.B().Del().Key(key).Build()).AsInt64()
-	return n > 0, err
+	if err != nil {
+		return false, fmt.Errorf("cache: delete: %w", err)
+	}
+	return n > 0, nil
 }
 
 func (c *CacheService) Keys(ctx context.Context, pattern string) ([]string, error) {
@@ -215,9 +235,12 @@ func (c *CacheService) ZAdd(ctx context.Context, key string, score float64, memb
 	defer done()
 	m, err := utils.Encode(member)
 	if err != nil {
-		return err
+		return fmt.Errorf("cache: encoding member: %w", err)
 	}
-	return client.Do(ctx, client.B().Zadd().Key(key).ScoreMember().ScoreMember(score, m).Build()).Error()
+	if err := client.Do(ctx, client.B().Zadd().Key(key).ScoreMember().ScoreMember(score, m).Build()).Error(); err != nil {
+		return fmt.Errorf("cache: zadd: %w", err)
+	}
+	return nil
 }
 
 func (c *CacheService) ZRange(ctx context.Context, key string, start int64, stop int64) ([]string, error) {
@@ -227,7 +250,11 @@ func (c *CacheService) ZRange(ctx context.Context, key string, start int64, stop
 	}
 	defer done()
 	cmd := client.B().Zrange().Key(key).Min(strconv.FormatInt(start, 10)).Max(strconv.FormatInt(stop, 10)).Build()
-	return client.Do(ctx, cmd).AsStrSlice()
+	out, err := client.Do(ctx, cmd).AsStrSlice()
+	if err != nil {
+		return nil, fmt.Errorf("cache: zrange: %w", err)
+	}
+	return out, nil
 }
 
 func (c *CacheService) ZCard(ctx context.Context, key string) (int64, error) {
@@ -236,7 +263,11 @@ func (c *CacheService) ZCard(ctx context.Context, key string) (int64, error) {
 		return 0, err
 	}
 	defer done()
-	return client.Do(ctx, client.B().Zcard().Key(key).Build()).AsInt64()
+	n, err := client.Do(ctx, client.B().Zcard().Key(key).Build()).AsInt64()
+	if err != nil {
+		return 0, fmt.Errorf("cache: zcard: %w", err)
+	}
+	return n, nil
 }
 
 func (c *CacheService) ZRem(ctx context.Context, key string, members ...any) (int64, error) {
@@ -251,10 +282,14 @@ func (c *CacheService) ZRem(ctx context.Context, key string, members ...any) (in
 	ms := make([]string, len(members))
 	for i, m := range members {
 		if ms[i], err = utils.Encode(m); err != nil {
-			return 0, err
+			return 0, fmt.Errorf("cache: encoding member: %w", err)
 		}
 	}
-	return client.Do(ctx, client.B().Zrem().Key(key).Member(ms...).Build()).AsInt64()
+	n, err := client.Do(ctx, client.B().Zrem().Key(key).Member(ms...).Build()).AsInt64()
+	if err != nil {
+		return 0, fmt.Errorf("cache: zrem: %w", err)
+	}
+	return n, nil
 }
 
 func (c *CacheService) ZRemRangeByScore(ctx context.Context, key string, min string, max string) (int64, error) {
@@ -263,7 +298,11 @@ func (c *CacheService) ZRemRangeByScore(ctx context.Context, key string, min str
 		return 0, err
 	}
 	defer done()
-	return client.Do(ctx, client.B().Zremrangebyscore().Key(key).Min(min).Max(max).Build()).AsInt64()
+	n, err := client.Do(ctx, client.B().Zremrangebyscore().Key(key).Min(min).Max(max).Build()).AsInt64()
+	if err != nil {
+		return 0, fmt.Errorf("cache: zremrangebyscore: %w", err)
+	}
+	return n, nil
 }
 
 func (c *CacheService) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
@@ -272,10 +311,16 @@ func (c *CacheService) Incr(ctx context.Context, key string, ttl time.Duration) 
 		return 0, err
 	}
 	defer done()
+	var n int64
 	if ttl <= 0 {
-		return client.Do(ctx, client.B().Incr().Key(key).Build()).AsInt64()
+		n, err = client.Do(ctx, client.B().Incr().Key(key).Build()).AsInt64()
+	} else {
+		n, err = incrScript.Exec(ctx, client, []string{key}, []string{strconv.FormatInt(utils.TTLMillis(ttl), 10)}).AsInt64()
 	}
-	return incrScript.Exec(ctx, client, []string{key}, []string{strconv.FormatInt(utils.TTLMillis(ttl), 10)}).AsInt64()
+	if err != nil {
+		return 0, fmt.Errorf("cache: incr: %w", err)
+	}
+	return n, nil
 }
 
 func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
@@ -284,7 +329,11 @@ func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration
 		return false, err
 	}
 	defer done()
-	return client.Do(ctx, client.B().Pexpire().Key(key).Milliseconds(utils.TTLMillis(ttl)).Build()).AsBool()
+	ok, err := client.Do(ctx, client.B().Pexpire().Key(key).Milliseconds(utils.TTLMillis(ttl)).Build()).AsBool()
+	if err != nil {
+		return false, fmt.Errorf("cache: expire: %w", err)
+	}
+	return ok, nil
 }
 
 func (c *CacheService) running() (client valkey.Client, done func(), err error) {

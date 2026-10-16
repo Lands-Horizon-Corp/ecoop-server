@@ -6,6 +6,23 @@ import (
 	"time"
 )
 
+// Chunks splits items into runs of at most size, keeping their order. A size
+// below 1 yields everything as one run.
+func Chunks[T any](items []T, size int) func(yield func([]T) bool) {
+	if size < 1 {
+		size = max(len(items), 1)
+	}
+	return func(yield func([]T) bool) {
+		for len(items) > 0 {
+			n := min(size, len(items))
+			if !yield(items[:n]) {
+				return
+			}
+			items = items[n:]
+		}
+	}
+}
+
 type BatchHandler[T any] func(ctx context.Context, batch []T) error
 
 type BatcherConfig[T any] struct {

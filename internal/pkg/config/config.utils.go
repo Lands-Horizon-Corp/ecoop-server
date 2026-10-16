@@ -70,7 +70,7 @@ func fillStruct(v reflect.Value, prefix string, lookup func(string) (string, boo
 		}
 
 		if err := setValue(fv, raw); err != nil {
-			errs = append(errs, fmt.Errorf("%w: %s (%s): %v", ErrInvalidValue, key, field.Type, err))
+			errs = append(errs, fmt.Errorf("%w: %s (%s): %w", ErrInvalidValue, key, field.Type, err))
 		} else {
 			anySet = true
 		}

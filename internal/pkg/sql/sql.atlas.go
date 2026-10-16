@@ -19,6 +19,8 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 // planner plans migrations with Atlas from two scratch databases on the
@@ -301,7 +303,7 @@ func (p *planner) generate(ctx context.Context) (string, error) {
 			"-- rename it to end in .sql to apply it.\n"
 	}
 	file := filepath.Join(p.dir, name)
-	if err := writeNew(file, header+body); err != nil {
+	if err := utils.WriteNew(file, header+body); err != nil {
 		return "", fmt.Errorf("sql: writing %s: %w", name, err)
 	}
 	if review {

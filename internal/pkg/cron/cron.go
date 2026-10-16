@@ -110,7 +110,7 @@ func (c *CronService) CreateJob(data CronJob) error {
 	c.queue.Handle(j.TaskName, func(ctx context.Context, payload []byte) (err error) {
 		defer func() { // a panicking job fails this run, not the worker
 			if r := recover(); r != nil {
-				err = fmt.Errorf("cron: job %q panicked: %v", data.JobID, r)
+				err = fmt.Errorf("%w: job %q: %v", ErrJobPanicked, data.JobID, r)
 			}
 		}()
 		return handler(ctx, payload)
@@ -168,7 +168,10 @@ func (c *CronService) RemoveJob(id string) error {
 		return ErrJobNotFound
 	}
 	delete(c.jobs, id)
-	return c.queue.Unschedule(j.schedule)
+	if err := c.queue.Unschedule(j.schedule); err != nil {
+		return fmt.Errorf("cron: removing job %q: %w", id, err)
+	}
+	return nil
 }
 
 func (c *CronService) ExecuteJob(ctx context.Context, taskName string, payload []byte) error {
@@ -205,8 +208,10 @@ func (c *CronService) execute(ctx context.Context, j *job, payload []byte) error
 	if payload == nil {
 		payload = j.Payload
 	}
-	_, err := c.queue.Enqueue(ctx, j.TaskName, payload)
-	return err
+	if _, err := c.queue.Enqueue(ctx, j.TaskName, payload); err != nil {
+		return fmt.Errorf("cron: running job %q: %w", j.JobID, err)
+	}
+	return nil
 }
 
 func (c *CronService) SetLocation(loc *time.Location) error {

@@ -171,9 +171,12 @@ func (q *QueueService) Ping(ctx context.Context) error {
 		return ErrNotStarted
 	}
 	if err := q.client.Ping(); err != nil {
-		return err
+		return fmt.Errorf("queue: ping: %w", err)
 	}
-	return q.cache.Ping(ctx)
+	if err := q.cache.Ping(ctx); err != nil {
+		return fmt.Errorf("queue: ping cache: %w", err)
+	}
+	return nil
 }
 
 // conn builds the queue's connection from the cache's settings, on DB. A
@@ -208,7 +211,7 @@ func (q *QueueService) Enqueue(ctx context.Context, taskType string, payload any
 	}
 	data, err := encode(payload)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("queue: enqueue %q: %w", taskType, err)
 	}
 	set := apply(opts)
 	base := set.queue
@@ -217,7 +220,7 @@ func (q *QueueService) Enqueue(ctx context.Context, taskType string, payload any
 	}
 	info, err := q.client.EnqueueContext(ctx, asynq.NewTask(taskType, data), append(set.enqueue, asynq.Queue(q.name(base)))...)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("queue: enqueue %q: %w", taskType, err)
 	}
 	return info.ID, nil
 }
@@ -252,7 +255,7 @@ func (q *QueueService) run(ctx context.Context, t *asynq.Task) error {
 		window := now.UnixNano() / int64(r.per)
 		n, err := q.cache.Incr(ctx, q.name(RateLimitKeyPrefix)+t.Type()+":"+strconv.FormatInt(window, 10), 2*r.per)
 		if err != nil {
-			return err
+			return fmt.Errorf("queue: rate limit for %q: %w", t.Type(), err)
 		}
 		if n > r.limit {
 			return RetryAfter(time.Unix(0, (window+1)*int64(r.per)).Sub(now), ErrRateLimited)
