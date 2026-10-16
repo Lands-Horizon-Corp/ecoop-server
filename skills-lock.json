@@ -37,6 +37,12 @@
       "skillPath": "skills/golang-documentation/SKILL.md",
       "computedHash": "30eb4877c93ed2aa84c374d4ca130b6c5ffd8a62be581fe4a11c285787a01677"
     },
+    "golang-error-handling": {
+      "source": "samber/cc-skills-golang",
+      "sourceType": "github",
+      "skillPath": "skills/golang-error-handling/SKILL.md",
+      "computedHash": "7b872085d11457427db2d5559f530d9a7c4d93e09c4709a030731868084db6d3"
+    },
     "golang-observability": {
       "source": "samber/cc-skills-golang",
       "sourceType": "github",
