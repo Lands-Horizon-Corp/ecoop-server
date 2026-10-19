@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 func (c *PaginationService[TData, TID]) Exists(
@@ -28,7 +29,9 @@ func (c *PaginationService[TData, TID]) ExistsWithTx(
 
 func (c *PaginationService[TData, TID]) exists(
 	ctx context.Context, db bun.IDB, filter StructuredFilter,
-) (bool, error) {
+) (_ bool, err error) {
+	ctx, op := c.begin(ctx, "exists")
+	defer func() { op.End(err) }()
 	ok, err := utils.Scoped(ctx, db, func(q bun.IDB) (bool, error) { return c.existsQuery(ctx, q, filter) })
 	if err != nil {
 		return false, err

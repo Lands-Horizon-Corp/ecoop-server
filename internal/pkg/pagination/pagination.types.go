@@ -5,9 +5,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 const (

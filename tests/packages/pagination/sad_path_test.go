@@ -122,7 +122,11 @@ func TestSad_PaginateInvalidFilters(t *testing.T) {
 // flip the expectation to ErrUnknownField.
 func TestSad_PaginateDropsUnknownFieldSilently(t *testing.T) {
 	fx := need(t)
-	res, err := fx.svc.Paginate(ctxT(t), pagination.Pagination{Filter: and(f("nmae", pagination.ModeEqual, "Alice"))})
+	// The typo under test is "name" with its middle letters swapped. It is built
+	// from parts so that no spell-fixer corrects it: spelled right it is a real
+	// column, and the filter would be applied instead of dropped.
+	typo := "n" + "mae"
+	res, err := fx.svc.Paginate(ctxT(t), pagination.Pagination{Filter: and(f(typo, pagination.ModeEqual, "Alice"))})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}

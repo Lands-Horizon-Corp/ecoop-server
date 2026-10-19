@@ -1,12 +1,12 @@
 package pagination
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/cloudwego/hertz/pkg/app"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 func (c *PaginationService[TData, TID]) checkReady() error {
@@ -57,9 +57,7 @@ func parseSort(ctx *app.RequestContext) ([]SortField, error) {
 	return sortFields, nil
 }
 
-func (c *PaginationService[TData, TID]) normalizeFilters(
-	ctx context.Context, filters []Filter,
-) []Filter {
+func (c *PaginationService[TData, TID]) normalizeFilters(filters []Filter) []Filter {
 	if len(filters) == 0 {
 		return filters
 	}
@@ -71,7 +69,7 @@ func (c *PaginationService[TData, TID]) normalizeFilters(
 		}
 		if f.Mode == ModeCustom {
 			if f.Custom == nil {
-				// c.warn(ctx, "filter dropped: custom filter has no function", "field", f.Field)
+				// A custom filter with no function has nothing to apply.
 				continue
 			}
 			normalized = append(normalized, f)
@@ -79,7 +77,7 @@ func (c *PaginationService[TData, TID]) normalizeFilters(
 		}
 		f.Field = utils.NormalizeColumnName(f.Field)
 		if utils.StructTagFieldIndex[TData]("bun", f.Field) == -1 {
-			// c.warn(ctx, "filter dropped: field is not a column of the entity", "field", f.Field, "mode", string(f.Mode))
+			// A field that is not a column of the entity is dropped, not queried.
 			continue
 		}
 		normalized = append(normalized, f)

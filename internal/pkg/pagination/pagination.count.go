@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 func (c *PaginationService[TData, TID]) CountWithTx(
@@ -28,7 +29,9 @@ func (c *PaginationService[TData, TID]) Count(
 
 func (c *PaginationService[TData, TID]) count(
 	ctx context.Context, db bun.IDB, filter StructuredFilter,
-) (int64, error) {
+) (_ int64, err error) {
+	ctx, op := c.begin(ctx, "count")
+	defer func() { op.End(err) }()
 	total, err := utils.Scoped(ctx, db, func(q bun.IDB) (int64, error) {
 		return c.countQuery(ctx, q, filter)
 	})
@@ -54,5 +57,5 @@ func (c *PaginationService[TData, TID]) countQuery(
 	if err != nil {
 		return 0, fmt.Errorf("counting: %w", err)
 	}
-	return int64(total), nil
+	return total, nil
 }

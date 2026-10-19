@@ -408,7 +408,7 @@ func walk(t testing.TB, fx *fixture, sf pagination.StructuredFilter, size int) [
 	t.Helper()
 	var out []string
 	var cursor *string
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		res := page(t, fx, sf, size, cursor)
 		out = append(out, nameList(res.Data)...)
 		if res.NextCursor == nil {

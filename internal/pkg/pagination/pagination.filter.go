@@ -5,8 +5,9 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 func (c *PaginationService[TData, TID]) applyFilters(

@@ -5,8 +5,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 func (c *PaginationService[TData, TID]) resolveSortFields(
@@ -74,7 +75,11 @@ func (c *PaginationService[TData, TID]) decodeCursor(
 	if err != nil {
 		return cursorPayload{}, false, fmt.Errorf("%w: %w", ErrInvalidCursor, err)
 	}
-	payload.Values = clean.Interface().([]string)
+	values, isStrings := clean.Interface().([]string)
+	if !isStrings {
+		return cursorPayload{}, false, fmt.Errorf("%w: values are not text", ErrInvalidCursor)
+	}
+	payload.Values = values
 	if len(payload.Values) != len(sortFields) {
 		return cursorPayload{}, false, fmt.Errorf(
 			"%w: does not match the current sort fields: expected %d values, got %d",

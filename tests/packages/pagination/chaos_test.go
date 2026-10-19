@@ -44,7 +44,7 @@ func TestChaos_RandomFilters(t *testing.T) {
 	}
 	sortables := []string{"id", "name", "tier", "balance", "score", "email", "created_at", "nope"}
 
-	for i := 0; i < 1500; i++ {
+	for i := range 1500 {
 		sf := pagination.StructuredFilter{Logic: []pagination.Logic{pagination.LogicAnd, pagination.LogicOr, ""}[rng.Intn(3)]}
 		for n := rng.Intn(4); n > 0; n-- {
 			sf.Filters = append(sf.Filters, pick())
@@ -59,7 +59,7 @@ func TestChaos_RandomFilters(t *testing.T) {
 
 		mustNotPanic(t, "random request", func() {
 			var cursor *string
-			for hop := 0; hop < 4; hop++ {
+			for range 4 {
 				res, err := fx.svc.Paginate(ctxT(t), pagination.Pagination{Filter: sf, PageSize: size, Cursor: cursor})
 				if err != nil {
 					if len(res.Data) != 0 {
@@ -91,7 +91,7 @@ func TestChaos_RandomFilters(t *testing.T) {
 func TestChaos_RandomCursors(t *testing.T) {
 	fx := need(t)
 	rng := rand.New(rand.NewSource(7))
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		raw := make([]byte, rng.Intn(120))
 		rng.Read(raw)
 		c := string(raw)

@@ -8,9 +8,10 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 func (c *PaginationService[TData, TID]) Pagination(
@@ -31,18 +32,16 @@ func (c *PaginationService[TData, TID]) paginate(
 	pagination Pagination,
 	forUpdate bool,
 	preloads ...string,
-) (*PaginationResult[TData], error) {
+) (_ *PaginationResult[TData], err error) {
 	if forUpdate && utils.RowLocksDisabled(ctx) {
 		forUpdate = false
 	}
-	// started := time.Now()
+	ctx, op := c.begin(ctx, "paginate")
+	defer func() { op.End(err) }()
 	result, err := utils.Scoped(ctx, db, func(q bun.IDB) (*PaginationResult[TData], error) {
 		return c.paginateQuery(ctx, q, extraFilter, pagination, forUpdate, preloads...)
 	})
 	if err != nil {
-		// return nil, c.report(ctx, "paginate", started, err,
-		// 	[]any{"page_size", pagination.PageSize, "has_cursor", pagination.Cursor != nil, "for_update", forUpdate},
-		// 	extraFilter, pagination.Filter)
 		return nil, err
 	}
 	return result, nil
@@ -65,7 +64,7 @@ func (c *PaginationService[TData, TID]) paginateQuery(
 		pagination.PageSize = math.MaxInt - 1
 	}
 
-	pagination.Filter.Filters = c.normalizeFilters(ctx, pagination.Filter.Filters)
+	pagination.Filter.Filters = c.normalizeFilters(pagination.Filter.Filters)
 	if len(pagination.Filter.SortFields) == 0 {
 		pagination.Filter.SortFields = extraFilter.SortFields
 	}

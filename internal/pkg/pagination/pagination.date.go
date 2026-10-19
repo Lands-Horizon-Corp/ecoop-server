@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 func resolveZone(name string) (*time.Location, error) {

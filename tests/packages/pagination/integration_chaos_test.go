@@ -150,7 +150,7 @@ func TestChaos_MoreRequestsThanConnections(t *testing.T) {
 			defer wg.Done()
 			got, err := fx.svc.Filter(ctxT(t), and(f("tier", pagination.ModeEqual, "gold")))
 			if err != nil || len(got) != 4 {
-				errs <- fmt.Errorf("%v, %d rows", err, len(got))
+				errs <- fmt.Errorf("%w, %d rows", err, len(got))
 			}
 		}()
 	}
@@ -331,7 +331,10 @@ func TestProd_LargeTable(t *testing.T) {
 	})
 	t.Run("the SQL the library really emits is index-friendly and OFFSET-free", func(t *testing.T) {
 		rec := &sqlRecorder{}
-		db.AddQueryHook(rec)
+		// WithQueryHook returns a copy; the library under test holds this *bun.DB, so
+		// the hook has to go onto it.
+		//lint:ignore SA1019 see above
+		db.AddQueryHook(rec) //nolint:staticcheck // see above
 		sf := and()
 		p := page(t, fx, sf, 100, nil)
 		page(t, fx, sf, 100, p.NextCursor)
