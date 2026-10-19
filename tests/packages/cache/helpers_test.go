@@ -18,8 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
 	valkey "github.com/valkey-io/valkey-go"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
 )
 
 // Server-backed tests run against the valkey service in docker-compose.yml,

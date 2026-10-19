@@ -11,6 +11,7 @@ import (
 
 	valkey "github.com/valkey-io/valkey-go"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -19,20 +20,44 @@ type CacheService struct {
 	client valkey.Client
 
 	inflight *utils.Inflight
+	obs      observability.IObserver
 
 	password  string
 	addresses []string
 }
 
-func NewCacheService(addresses []string, password string, inflight *utils.Inflight) ICacheService {
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing.
+func WithObserver(o observability.IObserver) Option {
+	return func(c *CacheService) { c.obs = observability.Pick(o) }
+}
+
+func NewCacheService(addresses []string, password string, inflight *utils.Inflight, opts ...Option) ICacheService {
 	if inflight == nil {
 		inflight = utils.NewInflight()
 	}
-	return &CacheService{
+	c := &CacheService{
 		password:  password,
 		addresses: addresses,
 		inflight:  inflight,
+		obs:       observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
+	}
+	return c
+}
+
+// begin starts the Operation of one cache call. A service built as a bare
+// struct literal has no observer, so it falls back to Nop (without writing, so
+// concurrent calls cannot race).
+func (c *CacheService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if c.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentCache, name)
+	}
+	return c.obs.Begin(ctx, observability.ComponentCache, name)
 }
 
 func (c *CacheService) Run(ctx context.Context) error {
@@ -82,7 +107,7 @@ func (c *CacheService) Client() valkey.Client {
 	return c.client
 }
 
-func (c *CacheService) Ping(ctx context.Context) error {
+func (c *CacheService) doPing(ctx context.Context) error {
 	client, done, err := c.running()
 	if err != nil {
 		return err
@@ -94,7 +119,7 @@ func (c *CacheService) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (c *CacheService) Flush(ctx context.Context) error {
+func (c *CacheService) doFlush(ctx context.Context) error {
 	client, done, err := c.running()
 	if err != nil {
 		return err
@@ -102,14 +127,14 @@ func (c *CacheService) Flush(ctx context.Context) error {
 	defer done()
 	for addr, node := range client.Nodes() {
 		err := node.Do(ctx, node.B().Flushdb().Build()).Error()
-		if verr, ok := valkey.IsValkeyErr(err); err != nil && !(ok && strings.HasPrefix(verr.Error(), "READONLY")) {
+		if verr, ok := valkey.IsValkeyErr(err); err != nil && (!ok || !strings.HasPrefix(verr.Error(), "READONLY")) {
 			return fmt.Errorf("cache: flushing %s: %w", addr, err)
 		}
 	}
 	return nil
 }
 
-func (c *CacheService) Get(ctx context.Context, key string) ([]byte, error) {
+func (c *CacheService) doGet(ctx context.Context, key string) ([]byte, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return nil, err
@@ -125,7 +150,7 @@ func (c *CacheService) Get(ctx context.Context, key string) ([]byte, error) {
 	return val, nil
 }
 
-func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
+func (c *CacheService) doSet(ctx context.Context, key string, value any, ttl time.Duration) error {
 	client, done, err := c.running()
 	if err != nil {
 		return err
@@ -147,7 +172,7 @@ func (c *CacheService) Set(ctx context.Context, key string, value any, ttl time.
 	return nil
 }
 
-func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error) {
+func (c *CacheService) doSetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return false, err
@@ -172,7 +197,7 @@ func (c *CacheService) SetNX(ctx context.Context, key string, value any, ttl tim
 	return true, nil
 }
 
-func (c *CacheService) Exists(ctx context.Context, key string) (bool, error) {
+func (c *CacheService) doExists(ctx context.Context, key string) (bool, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return false, err
@@ -185,7 +210,7 @@ func (c *CacheService) Exists(ctx context.Context, key string) (bool, error) {
 	return n > 0, nil
 }
 
-func (c *CacheService) Delete(ctx context.Context, key string) (bool, error) {
+func (c *CacheService) doDelete(ctx context.Context, key string) (bool, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return false, err
@@ -198,7 +223,7 @@ func (c *CacheService) Delete(ctx context.Context, key string) (bool, error) {
 	return n > 0, nil
 }
 
-func (c *CacheService) Keys(ctx context.Context, pattern string) ([]string, error) {
+func (c *CacheService) doKeys(ctx context.Context, pattern string) ([]string, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return nil, err
@@ -227,7 +252,7 @@ func (c *CacheService) Keys(ctx context.Context, pattern string) ([]string, erro
 	return keys, nil
 }
 
-func (c *CacheService) ZAdd(ctx context.Context, key string, score float64, member any) error {
+func (c *CacheService) doZAdd(ctx context.Context, key string, score float64, member any) error {
 	client, done, err := c.running()
 	if err != nil {
 		return err
@@ -243,7 +268,7 @@ func (c *CacheService) ZAdd(ctx context.Context, key string, score float64, memb
 	return nil
 }
 
-func (c *CacheService) ZRange(ctx context.Context, key string, start int64, stop int64) ([]string, error) {
+func (c *CacheService) doZRange(ctx context.Context, key string, start int64, stop int64) ([]string, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return nil, err
@@ -257,7 +282,7 @@ func (c *CacheService) ZRange(ctx context.Context, key string, start int64, stop
 	return out, nil
 }
 
-func (c *CacheService) ZCard(ctx context.Context, key string) (int64, error) {
+func (c *CacheService) doZCard(ctx context.Context, key string) (int64, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return 0, err
@@ -270,7 +295,7 @@ func (c *CacheService) ZCard(ctx context.Context, key string) (int64, error) {
 	return n, nil
 }
 
-func (c *CacheService) ZRem(ctx context.Context, key string, members ...any) (int64, error) {
+func (c *CacheService) doZRem(ctx context.Context, key string, members ...any) (int64, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return 0, err
@@ -292,20 +317,20 @@ func (c *CacheService) ZRem(ctx context.Context, key string, members ...any) (in
 	return n, nil
 }
 
-func (c *CacheService) ZRemRangeByScore(ctx context.Context, key string, min string, max string) (int64, error) {
+func (c *CacheService) doZRemRangeByScore(ctx context.Context, key string, lowest string, highest string) (int64, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return 0, err
 	}
 	defer done()
-	n, err := client.Do(ctx, client.B().Zremrangebyscore().Key(key).Min(min).Max(max).Build()).AsInt64()
+	n, err := client.Do(ctx, client.B().Zremrangebyscore().Key(key).Min(lowest).Max(highest).Build()).AsInt64()
 	if err != nil {
 		return 0, fmt.Errorf("cache: zremrangebyscore: %w", err)
 	}
 	return n, nil
 }
 
-func (c *CacheService) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+func (c *CacheService) doIncr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return 0, err
@@ -323,7 +348,7 @@ func (c *CacheService) Incr(ctx context.Context, key string, ttl time.Duration) 
 	return n, nil
 }
 
-func (c *CacheService) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+func (c *CacheService) doExpire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	client, done, err := c.running()
 	if err != nil {
 		return false, err

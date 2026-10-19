@@ -11,8 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
 	valkey "github.com/valkey-io/valkey-go"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
 )
 
 // Integration chaos: the patterns the app builds on the cache (rate limits,

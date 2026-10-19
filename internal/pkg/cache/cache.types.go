@@ -31,6 +31,9 @@ const (
 	ScanCount = 1000
 )
 
+// Option configures a CacheService: WithObserver.
+type Option func(*CacheService)
+
 // Config is how a CacheService connects to Valkey.
 type Config struct {
 	Addresses []string
@@ -52,7 +55,7 @@ type ICacheService interface {
 	ZRange(ctx context.Context, key string, start, stop int64) ([]string, error)
 	ZCard(ctx context.Context, key string) (int64, error)
 	ZRem(ctx context.Context, key string, members ...any) (int64, error)
-	ZRemRangeByScore(ctx context.Context, key string, min, max string) (int64, error)
+	ZRemRangeByScore(ctx context.Context, key string, lowest, highest string) (int64, error)
 	SetNX(ctx context.Context, key string, value any, ttl time.Duration) (bool, error)
 	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
 	Expire(ctx context.Context, key string, ttl time.Duration) (bool, error)
