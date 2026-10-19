@@ -8,9 +8,10 @@ import (
 	"runtime/debug"
 	"testing"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/qr"
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/crypto/chacha20poly1305"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/qr"
 )
 
 const testSecret = "ecoop-qr-test-secret"

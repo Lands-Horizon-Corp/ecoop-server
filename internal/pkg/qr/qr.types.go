@@ -19,6 +19,9 @@ var (
 const maxDecodedSize = 1 << 20 // 1 MiB
 
 type (
+	// Option configures a QRService: WithObserver.
+	Option func(*QRService)
+
 	QRData struct {
 		Data string `json:"data"`
 		Type string `json:"type"`

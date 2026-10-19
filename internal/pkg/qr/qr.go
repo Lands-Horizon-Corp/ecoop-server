@@ -16,6 +16,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/crypto/chacha20poly1305"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -26,6 +27,22 @@ type QRService struct {
 	codecs   atomic.Pointer[codecs]
 	inflight *utils.Inflight
 	secret   string
+	obs      observability.IObserver
+}
+
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing.
+func WithObserver(o observability.IObserver) Option {
+	return func(q *QRService) { q.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one call. A service built as a bare struct
+// literal has no observer, so it falls back to Nop without writing.
+func (q *QRService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if q.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentQR, name)
+	}
+	return q.obs.Begin(ctx, observability.ComponentQR, name)
 }
 
 // codecs is everything Start creates and Stop releases.
@@ -42,14 +59,21 @@ func (c *codecs) close() {
 
 // NewQRServices creates the service. inflight may be shared with other
 // services; nil gives the service its own tracker.
-func NewQRServices(secret string, inflight *utils.Inflight) IQRServices {
+func NewQRServices(secret string, inflight *utils.Inflight, opts ...Option) IQRServices {
 	if inflight == nil {
 		inflight = utils.NewInflight()
 	}
-	return &QRService{
+	q := &QRService{
 		secret:   secret,
 		inflight: inflight,
+		obs:      observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(q)
+		}
+	}
+	return q
 }
 
 func (q *QRService) Start(ctx context.Context) error {
@@ -123,12 +147,14 @@ func (q *QRService) acquire() (c *codecs, done func(), err error) {
 	return c, done, nil
 }
 
-func (q *QRService) Decode(ctx context.Context, encodedStr string) (QRData, error) {
+func (q *QRService) Decode(ctx context.Context, encodedStr string) (_ QRData, err error) {
 	c, done, err := q.acquire()
 	if err != nil {
 		return QRData{}, err
 	}
 	defer done()
+	_, op := q.begin(ctx, "decode")
+	defer func() { op.End(err) }()
 	decodedStr, err := base64.StdEncoding.DecodeString(encodedStr)
 	if err != nil {
 		return QRData{}, err
@@ -147,13 +173,13 @@ func (q *QRService) Decode(ctx context.Context, encodedStr string) (QRData, erro
 		return QRData{}, err
 	}
 	var decodedQRData QRData
-	if err = sonic.Unmarshal(decompressedStr, &decodedQRData); err != nil {
+	if err := sonic.Unmarshal(decompressedStr, &decodedQRData); err != nil {
 		return QRData{}, err
 	}
 	return decodedQRData, nil
 }
 
-func (q *QRService) Encode(ctx context.Context, data *QRData) (string, error) {
+func (q *QRService) Encode(ctx context.Context, data *QRData) (_ string, err error) {
 	if data == nil {
 		return "", ErrNilData
 	}
@@ -165,6 +191,8 @@ func (q *QRService) Encode(ctx context.Context, data *QRData) (string, error) {
 		return "", err
 	}
 	defer done()
+	_, op := q.begin(ctx, "encode")
+	defer func() { op.End(err) }()
 	marshalled, err := sonic.Marshal(data)
 	if err != nil {
 		return "", err
