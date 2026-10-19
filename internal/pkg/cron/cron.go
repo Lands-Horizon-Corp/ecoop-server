@@ -10,6 +10,7 @@ import (
 
 	robfig "github.com/robfig/cron/v3"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
@@ -20,6 +21,7 @@ import (
 type CronService struct {
 	queue queue.IQueueService
 	gate  *utils.Gate
+	obs   observability.IObserver
 
 	mu   sync.Mutex // guards jobs and loc
 	jobs map[string]*job
@@ -35,13 +37,36 @@ var parser = robfig.NewParser(robfig.Minute | robfig.Hour | robfig.Dom | robfig.
 
 // NewCronService creates the service. inflight may be shared with other
 // services; nil gives the service its own tracker.
-func NewCronService(queue queue.IQueueService, inflight *utils.Inflight) ICronServices {
-	return &CronService{
+func NewCronService(queue queue.IQueueService, inflight *utils.Inflight, opts ...Option) ICronServices {
+	c := &CronService{
 		queue: queue,
 		gate:  utils.NewGate(inflight),
 		jobs:  map[string]*job{},
 		loc:   time.UTC,
+		obs:   observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
+	}
+	return c
+}
+
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing. Running a job is observed by the queue
+// (queue/run), so cron does not count the same run a second time.
+func WithObserver(o observability.IObserver) Option {
+	return func(c *CronService) { c.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one unit of work. A service built as a bare
+// struct literal has no observer, so it falls back to Nop without writing.
+func (c *CronService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if c.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentCron, name)
+	}
+	return c.obs.Begin(ctx, observability.ComponentCron, name)
 }
 
 func (c *CronService) Start(ctx context.Context) error {
@@ -71,13 +96,15 @@ func (c *CronService) Ping(ctx context.Context) error {
 	return c.queue.Ping(ctx)
 }
 
-func (c *CronService) CreateJob(data CronJob) error {
+func (c *CronService) CreateJob(data CronJob) (err error) {
 	if c.gate == nil || c.jobs == nil {
 		return ErrNoTracker
 	}
 	if utils.IsNil(c.queue) {
 		return ErrNoQueue
 	}
+	_, op := c.begin(context.Background(), "create_job")
+	defer func() { op.End(err) }()
 	var errs []error
 	if strings.TrimSpace(data.JobID) == "" {
 		errs = append(errs, ErrNoJobID)
@@ -157,10 +184,12 @@ func (c *CronService) schedule(j *job) error {
 	return nil
 }
 
-func (c *CronService) RemoveJob(id string) error {
+func (c *CronService) RemoveJob(id string) (err error) {
 	if c.jobs == nil {
 		return ErrJobNotFound
 	}
+	_, op := c.begin(context.Background(), "remove_job")
+	defer func() { op.End(err) }()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	j, ok := c.jobs[id]
@@ -199,12 +228,14 @@ func (c *CronService) ExecuteJobByID(ctx context.Context, id string, payload []b
 	return c.execute(ctx, j, payload)
 }
 
-func (c *CronService) execute(ctx context.Context, j *job, payload []byte) error {
+func (c *CronService) execute(ctx context.Context, j *job, payload []byte) (err error) {
 	done, ok := c.gate.Enter()
 	if !ok {
 		return ErrNotStarted
 	}
 	defer done()
+	ctx, op := c.begin(ctx, "execute")
+	defer func() { op.End(err) }()
 	if payload == nil {
 		payload = j.Payload
 	}

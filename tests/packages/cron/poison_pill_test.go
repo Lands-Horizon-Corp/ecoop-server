@@ -89,7 +89,7 @@ func TestPoison_BinaryAndLargePayloads(t *testing.T) {
 	}
 	eventually(t, 10*time.Second, "both runs", func() bool { return r.n.Load() == 2 })
 	got := r.payloads()
-	if !(bytes.Equal(got[0], binary) && bytes.Equal(got[1], large) || bytes.Equal(got[1], binary) && bytes.Equal(got[0], large)) {
+	if (!bytes.Equal(got[0], binary) || !bytes.Equal(got[1], large)) && (!bytes.Equal(got[1], binary) || !bytes.Equal(got[0], large)) {
 		t.Fatal("payloads changed in transit")
 	}
 }

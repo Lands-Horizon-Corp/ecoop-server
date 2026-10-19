@@ -26,6 +26,9 @@ var (
 )
 
 type (
+	// Option configures a CronService: WithObserver.
+	Option func(*CronService)
+
 	CronJob struct {
 		JobID    string
 		Schedule string

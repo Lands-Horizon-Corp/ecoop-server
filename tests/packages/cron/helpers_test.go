@@ -120,7 +120,7 @@ func newQueue(t testing.TB, addr ...string) queue.IQueueService {
 	if err := ch.Run(context.Background()); err != nil {
 		t.Fatalf("cache Run: %v", err)
 	}
-	q := queue.NewQueueService(ch, queue.Namespace(qns.For(t, valkeyAddr, valkeyPassword)))
+	q := queue.NewQueueService(ch, queue.WithNamespace(qns.For(t, valkeyAddr, valkeyPassword)))
 	if err := q.Start(context.Background()); err != nil {
 		t.Fatalf("queue Start: %v", err)
 	}
