@@ -66,6 +66,9 @@ var (
 )
 
 type (
+	// Option configures a SQLService: WithObserver.
+	Option func(*SQLService)
+
 	ISQLService interface {
 		Start(ctx context.Context) error
 		Run(ctx context.Context) error

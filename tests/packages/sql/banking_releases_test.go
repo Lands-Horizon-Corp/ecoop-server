@@ -131,8 +131,6 @@ END $$;
 		`DROP VIEW customer_accounts;`},
 }
 
-const bankLatest = 200 // version of the last release
-
 // writeReleases writes releases from..to (1-based, inclusive) into e.
 func writeReleases(t testing.TB, e *env, from, to int) {
 	t.Helper()

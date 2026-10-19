@@ -214,7 +214,7 @@ func m100Generate(label string) (h m100History) {
 				return errors.New("the models changed but no migration was generated")
 			}
 			if err := s.Migrate(ctx); err != nil || len(files()) != n {
-				return fmt.Errorf("does not converge: %v, %d -> %d files", err, n, len(files()))
+				return fmt.Errorf("does not converge: %w, %d -> %d files", err, n, len(files()))
 			}
 			h.files = append(h.files, n)
 			return nil

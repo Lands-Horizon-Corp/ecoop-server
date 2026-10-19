@@ -21,6 +21,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -43,6 +44,22 @@ type SQLService struct {
 	migrating chan struct{} // one migration command at a time in this process
 	gate      *utils.Gate
 	inflight  *utils.Inflight
+	obs       observability.IObserver
+}
+
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing.
+func WithObserver(o observability.IObserver) Option {
+	return func(s *SQLService) { s.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one command. A service built as a bare struct
+// literal has no observer, so it falls back to Nop without writing.
+func (s *SQLService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if s.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentSQL, name)
+	}
+	return s.obs.Begin(ctx, observability.ComponentSQL, name)
 }
 
 // NewSQLService creates a Postgres service. migrations is an opened
@@ -59,6 +76,7 @@ func NewSQLService(
 	output io.Writer,
 	models []any,
 	inflight *utils.Inflight,
+	opts ...Option,
 ) ISQLService {
 	if output == nil {
 		output = os.Stdout
@@ -66,7 +84,7 @@ func NewSQLService(
 	if inflight == nil {
 		inflight = utils.NewInflight()
 	}
-	return &SQLService{
+	s := &SQLService{
 		dsn:             dsn,
 		maxIdleConn:     maxIdleConn,
 		maxOpenConn:     maxOpenConn,
@@ -79,13 +97,22 @@ func NewSQLService(
 		migrating:       make(chan struct{}, 1),
 		gate:            utils.NewGate(inflight),
 		inflight:        inflight,
+		obs:             observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
 }
 
-func (s *SQLService) Start(ctx context.Context) error {
+func (s *SQLService) Start(ctx context.Context) (err error) {
 	if ctx == nil {
 		return ErrNilContext
 	}
+	ctx, op := s.begin(ctx, "start")
+	defer func() { op.End(err) }()
 	if s.dsn == "" {
 		return ErrNoDSN
 	}
@@ -145,10 +172,12 @@ func connector(dsn string, opts ...pgdriver.Option) (c *pgdriver.Connector, err 
 	return pgdriver.NewConnector(append([]pgdriver.Option{pgdriver.WithDSN(dsn)}, opts...)...), nil
 }
 
-func (s *SQLService) Run(ctx context.Context) error {
+func (s *SQLService) Run(ctx context.Context) (err error) {
 	if !s.autoMigrate {
 		return nil
 	}
+	ctx, op := s.begin(ctx, "run")
+	defer func() { op.End(err) }()
 	return s.migration(ctx, func(mig *sql.DB, dir string) error {
 		return withMigrationLock(ctx, mig, func() error { return upLocked(ctx, mig, dir) })
 	})
@@ -164,7 +193,8 @@ func (s *SQLService) Stop(ctx context.Context) error {
 	if err := s.gate.Close(ctx); err != nil {
 		go func() {
 			_ = s.inflight.Wait(context.Background())
-			s.release(db, migdb)
+			// Nobody is waiting for this result: Stop has already returned its error.
+			_ = s.release(db, migdb)
 		}()
 		return fmt.Errorf("sql: stop: commands still running: %w", err)
 	}
@@ -183,12 +213,14 @@ func (s *SQLService) release(db *bun.DB, migdb *sql.DB) error {
 	return nil
 }
 
-func (s *SQLService) Ping(ctx context.Context) error {
+func (s *SQLService) Ping(ctx context.Context) (err error) {
 	db, _, done, err := s.ready(ctx)
 	if err != nil {
 		return err
 	}
 	defer done()
+	ctx, op := s.begin(ctx, "ping")
+	defer func() { op.End(err) }()
 	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("sql: ping: %w", err)
 	}
@@ -199,10 +231,12 @@ func (s *SQLService) Client() *bun.DB {
 	return s.db.Load()
 }
 
-func (s *SQLService) Migrate(ctx context.Context) error {
+func (s *SQLService) Migrate(ctx context.Context) (err error) {
 	if err := validModels(s.models); err != nil {
 		return err
 	}
+	ctx, op := s.begin(ctx, "migrate")
+	defer func() { op.End(err) }()
 	return s.migration(ctx, func(mig *sql.DB, dir string) error {
 		return withMigrationLock(ctx, mig, func() error {
 			if err := upLocked(ctx, mig, dir); err != nil || len(s.models) == 0 {
@@ -233,7 +267,9 @@ func (s *SQLService) Migrate(ctx context.Context) error {
 	})
 }
 
-func (s *SQLService) Fresh(ctx context.Context) error {
+func (s *SQLService) Fresh(ctx context.Context) (err error) {
+	ctx, op := s.begin(ctx, "fresh")
+	defer func() { op.End(err) }()
 	return s.migration(ctx, func(mig *sql.DB, dir string) error {
 		return withMigrationLock(ctx, mig, func() error {
 			db := bun.NewDB(mig, pgdialect.New())

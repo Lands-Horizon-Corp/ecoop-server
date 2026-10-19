@@ -136,13 +136,13 @@ func (p *planner) drift(ctx context.Context, mig *sql.DB) error {
 // whose foreign key names a table not created yet waits for the next round.
 func (p *planner) createModels(ctx context.Context, db *sql.DB) error {
 	b := bun.NewDB(db, pgdialect.New()) // closed with db
-	if exts, err := extensions(ctx, p.folder); err != nil {
+	exts, err := extensions(ctx, p.folder)
+	if err != nil {
 		return err
-	} else {
-		for _, e := range exts {
-			if _, err := db.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS "`+e+`"`); err != nil {
-				return fmt.Errorf("sql: planning: extension %s: %w", e, err)
-			}
+	}
+	for _, e := range exts {
+		if _, err := db.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS "`+e+`"`); err != nil {
+			return fmt.Errorf("sql: planning: extension %s: %w", e, err)
 		}
 	}
 	pending := slices.Clone(p.s.models)
@@ -410,7 +410,9 @@ func (p *planner) rebuildEnum(ctx context.Context, typ string) ([]string, error)
 		quoted[i] = v[0]
 	}
 	old := typ + "__old"
-	stmts := append(before,
+	stmts := make([]string, 0, len(before)+len(columns)+len(after)+3)
+	stmts = append(stmts, before...)
+	stmts = append(stmts,
 		fmt.Sprintf("ALTER TYPE %q RENAME TO %q", typ, old),
 		fmt.Sprintf("CREATE TYPE %q AS ENUM (%s)", typ, strings.Join(quoted, ", ")))
 	for _, col := range columns {
@@ -787,8 +789,8 @@ func (p *planner) renameSequenceForTable(ctx context.Context, r *schema.RenameTa
 		}
 		renamed := r.To.Name + "_" + col + "_seq"
 		plan.Changes = append(plan.Changes, &migrate.Change{
-			Cmd:     fmt.Sprintf(`ALTER SEQUENCE "%s" RENAME TO "%s"`, seq, renamed),
-			Reverse: fmt.Sprintf(`ALTER SEQUENCE "%s" RENAME TO "%s"`, renamed, seq),
+			Cmd:     fmt.Sprintf(`ALTER SEQUENCE %q RENAME TO %q`, seq, renamed),
+			Reverse: fmt.Sprintf(`ALTER SEQUENCE %q RENAME TO %q`, renamed, seq),
 			Comment: fmt.Sprintf("rename %q sequence with its table", seq),
 		})
 	}

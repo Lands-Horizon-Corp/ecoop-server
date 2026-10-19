@@ -255,7 +255,7 @@ func lintLockSafe(body string, earlier []string) []string {
 	if addNotNull.MatchString(up) {
 		problems = append(problems, "ADD COLUMN ... NOT NULL: add it nullable, backfill, then validate")
 	}
-	if rewriteDML.MatchString(up) && !(notx && strings.Contains(up, "COMMIT;")) {
+	if rewriteDML.MatchString(up) && (!notx || !strings.Contains(up, "COMMIT;")) {
 		problems = append(problems, "UPDATE or DELETE in one transaction: backfill in committed batches")
 	}
 	for _, m := range setNotNull.FindAllStringSubmatch(up, -1) {
