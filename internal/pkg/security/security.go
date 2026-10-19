@@ -14,6 +14,8 @@ import (
 
 	"aidanwoods.dev/go-paseto"
 	"golang.org/x/crypto/argon2"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 )
 
 type SecurityService struct {
@@ -23,21 +25,47 @@ type SecurityService struct {
 	parallelism uint8
 	salt        uint32
 	key         uint32
+	obs         observability.IObserver
+}
+
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing. Only the operation name and its outcome are
+// ever recorded: never a password, a hash, a token, a key or any plaintext.
+func WithObserver(o observability.IObserver) Option {
+	return func(s *SecurityService) { s.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one call. A service built as a bare struct
+// literal has no observer, so it falls back to Nop without writing.
+func (s *SecurityService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if s.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentSecurity, name)
+	}
+	return s.obs.Begin(ctx, observability.ComponentSecurity, name)
 }
 
 func NewSecurityService(
-	secret string, memory uint32, iterations uint32, parallelism uint8, salt uint32, key uint32) ISecurityService {
-	return &SecurityService{
+	secret string, memory uint32, iterations uint32, parallelism uint8, salt uint32, key uint32, opts ...Option) ISecurityService {
+	s := &SecurityService{
 		secret:      secret,
 		memory:      memory,
 		iterations:  iterations,
 		parallelism: parallelism,
 		salt:        salt,
 		key:         key,
+		obs:         observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
 }
 
-func (s *SecurityService) GeneratePassword(ctx context.Context, password string) (string, error) {
+func (s *SecurityService) GeneratePassword(ctx context.Context, password string) (_ string, err error) {
+	_, op := s.begin(ctx, "hash_password")
+	defer func() { op.End(err) }()
 	if err := s.validateHashConfig(); err != nil {
 		return "", err
 	}
@@ -51,7 +79,17 @@ func (s *SecurityService) GeneratePassword(ctx context.Context, password string)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, s.memory, s.iterations, s.parallelism, b64Salt, b64Hash), nil
 }
 
-func (s *SecurityService) VerifyPassword(ctx context.Context, hash string, password string) (bool, error) {
+func (s *SecurityService) VerifyPassword(ctx context.Context, hash string, password string) (match bool, err error) {
+	_, op := s.begin(ctx, "verify_password")
+	defer func() {
+		if err == nil && !match {
+			// A wrong password is an answer, not a fault of the service: it is
+			// counted on its own so a guessing attack shows up, and it never
+			// raises the error rate.
+			op.SetOutcome(observability.OutcomeSkipped)
+		}
+		op.End(err)
+	}()
 	vals := strings.Split(hash, "$")
 	if len(vals) != 6 || vals[0] != "" || vals[1] != hashAlgorithm ||
 		vals[2] != fmt.Sprintf("v=%d", argon2.Version) {
@@ -87,6 +125,8 @@ func (s *SecurityService) VerifyPassword(ctx context.Context, hash string, passw
 }
 
 func (s *SecurityService) Encrypt(ctx context.Context, data string, ttl time.Duration) (string, error) {
+	_, op := s.begin(ctx, "encrypt")
+	defer op.End(nil)
 	token := paseto.NewToken()
 	token.SetIssuedAt(time.Now())
 	token.SetNotBefore(time.Now())
@@ -96,7 +136,9 @@ func (s *SecurityService) Encrypt(ctx context.Context, data string, ttl time.Dur
 	return encrypted, nil
 }
 
-func (s *SecurityService) Decrypt(ctx context.Context, tokenString string) (string, error) {
+func (s *SecurityService) Decrypt(ctx context.Context, tokenString string) (_ string, err error) {
+	_, op := s.begin(ctx, "decrypt")
+	defer func() { op.End(err) }()
 	parser := paseto.NewParser()
 	parser.AddRule(paseto.NotExpired())
 	parser.AddRule(paseto.ValidAt(time.Now()))
@@ -111,7 +153,9 @@ func (s *SecurityService) Decrypt(ctx context.Context, tokenString string) (stri
 	return payload, nil
 }
 
-func (s *SecurityService) EncryptData(ctx context.Context, data []byte) ([]byte, error) {
+func (s *SecurityService) EncryptData(ctx context.Context, data []byte) (_ []byte, err error) {
+	_, op := s.begin(ctx, "encrypt_data")
+	defer func() { op.End(err) }()
 	gcm, err := s.aead()
 	if err != nil {
 		return nil, fmt.Errorf("security: preparing cipher: %w", err)
@@ -123,7 +167,9 @@ func (s *SecurityService) EncryptData(ctx context.Context, data []byte) ([]byte,
 	return gcm.Seal(nonce, nonce, data, nil), nil
 }
 
-func (s *SecurityService) DecryptData(ctx context.Context, ciphertext []byte) ([]byte, error) {
+func (s *SecurityService) DecryptData(ctx context.Context, ciphertext []byte) (_ []byte, err error) {
+	_, op := s.begin(ctx, "decrypt_data")
+	defer func() { op.End(err) }()
 	gcm, err := s.aead()
 	if err != nil {
 		return nil, fmt.Errorf("security: preparing cipher: %w", err)

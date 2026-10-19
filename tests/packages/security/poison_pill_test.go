@@ -200,7 +200,7 @@ func TestPoisonPill_DecryptErrorDoesNotLeakCause(t *testing.T) {
 	ct, _ := svc.EncryptData(ctx, []byte("x"))
 	ct[0] ^= 0xff
 	_, err := svc.DecryptData(ctx, ct)
-	if err != security.ErrDecrypt {
+	if !errors.Is(err, security.ErrDecrypt) {
 		t.Fatalf("err = %#v; want the bare ErrDecrypt sentinel (no oracle detail)", err)
 	}
 }

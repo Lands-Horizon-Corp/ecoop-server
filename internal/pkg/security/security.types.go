@@ -25,6 +25,9 @@ const (
 )
 
 type (
+	// Option configures a SecurityService: WithObserver.
+	Option func(*SecurityService)
+
 	ISecurityService interface {
 		GeneratePassword(ctx context.Context, password string) (string, error)
 		VerifyPassword(ctx context.Context, hash string, password string) (bool, error)
