@@ -112,7 +112,7 @@ func TestDeadLetters_ArgumentsAreChecked(t *testing.T) {
 		t.Fatalf("empty topic: %v", err)
 	}
 	//lint:ignore SA1012 a nil context is the case under test
-	if _, err := s.DeadLetters(nil, "t", 0); !errors.Is(err, cdc.ErrNilContext) { //nolint:staticcheck
+	if _, err := s.DeadLetters(nil, "t", 0); !errors.Is(err, cdc.ErrNilContext) {
 		t.Fatalf("nil context: %v", err)
 	}
 	var nilSvc *cdc.CDCService

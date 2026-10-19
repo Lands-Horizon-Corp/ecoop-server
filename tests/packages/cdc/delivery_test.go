@@ -460,7 +460,8 @@ func TestDelivery_NilPanicValueIsContainedToo(t *testing.T) {
 	h := func(ctx context.Context, b []cdc.Record) error {
 		if calls.Add(1) == 1 {
 			var m map[string]int
-			m["x"] = 1 // a nil map write: a runtime panic, not a string
+			//lint:ignore SA5000 the nil map write is the panic under test
+			m["x"] = 1 //nolint:staticcheck // a nil map write: a runtime panic, not a string
 		}
 		return sink.handle(ctx, b)
 	}
@@ -972,7 +973,7 @@ func TestDeadLetter_NilCauseIsUnspecified(t *testing.T) {
 func TestDeadLetter_NilContextIsRefused(t *testing.T) {
 	t.Parallel()
 	s := service(t)
-	//nolint:staticcheck // a nil context is the case under test
+
 	if err := s.DeadLetter(nil, cdc.Record{Topic: "t"}, errors.New("x")); !errors.Is(err, cdc.ErrNilContext) {
 		t.Fatalf("DeadLetter(nil ctx) = %v", err)
 	}

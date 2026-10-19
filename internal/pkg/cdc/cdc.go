@@ -10,6 +10,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -22,6 +23,7 @@ type CDCService struct {
 	dlqSuffix string
 	attempts  int
 	backoff   time.Duration
+	obs       observability.IObserver
 
 	mu       sync.Mutex
 	producer *kgo.Client
@@ -48,11 +50,26 @@ type subscription struct {
 	done   chan struct{}
 }
 
-func NewCDCService(brokers []string, groupID, topicPrefix string) ICDCService {
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing.
+func WithObserver(o observability.IObserver) Option {
+	return func(c *CDCService) { c.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one unit of work. A service built as a bare
+// struct literal has no observer, so it falls back to Nop without writing.
+func (c *CDCService) begin(ctx context.Context, name string, attrs ...observability.Attr) (context.Context, observability.Operation) {
+	if c.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentCDC, name, attrs...)
+	}
+	return c.obs.Begin(ctx, observability.ComponentCDC, name, attrs...)
+}
+
+func NewCDCService(brokers []string, groupID, topicPrefix string, opts ...Option) ICDCService {
 	if strings.TrimSpace(topicPrefix) == "" {
 		topicPrefix = defaultTopicPrefix
 	}
-	return &CDCService{
+	c := &CDCService{
 		brokers:   brokers,
 		groupID:   strings.TrimSpace(groupID),
 		prefix:    topicPrefix,
@@ -60,8 +77,15 @@ func NewCDCService(brokers []string, groupID, topicPrefix string) ICDCService {
 		dlqSuffix: defaultDLQSuffix,
 		attempts:  defaultAttempts,
 		backoff:   defaultBackoff,
+		obs:       observability.Nop(),
 		subs:      map[string]*subscription{},
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
+	}
+	return c
 }
 
 func (c *CDCService) Run(ctx context.Context) error {

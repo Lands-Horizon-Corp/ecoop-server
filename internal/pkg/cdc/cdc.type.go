@@ -64,6 +64,9 @@ var (
 )
 
 type (
+	// Option configures a CDCService: WithObserver.
+	Option func(*CDCService)
+
 	ChangeType  string
 	ChangeEvent struct {
 		Op     ChangeType      `json:"op"`

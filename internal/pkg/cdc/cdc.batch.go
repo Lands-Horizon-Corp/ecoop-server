@@ -11,6 +11,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -67,13 +68,20 @@ func (c *CDCService) GroupID() string {
 }
 
 // DeadLetter implements ICDCService.
-func (c *CDCService) DeadLetter(ctx context.Context, rec Record, cause error) error {
+func (c *CDCService) DeadLetter(ctx context.Context, rec Record, cause error) (err error) {
 	if c == nil || c.subs == nil {
 		return ErrNoService
 	}
 	if ctx == nil {
 		return ErrNilContext
 	}
+	ctx, op := c.begin(ctx, "dead_letter")
+	defer func() {
+		if err == nil {
+			op.SetOutcome(observability.OutcomeDLQ) // parked: the record is on the dead-letter topic
+		}
+		op.End(err)
+	}()
 	if cause == nil {
 		cause = errors.New("unspecified")
 	}
@@ -243,7 +251,10 @@ func (c *CDCService) handleChunk(ctx context.Context, client *kgo.Client, s *sub
 	last := records[len(records)-1]
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitTimeout)
 	defer cancel()
-	if err := client.CommitRecords(cctx, last); err != nil && s.opts.OnCommitError != nil {
+	_, op := c.begin(cctx, "commit")
+	err := client.CommitRecords(cctx, last)
+	op.End(err)
+	if err != nil && s.opts.OnCommitError != nil {
 		s.opts.OnCommitError(last.Partition, last.Offset, err)
 	}
 	return true
@@ -254,12 +265,18 @@ func (c *CDCService) handleChunk(ctx context.Context, client *kgo.Client, s *sub
 func (c *CDCService) deliver(ctx context.Context, handler BatchHandler, batch []Record) bool {
 	wait := c.backoff
 	for {
-		if safeBatch(ctx, handler, batch) == nil {
+		_, op := c.begin(ctx, "deliver")
+		err := safeBatch(ctx, handler, batch)
+		if err == nil {
+			op.End(nil)
 			return true
 		}
 		if !c.gate.IsOpen() || ctx.Err() != nil {
+			op.End(err)
 			return false
 		}
+		op.SetOutcome(observability.OutcomeRetry) // a failed attempt that will be tried again
+		op.End(err)
 		select {
 		case <-ctx.Done():
 			return false
