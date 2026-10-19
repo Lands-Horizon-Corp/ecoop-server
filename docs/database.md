@@ -489,6 +489,21 @@ go test -tags integration -race -count=1 -p 1 ./...   # the same, by hand
 
 All targets run with `-race` and `-count=1`, so a cached "ok" never hides a run.
 
+Static checks:
+
+```sh
+make check          # build + vet (both tag sets) + gofmt + golangci-lint
+make lint           # golangci-lint v2 over every package, integration-tagged tests included
+make lint-fix       # the same with --fix: imports, comment periods, whitespace
+make lint-config    # validate .golangci.yml against the golangci-lint schema
+```
+
+The linter set is in `.golangci.yml` (every linter is named; `default: none`) and the version is pinned in the Makefile. Every suppression carries a reason, either as an exclusion in the config or as `//nolint:<linter> // why`. `staticcheck` does not read `//nolint`; its own ignores are `//lint:ignore CODE reason` and `staticcheck.conf`.
+
+Two things to check after `make lint-fix`: read `git diff` for changed string literals in tests (the `misspell` fixer once corrected a deliberate typo that a test depended on), and run the suites, because an automatic edit is mechanical but not proven.
+
+Timing-sensitive tests (`TestPG100_*` in `tests/packages/sql` run a 2-minute `ctxT` deadline and a 5-second "no operation waited behind a migration" bound) take between about 80 s and 115 s alone, depending on machine load, so they sit close to that deadline and fail when the machine is busy: a run with six busy loops competing for CPU failed two of them, and the same suite passed 175 of 175 once the load was gone. Interleaved timings of the committed code and the working tree showed no difference between them, so the spread is the machine. Run the heavy suites on an idle machine.
+
 ### Why the heavy suites take turns
 
 The `cqrs`, `sql`, `pagination` and `cdc` suites all create and drop databases and open many connections on the **one shared Postgres** of the compose stack. Run at the same time they starve each other, and the symptom is misleading: `i/o timeout`, `migration lock: context deadline exceeded`, leaked scratch databases. None of those say "you ran two suites at once". This was observed, not guessed: `sql` passed 172 of 172 alone and failed with timeouts and lock deadlines whenever another suite ran beside it.
