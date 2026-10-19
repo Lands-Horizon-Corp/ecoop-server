@@ -29,6 +29,9 @@ var (
 )
 
 type (
+	// Option configures a PDFEngineService: WithObserver.
+	Option func(*PDFEngineService)
+
 	// RenderOptions is one document: an HTML/Minijinja Template filled with
 	// Data. Width and Height take in, mm, cm, pt, pc or px (the engine
 	// defaults to 8.5in x 11in); Orientation is Portrait or Landscape.

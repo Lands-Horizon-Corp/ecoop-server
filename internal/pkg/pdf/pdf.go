@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -19,15 +20,38 @@ type PDFEngineService struct {
 	token  string
 	client *http.Client
 	gate   *utils.Gate
+	obs    observability.IObserver
 }
 
-func NewPDFService(url, token string, inflight *utils.Inflight) IPDFServices {
-	return &PDFEngineService{
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing.
+func WithObserver(o observability.IObserver) Option {
+	return func(p *PDFEngineService) { p.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one call. A service built as a bare struct
+// literal has no observer, so it falls back to Nop without writing.
+func (p *PDFEngineService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if p.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentPDF, name)
+	}
+	return p.obs.Begin(ctx, observability.ComponentPDF, name)
+}
+
+func NewPDFService(url, token string, inflight *utils.Inflight, opts ...Option) IPDFServices {
+	p := &PDFEngineService{
 		url:    strings.TrimRight(url, "/"),
 		token:  token,
 		client: &http.Client{Timeout: RequestTimeout},
 		gate:   utils.NewGate(inflight),
+		obs:    observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(p)
+		}
+	}
+	return p
 }
 
 func (p *PDFEngineService) Start(ctx context.Context) error {
@@ -55,12 +79,14 @@ func (p *PDFEngineService) Stop(ctx context.Context) error {
 	return p.gate.Close(ctx)
 }
 
-func (p *PDFEngineService) Ping(ctx context.Context) error {
+func (p *PDFEngineService) Ping(ctx context.Context) (err error) {
 	done, ok := p.gate.Enter()
 	if !ok {
 		return ErrNotStarted
 	}
 	defer done()
+	ctx, op := p.begin(ctx, "ping")
+	defer func() { op.End(err) }()
 	return p.health(ctx)
 }
 
@@ -80,25 +106,29 @@ func (p *PDFEngineService) health(ctx context.Context) error {
 	return nil
 }
 
-func (p *PDFEngineService) Generate(ctx context.Context, render RenderOptions) (io.ReadCloser, error) {
+func (p *PDFEngineService) Generate(ctx context.Context, render RenderOptions) (_ io.ReadCloser, err error) {
 	done, ok := p.gate.Enter()
 	if !ok {
 		return nil, ErrNotStarted
 	}
 	defer done()
-	resp, err := p.post(ctx, "/api/to-bytes", render)
+	ctx, op := p.begin(ctx, "generate")
+	defer func() { op.End(err) }()
+	resp, err := p.post(ctx, "/api/to-bytes", render) //nolint:bodyclose // the body is the result: the caller closes it
 	if err != nil {
 		return nil, err
 	}
 	return resp.Body, nil
 }
 
-func (p *PDFEngineService) GenerateToS3(ctx context.Context, render RenderOptions) (*MediaPayload, error) {
+func (p *PDFEngineService) GenerateToS3(ctx context.Context, render RenderOptions) (_ *MediaPayload, err error) {
 	done, ok := p.gate.Enter()
 	if !ok {
 		return nil, ErrNotStarted
 	}
 	defer done()
+	ctx, op := p.begin(ctx, "generate_to_s3")
+	defer func() { op.End(err) }()
 	resp, err := p.post(ctx, "/api/to-s3", render)
 	if err != nil {
 		return nil, err
