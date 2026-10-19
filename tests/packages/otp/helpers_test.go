@@ -157,7 +157,7 @@ func newSecurity() security.ISecurityService {
 
 func newQueue(t testing.TB, ch cache.ICacheService) queue.IQueueService {
 	t.Helper()
-	q := queue.NewQueueService(ch, queue.Namespace(qns.For(t, valkeyAddr, valkeyPassword)))
+	q := queue.NewQueueService(ch, queue.WithNamespace(qns.For(t, valkeyAddr, valkeyPassword)))
 	if err := q.Start(context.Background()); err != nil {
 		t.Fatalf("queue Start: %v", err)
 	}
@@ -238,7 +238,7 @@ func realSMS(t testing.TB, q queue.IQueueService) (sms.ISMSServices, *fakeTwilio
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("sms Start: %v", err)
 	}
-	s.Client().RequestHandler.Client.(*twilioclient.Client).HTTPClient.Transport = redirect{target}
+	s.Client().Client.(*twilioclient.Client).HTTPClient.Transport = redirect{target}
 	t.Cleanup(func() { _ = s.Stop(context.Background()) })
 	return s, fake
 }
@@ -326,9 +326,7 @@ func inbox(t testing.TB) string {
 	addr := fmt.Sprintf("otp%d-%d@ecoop.test", runID, seq.Add(1))
 	t.Cleanup(func() {
 		var ids []string
-		for _, id := range mailIDs(addr) {
-			ids = append(ids, id)
-		}
+		ids = append(ids, mailIDs(addr)...)
 		if len(ids) > 0 {
 			body, _ := json.Marshal(map[string][]string{"IDs": ids})
 			req, _ := http.NewRequest(http.MethodDelete, mailpitAPI+"/messages", bytes.NewReader(body))

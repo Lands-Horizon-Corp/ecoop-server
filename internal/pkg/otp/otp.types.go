@@ -35,6 +35,9 @@ var (
 )
 
 type (
+	// Option configures an OTPService: WithObserver.
+	Option func(*OTPService)
+
 	IOTPService interface {
 		Start(ctx context.Context) error
 		Stop(ctx context.Context) error

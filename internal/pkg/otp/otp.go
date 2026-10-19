@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/security"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sms"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/smtp"
@@ -21,6 +22,23 @@ type OTPService struct {
 	sms  sms.ISMSServices
 
 	gate *utils.Gate
+	obs  observability.IObserver
+}
+
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing. Only the operation name and its outcome are
+// ever recorded: never a code, a key, a hash or an address.
+func WithObserver(o observability.IObserver) Option {
+	return func(s *OTPService) { s.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one call. A service built as a bare struct
+// literal has no observer, so it falls back to Nop without writing.
+func (o *OTPService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if o.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentOTP, name)
+	}
+	return o.obs.Begin(ctx, observability.ComponentOTP, name)
 }
 
 func NewOTPService(
@@ -30,15 +48,23 @@ func NewOTPService(
 	smtp smtp.ISMTPService,
 	sms sms.ISMSServices,
 	inflight *utils.Inflight,
+	opts ...Option,
 ) IOTPService {
-	return &OTPService{
+	s := &OTPService{
 		secret: secret,
 		sec:    sec,
 		ch:     ch,
 		smtp:   smtp,
 		sms:    sms,
 		gate:   utils.NewGate(inflight),
+		obs:    observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
 }
 
 // Start implements [IOTPService].
@@ -82,7 +108,7 @@ func (o *OTPService) Stop(ctx context.Context) error {
 	return o.gate.Close(ctx)
 }
 
-func (o *OTPService) Generate(ctx context.Context, key string) (string, error) {
+func (o *OTPService) Generate(ctx context.Context, key string) (_ string, err error) {
 	done, ok := o.gate.Enter()
 	if !ok {
 		return "", ErrNotStarted
@@ -91,6 +117,8 @@ func (o *OTPService) Generate(ctx context.Context, key string) (string, error) {
 	if key == "" {
 		return "", ErrEmptyKey
 	}
+	ctx, op := o.begin(ctx, "generate")
+	defer func() { op.End(err) }()
 	code, err := utils.RandomDigits(CodeLength)
 	if err != nil {
 		return "", fmt.Errorf("otp: generating code: %w", err)
@@ -132,7 +160,7 @@ func (o *OTPService) GenerateSMS(ctx context.Context, key string, req sms.SMSReq
 	return code, nil
 }
 
-func (o *OTPService) Verify(ctx context.Context, key, code string) (bool, error) {
+func (o *OTPService) Verify(ctx context.Context, key, code string) (matched bool, err error) {
 	done, ok := o.gate.Enter()
 	if !ok {
 		return false, ErrNotStarted
@@ -141,6 +169,19 @@ func (o *OTPService) Verify(ctx context.Context, key, code string) (bool, error)
 	if key == "" {
 		return false, ErrEmptyKey
 	}
+	ctx, op := o.begin(ctx, "verify")
+	defer func() {
+		// A wrong, expired or exhausted code is an answer, not a fault of the
+		// service. It ends as skipped so a guessing attack shows up on its own
+		// and never raises the error rate; a store failure stays an error. The
+		// error the caller receives is not changed.
+		seen := err
+		if !matched && (err == nil || errors.Is(err, ErrCodeNotFound) || errors.Is(err, ErrTooManyAttempts)) {
+			op.SetOutcome(observability.OutcomeSkipped)
+			seen = nil
+		}
+		op.End(seen)
+	}()
 	attempts, err := o.ch.Incr(ctx, AttemptsPrefix+key, CodeTTL)
 	if err != nil {
 		return false, fmt.Errorf("otp: counting attempts: %w", err)
@@ -175,7 +216,7 @@ func (o *OTPService) Verify(ctx context.Context, key, code string) (bool, error)
 	return true, nil
 }
 
-func (o *OTPService) Revoke(ctx context.Context, key string) error {
+func (o *OTPService) Revoke(ctx context.Context, key string) (err error) {
 	done, ok := o.gate.Enter()
 	if !ok {
 		return ErrNotStarted
@@ -184,6 +225,8 @@ func (o *OTPService) Revoke(ctx context.Context, key string) error {
 	if key == "" {
 		return ErrEmptyKey
 	}
+	ctx, op := o.begin(ctx, "revoke")
+	defer func() { op.End(err) }()
 	return o.revoke(ctx, key)
 }
 
