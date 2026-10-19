@@ -2,11 +2,13 @@
 
 ## 1. Purpose
 
-This document describes the security controls present in the Horizon API bootstrap and middleware, highlights implementation risks that must be resolved, and defines additional safeguards for an API that handles cooperative/member information, account balances, credit data, and financial ledgers.
+This document defines the security controls the API must have, and the risks to avoid, for an API that handles cooperative/member information, account balances, credit data, and financial ledgers.
 
-The API framework uses Echo and includes request tracing, host filtering, HTTPS redirection in secured mode, CORS, request-size controls, rate limiting, suspicious-path blocking, security headers, cookie hardening, structured request logging, and health endpoints.
+**Status: the transport layer is implemented and tested; authentication and authorization are not.** The API framework is **Hertz** (`github.com/cloudwego/hertz`), and [internal/pkg/api](../internal/pkg/api/api.go) builds the server, applies the security middleware to every route in a fixed order, and runs under fx ([api.module.go](../internal/pkg/api/api.module.go), wired in [main.go](../main.go)). [Section 3.1](#31-implementation-status) says which control is built and where it is tested. Nothing here authenticates a caller or checks a tenant: those belong to route middleware (section 5), and no route is registered yet. An earlier version of this document described an Echo-based bootstrap that is not part of this repository; the findings in section 4 are the mistakes that bootstrap made, and each one is covered by a regression test.
 
-**Important:** this README is not a security certification. It describes behavior visible in the supplied implementation. Middleware being present does not prove that it is effective in production. Complete the priority fixes and verification checklist below before relying on these controls for sensitive financial operations.
+The API must include request tracing, host filtering, HTTPS redirection in secured mode, CORS, request-size controls, rate limiting, suspicious-path blocking, security headers, cookie hardening, structured request logging, and health endpoints. Metrics, traces and logs go through the shared observer described in [logs.md](logs.md).
+
+**Important:** this README is not a security certification. A control being listed does not prove that it is effective in production. Complete the priority fixes and verification checklist below before relying on these controls for sensitive financial operations.
 
 ## 2. Security goals
 
@@ -19,28 +21,61 @@ The security program should protect:
 - **Accountability:** sensitive reads and every financial state transition must be attributable to an authenticated actor or service, with sufficient records to investigate disputes and incidents.
 - **Recoverability:** encrypted, tested backups and documented recovery procedures must allow restoration after accidental deletion, corruption, ransomware, or compromise.
 
-## 3. Controls visible in the current implementation
+## 3. Controls the API must implement
 
-The following controls are present in the supplied API bootstrap. Each item should still be covered by tests in the actual deployed configuration.
+The table lists each control, the behavior to build into the Hertz API, and the limitation to design around. The behavior column was taken from an earlier Echo bootstrap and is a requirement, not a description of code in this repository. Each item must be covered by tests in the deployed configuration.
 
-| Control | Current behavior visible in the implementation | Important limitation |
+| Control | Required behavior | Important limitation |
 |---|---|---|
 | HTTPS redirect | Secured mode redirects requests to HTTPS, except the live and readiness health paths. | Correct behavior depends on TLS termination and trusted proxy configuration. Verify the redirect at the public edge and confirm health checks are intentionally reachable without redirects. |
 | Host allowlist | Requests are checked against host values derived from the configured origins; disallowed hosts are logged and rejected. | Host allowlisting is not authentication. The origin list is also reused to construct host values and includes duplicate entries, trailing-slash variants, development/staging domains, and some HTTP origins. |
 | HTTP method allowlist | Only GET, POST, PUT, PATCH, DELETE, HEAD, and OPTIONS are accepted by the general middleware. | Validate that method restrictions also match individual route intent. Unneeded methods should not be enabled on a route. |
 | Request body limit | A middleware checks a declared content length and wraps the request body with a limited reader. | The current limited-reader approach can truncate an oversized or streaming request rather than consistently returning a clear 413 response. See Priority 0 fixes. |
-| Rate limiting | Echo's in-memory rate limiter uses the client IP, a configured rate of 10 requests per second, a burst of 30, and a three-minute store expiry. | The limiter is per process and is not shared across replicas. IP-based limiting alone is insufficient for authenticated financial operations. |
+| Rate limiting | A per-client-IP limiter at a configured rate (the earlier bootstrap used 10 requests per second, a burst of 30, and a three-minute store expiry). Hertz has no built-in limiter, so use a middleware or the shared cache. | An in-memory limiter is per process and is not shared across replicas. IP-based limiting alone is insufficient for authenticated financial operations. |
 | Suspicious-path blocking | Suspicious paths are checked using a helper and cached in Redis for five minutes. Attempts are recorded in a sorted set with old entries periodically removed. | Background goroutines are started per suspicious request. Add bounded work queues, limits, and monitoring to prevent abuse of this tracking path. |
 | CORS | A configured list of origins, methods, headers, exposed headers, credential support, and a one-hour preflight cache is supplied. | CORS is a browser policy, not an access-control boundary. Production, staging, development, and plain-HTTP origins must not share one broad allowlist. |
 | Security headers | The intended secured profile includes content-type sniffing protection, frame restrictions, a referrer policy, CSP, HSTS, Permissions Policy, and cross-origin policies. | Headers are currently assigned after the next handler has run. Once a response is committed, changes may not reach the client. Fix this before relying on the headers. |
 | Cookie hardening | In secured mode, the middleware attempts to add HttpOnly, Secure, and SameSite=None; development mode attempts to add HttpOnly and SameSite=Lax. | String replacement on a single Set-Cookie value is fragile and may miss cookies, alter existing attributes, or fail when Path is absent or differently formatted. Set flags when each cookie is created. |
 | Panic recovery | Recovery middleware and an outer tracing/recovery wrapper attempt to prevent panics from crashing request handling. | Panic details and request body content can leak through logs or streaming responses. Never return raw panic/error details to clients. |
-| Request tracing | Telescope tracing wraps requests and registered route callbacks; the streaming path records update events on the active span. | Ensure spans and trace attributes never contain passwords, session tokens, full payloads, account numbers, or other sensitive information. |
+| Request tracing | Every request is one `Operation` of the shared observer (component `api`), with the route template as its name; the streaming path records update events on the active span. | Ensure spans and trace attributes never contain passwords, session tokens, full payloads, account numbers, or other sensitive information. |
 | Request logging | Structured logs include request method, URI, status, latency, IP, user agent, host, and content length; client and server errors are logged. | URLs can contain sensitive query parameters. Log fields must be sanitized and logs must not contain credentials or full financial payloads. Multiple request-logging middleware instances may also produce duplicate events. |
 | Health checks | Liveness and readiness endpoints are registered. Readiness checks cache, main database, admin database, and storage with a five-second context timeout. | Keep responses minimal and ensure health endpoints do not expose connection details, credentials, internal addresses, or stack traces. Decide whether public access is needed. |
 | Profiling endpoints | Pprof routes are registered when secured mode is disabled. | “Not secured” does not necessarily mean local development. Ensure these routes cannot be exposed to the public internet, and remove or strongly protect them in shared environments. |
 | Route metadata | A route inventory endpoint exposes grouped, non-private route metadata and generated request/response interface descriptions. | Treat route inventories as internal documentation; protect them or publish only an intentionally public API specification. |
 | Gzip | Responses are compressed, with exclusions for selected binary media and metrics paths. | Compression may reveal information when attacker-controlled and secret content are compressed together. Review sensitive response patterns and consider disabling compression on responses containing secrets. |
+
+### 3.1 Implementation status
+
+Every row is exercised through the whole middleware chain by the tests in [tests/packages/api](../tests/packages/api), over a real socket where the behavior needs one (body framing, timeouts, streams, shutdown). Configuration is read from the environment by `api.FromEnv` and refused at startup when unsafe (`API_*` in [.env.example](../.env.example)).
+
+| Control | State | How it is built |
+|---|---|---|
+| Request id | built | `X-Request-Id` is generated per request; a client value is never trusted. It is in every error body. |
+| Security headers | built | Set before the handler runs, so error, panic, redirect and stream responses carry them. A deliberately minimal CSP (`default-src 'none'`) fits a JSON API; `RandomNonce()` exists for a route that serves HTML. Expect-CT is not sent. |
+| Panic recovery | built | A panic is a generic 500 with the request id. The log has the panic type, never the body or the message. |
+| HTTPS redirect | built | Secured only. A plain `POST` is refused with 403, not redirected, so a body is never replayed. `X-Forwarded-Proto` is believed only from a trusted proxy. `/healthz` and `/readyz` are exempt. |
+| Host allowlist | built | Separate from the CORS origins; defaults to their hosts only as a convenience. Probes are exempt, because a pod is probed by its own address. |
+| Method allowlist | built | Configurable; unknown methods answer 405. |
+| Body limit | built | A declared length is refused with 413 before the handler, and the server's own limit covers chunked and lying bodies. |
+| Rate limiting | built | Per client address, bounded in memory. With a cache it also keeps a shared one-second window, so replicas agree. `api.Keyed` limits by another key (login, OTP, a tenant). The client address is the peer unless it is a trusted proxy. |
+| Suspicious paths | built | Scanner paths answer 404 and are counted; no goroutine is started per request. |
+| CORS | built | Exact origins only, never a wildcard, `Vary: Origin`, preflights answered before they cost a rate-limit token. |
+| Timeouts and limits | built | Read, write, idle and header limits are set on the server and tested against a slow client. |
+| Probes | built | `/healthz` checks nothing; `/readyz` runs the checks given to `WithReadiness` and returns names, never error text. |
+| Pprof and route inventory | built | Never when Secured (`Validate` refuses pprof, and the inventory answers 404), and loopback-only otherwise. `Private` routes are never listed. |
+| Event streams | built | `RegisterSSR`: NDJSON, the same middleware as any route, at most `MaxStreams` open (503 beyond), each ended at `StreamTimeout`, on shutdown, or when the client leaves. A failure is one generic event with the request id. |
+| Graceful shutdown | built | `Stop` refuses new requests, ends open streams, waits for the requests in flight up to `ShutdownTimeout`, and does not wait for idle keep-alive connections. |
+| Tracing and metrics | built | `Observe`, see [logs.md](logs.md). |
+| Cookie hardening | not in this package | Cookies are created with explicit attributes by the auth service ([auth.go](../internal/pkg/auth/auth.go)), not rewritten afterwards. |
+| Gzip | not built | Left out on purpose: a response that mixes a secret with attacker-controlled text should not be compressed. Compress at the gateway for routes that are safe. |
+| Authentication, authorization, tenant checks, CSRF | not built | Route middleware. See section 5. |
+| Idempotency, ledger rules, audit trail | not built | Business logic. See section 6. |
+
+How the API (and every other service) is added to the application, and how its settings are read, is in [modules.md](modules.md).
+
+Where the code lives, in [internal/pkg/api](../internal/pkg/api): `api.go` is the lifecycle (Start, Run, Stop), `api.mount.go` the middleware chain and the loopback-only routes, `api.middleware.go` the middleware themselves, `api.routes.go` the route table and registration, `api.stream.go` the event streams, `api.ratelimit.go` the shared window and `Keyed`, `api.config.go` the configuration, `api.health.go` the probes. What is not specific to the API lives in [internal/utils](../internal/utils): `Limiter` (the bounded per-key token bucket), `Gate` and `Inflight` (what `Stop` waits on), and the text helpers `Truncate`, `StripControl`, `SplitList` and `ASCIILower`, each tested under [tests/utils](../tests/utils).
+
+Two things the tests showed that are worth knowing. A probe must never be host-filtered, or a healthy pod is restarted by the orchestrator. And a stream must write its last byte before its handler returns, because Hertz reuses the request context afterwards.
 
 ## 4. Priority fixes before production use
 
@@ -280,7 +315,7 @@ Use these standards as living references when implementing and reviewing the con
 - [OWASP Application Security Verification Standard](https://owasp.org/www-project-application-security-verification-standard/): a structured security verification checklist; the current stable release is ASVS 5.0.0.
 - [PostgreSQL Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html): database-level row policies and their limitations.
 - [Go net/http documentation](https://pkg.go.dev/net/http): request handling and body-size controls, including the behavior of MaxBytesReader.
-- [Echo Rate Limiter documentation](https://echo.labstack.com/docs/middleware/rate-limiter): behavior and limitations of Echo's rate-limiting middleware.
+- [Hertz documentation](https://www.cloudwego.io/docs/hertz/): the framework the API is built on, including its middleware model.
 
 ---
 
