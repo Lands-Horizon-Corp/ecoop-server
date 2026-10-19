@@ -15,6 +15,7 @@ import (
 	"github.com/valkey-io/valkey-go"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -22,6 +23,7 @@ type QueueService struct {
 	cache    cache.ICacheService
 	ns       string // prefixes queue names, the leader lock and rate counters
 	inflight *utils.Inflight
+	obs      observability.IObserver
 	id       string   // this instance, for scheduler leadership
 	routes   sync.Map // task type -> route
 	cron     *cron.Cron
@@ -65,6 +67,7 @@ func NewQueueService(cache cache.ICacheService, opts ...ServiceOption) IQueueSer
 		inflight: utils.NewInflight(),
 		id:       utils.RandomHex(16),
 		cron:     cron.New(),
+		obs:      observability.Nop(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -74,11 +77,26 @@ func NewQueueService(cache cache.ICacheService, opts ...ServiceOption) IQueueSer
 	return q
 }
 
-// Namespace isolates this service's jobs from every service with another
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing.
+func WithObserver(o observability.IObserver) ServiceOption {
+	return func(q *QueueService) { q.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one unit of work. A service built as a bare
+// struct literal has no observer, so it falls back to Nop without writing.
+func (q *QueueService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if q.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentQueue, name)
+	}
+	return q.obs.Begin(ctx, observability.ComponentQueue, name)
+}
+
+// WithNamespace isolates this service's jobs from every service with another
 // namespace on the same Valkey: its queue names, scheduler leader lock and
 // rate-limit counters are prefixed with ns. Instances that should share work
 // (the replicas of one app) use the same namespace; the default is none.
-func Namespace(ns string) ServiceOption {
+func WithNamespace(ns string) ServiceOption {
 	return func(q *QueueService) { q.ns = ns }
 }
 
@@ -93,7 +111,7 @@ func QueueName(ns, base string) string {
 
 func (q *QueueService) name(base string) string { return QueueName(q.ns, base) }
 
-// Lifecycle
+// Lifecycle.
 
 // Start connects to Valkey with the cache's settings and runs this
 // instance's worker and scheduler. Calling it while running does nothing.
@@ -193,14 +211,14 @@ func (q *QueueService) conn() (asynq.RedisConnOpt, error) {
 	}
 }
 
-// Jobs
+// Jobs.
 
 func (q *QueueService) Handle(taskType string, handler Handler, opts ...Option) {
 	set := apply(opts)
 	q.routes.Store(taskType, route{handler: handler, limit: set.limit, per: set.per, gate: set.gate})
 }
 
-func (q *QueueService) Enqueue(ctx context.Context, taskType string, payload any, opts ...Option) (string, error) {
+func (q *QueueService) Enqueue(ctx context.Context, taskType string, payload any, opts ...Option) (id string, err error) {
 	if !q.started.Load() {
 		return "", ErrNotStarted
 	}
@@ -209,6 +227,8 @@ func (q *QueueService) Enqueue(ctx context.Context, taskType string, payload any
 	if !q.started.Load() { // Stop may have begun after the first check
 		return "", ErrNotStarted
 	}
+	ctx, op := q.begin(ctx, "enqueue")
+	defer func() { op.End(err) }()
 	data, err := encode(payload)
 	if err != nil {
 		return "", fmt.Errorf("queue: enqueue %q: %w", taskType, err)
@@ -227,10 +247,20 @@ func (q *QueueService) Enqueue(ctx context.Context, taskType string, payload any
 
 // dispatch runs a job on this instance and honours RetryAfter.
 func (q *QueueService) dispatch(ctx context.Context, t *asynq.Task) error {
+	ctx, op := q.begin(ctx, "run")
 	err := q.run(ctx, t)
 	if later, ok := errors.AsType[*retryAfterError](err); ok {
+		// Asked to run again later: not a failure, and a missing handler is not
+		// an error of this instance, so neither raises the error rate.
+		if errors.Is(err, ErrNoHandler) {
+			op.SetOutcome(observability.OutcomeSkipped)
+		} else {
+			op.SetOutcome(observability.OutcomeRetry)
+		}
+		op.End(err)
 		return q.later(ctx, t, later)
 	}
+	op.End(err)
 	return err
 }
 
@@ -303,7 +333,7 @@ func runAt(d time.Duration) time.Time {
 	return at
 }
 
-// Scheduling
+// Scheduling.
 
 func (q *QueueService) Schedule(spec, taskType string, payload any, opts ...Option) (string, error) {
 	if q.cron == nil { // not built with NewQueueService
@@ -387,7 +417,7 @@ func (q *QueueService) lead(ctx context.Context) {
 	}
 }
 
-// Options
+// Options.
 
 // Priority puts the job on a base queue: Critical, Default or Low.
 func Priority(queue string) Option { return func(s *settings) { s.queue = queue } }
@@ -429,7 +459,7 @@ func apply(opts []Option) settings {
 	return set
 }
 
-// Helpers
+// Helpers.
 
 // RetryAfter makes the queue run the job again after d without counting a
 // failed attempt; err is kept for errors.Is.

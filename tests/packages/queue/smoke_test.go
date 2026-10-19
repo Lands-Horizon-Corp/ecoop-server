@@ -15,7 +15,7 @@ func TestSmoke(t *testing.T) {
 	t.Parallel()
 	requireValkey(t)
 	ctx := ctxT(t)
-	q := queue.NewQueueService(newCache(t, valkeyAddr), queue.Namespace(ns(t)))
+	q := queue.NewQueueService(newCache(t, valkeyAddr), queue.WithNamespace(ns(t)))
 	if err := q.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

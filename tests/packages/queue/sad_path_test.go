@@ -34,7 +34,7 @@ func TestSadPath_NotStarted(t *testing.T) {
 	t.Parallel()
 	requireValkey(t)
 	ctx := ctxT(t)
-	q := queue.NewQueueService(newCache(t, valkeyAddr), queue.Namespace(ns(t)))
+	q := queue.NewQueueService(newCache(t, valkeyAddr), queue.WithNamespace(ns(t)))
 	if _, err := q.Enqueue(ctx, "t", nil); !errors.Is(err, queue.ErrNotStarted) {
 		t.Errorf("Enqueue before Start = %v", err)
 	}

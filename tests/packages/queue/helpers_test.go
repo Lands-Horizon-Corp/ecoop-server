@@ -128,7 +128,7 @@ func newQueue(t testing.TB, addr ...string) queue.IQueueService {
 	if len(addr) > 0 {
 		target = addr[0]
 	}
-	q := queue.NewQueueService(newCache(t, target), queue.Namespace(ns(t)))
+	q := queue.NewQueueService(newCache(t, target), queue.WithNamespace(ns(t)))
 	if err := q.Start(context.Background()); err != nil {
 		t.Fatalf("queue Start: %v", err)
 	}
