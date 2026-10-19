@@ -150,11 +150,11 @@ func OffsetFromName(name string) (int, bool) {
 		return 0, false
 	}
 	h, _ := strconv.Atoi(m[2])
-	min, _ := strconv.Atoi(m[3])
-	if min > 59 {
+	mins, _ := strconv.Atoi(m[3])
+	if mins > 59 {
 		return 0, false
 	}
-	secs := h*3600 + min*60
+	secs := h*3600 + mins*60
 	if m[1] == "-" {
 		secs = -secs
 	}

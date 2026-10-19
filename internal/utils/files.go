@@ -26,9 +26,11 @@ func IsValidFilePath(p string) error {
 	return nil
 }
 
-// WriteNew creates file with content and fails if the file already exists.
+// WriteNew creates file with content and fails if the file already exists. The
+// file is 0644 on purpose: it is a migration or source file that is committed and
+// read by other users and tools, not a secret.
 func WriteNew(file, content string) error {
-	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // see above: not a secret
 	if err != nil {
 		return err
 	}

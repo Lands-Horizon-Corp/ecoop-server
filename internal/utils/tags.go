@@ -10,7 +10,7 @@ func StructTagFieldIndex[T any](tagName, columnName string) int {
 	if t.Kind() != reflect.Struct {
 		return -1
 	}
-	for i := 0; i < t.NumField(); i++ {
+	for i := range t.NumField() {
 		field := t.Field(i)
 		if !field.IsExported() {
 			continue

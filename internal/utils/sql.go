@@ -184,7 +184,7 @@ func SetReplicator(ctx context.Context, tx bun.IDB) error {
 // an embedded struct has a path longer than one.
 func BunFieldIndex[TData any](column string) []int {
 	t := reflect.TypeFor[TData]()
-	if column == "" || t == nil || t.Kind() != reflect.Struct {
+	if column == "" || t.Kind() != reflect.Struct {
 		return nil
 	}
 	f := bunTables.Get(t).LookupField(column)
@@ -198,7 +198,7 @@ func BunFieldIndex[TData any](column string) []int {
 // schema), or nil when TData is not a struct.
 func BunTable[TData any]() *schema.Table {
 	t := reflect.TypeFor[TData]()
-	if t == nil || t.Kind() != reflect.Struct {
+	if t.Kind() != reflect.Struct {
 		return nil
 	}
 	return bunTables.Get(t)
@@ -324,5 +324,4 @@ func cleanString(s string, p TextPolicy) (string, error) {
 		return norm.NFC.String(s), nil
 	}
 	return s, nil
-
 }
