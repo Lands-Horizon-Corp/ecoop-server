@@ -153,6 +153,14 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) noteParked(rec cdc.Record
 		return
 	}
 	c.st.repair.add(key, id, time.Now().Add(c.RepairInterval))
+	c.reportAwaiting()
+}
+
+// reportAwaiting publishes how many parked rows still wait for repair.
+func (c *CQRSService[TData, TResponse, TRequest, TID]) reportAwaiting() {
+	if c.awaiting != nil && c.st != nil && c.st.repair != nil {
+		c.awaiting.Set(context.Background(), float64(c.st.repair.count()))
+	}
 }
 
 // startRepair starts the loop. The caller holds the lifecycle lock.
@@ -236,6 +244,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) repairTick(ctx context.Co
 			return
 		}
 		rs.resolve(rows, failed, time.Now(), c.RepairInterval)
+		c.reportAwaiting()
 	}
 	c.maybePrune(ctx)
 }
@@ -336,11 +345,11 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) repairOnce(ctx context.Co
 		}
 		var wrows, rrows []TData
 		if err := wdb.NewSelect().Model(&wrows).
-			Where("? IN (?)", bun.Ident(c.model.idCol), bun.In(ids)).Scan(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			Where("? IN (?)", bun.Ident(c.model.idCol), bun.List(ids)).Scan(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("reading the write db: %w", err)
 		}
 		if err := tx.NewSelect().Model(&rrows).
-			Where("? IN (?)", bun.Ident(c.model.idCol), bun.In(ids)).Scan(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			Where("? IN (?)", bun.Ident(c.model.idCol), bun.List(ids)).Scan(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("reading the read db: %w", err)
 		}
 		gen := rdb.QueryGen()
@@ -434,7 +443,7 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) pruneRowState(ctx context
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, nil
+		return 0, nil //nolint:nilerr // the driver cannot say; the count is only informational
 	}
 	return n, nil
 }

@@ -207,21 +207,6 @@ func (w *world) total() int64 {
 	return n
 }
 
-// changes is how many records carry a change (tombstones do not).
-func (w *world) changes() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	n := 0
-	for _, l := range w.log {
-		for _, r := range l {
-			if r.Event != nil {
-				n++
-			}
-		}
-	}
-	return n
-}
-
 // deliverNew hands f every record it has not been handed, from its committed
 // offsets on, in batches of at most size; f commits what its handler accepted.
 func (w *world) deliverNew(ctx context.Context, f *fakeCDC, size int) error {

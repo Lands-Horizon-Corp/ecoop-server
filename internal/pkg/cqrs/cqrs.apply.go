@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
 	"github.com/uptrace/bun"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cdc"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	sqlsvc "github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
@@ -23,7 +25,6 @@ type outcome[TData any] struct {
 	written    int
 	stale      int
 	duplicates int
-	notes      int
 	parked     map[int64]struct{} // offsets already on the dead-letter topic
 }
 
@@ -49,7 +50,7 @@ type applied[TData any] struct {
 // then it retries, with a capped backoff, so a database that is down or a
 // dead-letter topic that is unreachable stalls the partition instead of
 // losing a change.
-func (c *CQRSService[TData, TResponse, TRequest, TID]) handle(ctx context.Context, batch []cdc.Record) error {
+func (c *CQRSService[TData, TResponse, TRequest, TID]) handle(ctx context.Context, batch []cdc.Record) (err error) {
 	if len(batch) == 0 {
 		return nil
 	}
@@ -58,6 +59,8 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) handle(ctx context.Contex
 		return ErrStopped
 	}
 	defer done()
+	ctx, op := c.obs.Begin(ctx, observability.ComponentCQRS, "handle", slog.String(observability.KeyTopic, c.topic))
+	defer func() { op.End(err) }()
 	if err := checkBatch(batch); err != nil {
 		c.log.Error("rejecting malformed batch", "error", err)
 		return err
@@ -98,6 +101,10 @@ func (c *CQRSService[TData, TResponse, TRequest, TID]) handle(ctx context.Contex
 	c.st.stats.applied.Add(int64(out.written))
 	c.st.stats.stale.Add(int64(out.stale))
 	c.st.stats.duplicates.Add(int64(out.duplicates))
+	c.batchTime.Record(ctx, time.Since(started).Seconds())
+	if out.duplicates == len(batch) {
+		op.SetOutcome(observability.OutcomeSkipped) // the checkpoint already covered all of it
+	}
 	log.Debug("batch applied", "written", out.written, "stale_rejected", out.stale,
 		"duplicates", out.duplicates, "duration_ms", time.Since(started).Milliseconds())
 	c.fireHooks(ctx, out.kept)

@@ -199,7 +199,7 @@ func TestDecodePublic_ValidValuesArriveExactly(t *testing.T) {
 	rig := newKitchen(t)
 	for i, tc := range ok {
 		t.Run(tc.name, func(t *testing.T) {
-			id := int64(1)
+			var id int64
 			row := tc.row
 			// Give every case its own key so they do not overwrite each other.
 			if strings.Contains(row, `"id":"1"`) {

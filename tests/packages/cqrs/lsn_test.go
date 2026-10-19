@@ -254,7 +254,7 @@ func TestLSN_RandomReplaysAlwaysConverge(t *testing.T) {
 				rng := rand.New(rand.NewPCG(seed, 2024))
 				ctx := longCtx(t)
 				randomHistory(r.w, rng, 60+rng.IntN(60))
-				for round := 0; round < 2+rng.IntN(3); round++ {
+				for range 2 + rng.IntN(3) {
 					if err := r.w.deliverNew(ctx, r.f, 1+rng.IntN(30)); err != nil {
 						t.Fatal(err)
 					}

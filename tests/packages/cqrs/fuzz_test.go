@@ -181,7 +181,7 @@ func TestFuzz_RandomDeliveryOrderOfTheSameLog(t *testing.T) {
 				rng := rand.New(rand.NewPCG(seed, 77))
 				randomHistory(r.w, rng, 60+rng.IntN(60))
 				ctx := longCtx(t)
-				for round := 0; round < 3+rng.IntN(3); round++ {
+				for range 3 + rng.IntN(3) {
 					for part := range r.w.parts {
 						size := r.w.size(part)
 						if size == 0 {
@@ -253,7 +253,7 @@ func TestFuzz_RandomPoisonDoesNotStopTheStream(t *testing.T) {
 				// Rows with balance 13 are poison for this read model. Keep them out of the
 				// comparison: they are rejected, and so is every later change of the same row.
 				poisoned := map[int64]bool{}
-				for i := 0; i < 40+rng.IntN(40); i++ {
+				for range 40 + rng.IntN(40) {
 					id := int64(1 + rng.IntN(40))
 					bal := int64(rng.IntN(100))
 					if rng.IntN(8) == 0 {

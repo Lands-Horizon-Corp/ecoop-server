@@ -443,7 +443,7 @@ func execRaw(ctx context.Context, tx bun.Tx, stmt []byte) (int64, error) {
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, nil // the driver cannot say; the guard count is only informational
+		return 0, nil //nolint:nilerr // the driver cannot say; the guard count is only informational
 	}
 	return n, nil
 }

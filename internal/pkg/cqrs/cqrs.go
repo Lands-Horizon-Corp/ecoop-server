@@ -1,18 +1,21 @@
 package cqrs
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/go-playground/validator/v10"
+
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broadcast"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cdc"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/sql"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
-	"github.com/go-playground/validator/v10"
 )
 
 // CQRSService is the typed service of one model: writes go to WriteSQLService,
@@ -61,6 +64,9 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	BroadcastService  broadcast.IBroadcastService
 	PaginationService pagination.IPaginationService[TData, TID]
 
+	// Observer receives the service's metrics and traces, and its logs when
+	// Logger is nil. Optional: nil observes nothing.
+	Observer observability.IObserver
 	// Logger receives the service's structured logs (slog.Default if nil).
 	Logger *slog.Logger
 	// BatchSize caps the changes applied in one read-database transaction.
@@ -93,6 +99,9 @@ type CQRSService[TData any, TResponse any, TRequest any, TID comparable] struct 
 	model      *model[TData]
 	topic      string
 	log        *slog.Logger
+	obs        observability.IObserver
+	batchTime  observability.Histogram // seconds to apply one batch
+	awaiting   observability.Gauge     // parked rows still waiting for repair
 	st         *state
 	textFields []int
 
@@ -112,22 +121,62 @@ type state struct {
 	stats     counters
 }
 
+// metric is one running total. Stats reads the atomic; Add also feeds the
+// observer's counter, once bind has given it one, so no call site changes.
+type metric struct {
+	atomic.Int64
+	out observability.Counter
+}
+
+func (m *metric) Add(n int64) int64 {
+	v := m.Int64.Add(n)
+	if m.out != nil {
+		m.out.Add(context.Background(), n)
+	}
+	return v
+}
+
 // counters are the service's running totals; Stats reads them.
 type counters struct {
-	batches      atomic.Int64
-	records      atomic.Int64
-	applied      atomic.Int64
-	duplicates   atomic.Int64
-	tombstones   atomic.Int64
-	skipped      atomic.Int64
-	deadLettered atomic.Int64
-	retries      atomic.Int64
-	stale        atomic.Int64
-	commitFails  atomic.Int64
-	hooks        atomic.Int64
-	hooksDropped atomic.Int64
-	repaired     atomic.Int64
+	batches      metric
+	records      metric
+	applied      metric
+	duplicates   metric
+	tombstones   metric
+	skipped      metric
+	deadLettered metric
+	retries      metric
+	stale        metric
+	commitFails  metric
+	hooks        metric
+	hooksDropped metric
+	repaired     metric
 	lastError    atomic.Pointer[string]
+}
+
+// bind connects every total to its counter of the observer's meter. It runs
+// once, before the service is returned, so nothing races with it.
+func (c *counters) bind(m observability.Meter) {
+	for _, t := range []struct {
+		to         *metric
+		name, help string
+	}{
+		{&c.batches, observability.MetricCQRSBatches, "batches received from the change stream"},
+		{&c.records, observability.MetricCQRSRecords, "records received"},
+		{&c.applied, observability.MetricCQRSApplied, "row changes written to the read database"},
+		{&c.duplicates, observability.MetricCQRSDuplicates, "records the checkpoint already covered"},
+		{&c.tombstones, observability.MetricCQRSTombstones, "Debezium tombstones skipped"},
+		{&c.skipped, observability.MetricCQRSSkipped, "records skipped by design"},
+		{&c.deadLettered, observability.MetricCQRSDeadLettered, "records parked on the dead-letter topic"},
+		{&c.retries, observability.MetricCQRSRetries, "failed attempts that will be retried"},
+		{&c.stale, observability.MetricCQRSStale, "upserts turned away for a newer stored version"},
+		{&c.commitFails, observability.MetricCQRSCommitFails, "Kafka offset commits that failed"},
+		{&c.hooks, observability.MetricCQRSHooks, "change hooks run"},
+		{&c.hooksDropped, observability.MetricCQRSHooksDropped, "change hooks dropped"},
+		{&c.repaired, observability.MetricCQRSRepaired, "rows the repair loop brought in line"},
+	} {
+		t.to.out = m.Counter(t.name, t.help)
+	}
 }
 
 // Stats is a snapshot of the totals since the service was created.
@@ -241,12 +290,19 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 	if topic == "" {
 		topic = c.CDCService.Topic(m.schema, m.name)
 	}
+	obs := observability.Pick(c.Observer)
 	base := c.Logger
-	if base == nil {
-		base = slog.Default()
+	switch {
+	case base != nil:
+		base = base.With("component", "cqrs")
+	case !observability.IsNop(obs):
+		base = obs.Logger(observability.ComponentCQRS)
+	default:
+		base = slog.Default().With("component", "cqrs")
 	}
+	meter := obs.Meter(observability.ComponentCQRS)
 
-	return &CQRSService[TData, TResponse, TRequest, TID]{
+	svc := &CQRSService[TData, TResponse, TRequest, TID]{
 		Channel:           c.Channel,
 		Topic:             c.Topic,
 		ColumnDefaultID:   c.ColumnDefaultID,
@@ -267,6 +323,7 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		CDCService:        c.CDCService,
 		BroadcastService:  c.BroadcastService,
 		PaginationService: c.PaginationService,
+		Observer:          c.Observer,
 		Logger:            c.Logger,
 		BatchSize:         c.BatchSize,
 		ApplyTimeout:      c.ApplyTimeout,
@@ -279,7 +336,10 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 
 		model:      m,
 		topic:      topic,
-		log:        base.With("component", "cqrs", "channel", c.Channel, "topic", topic),
+		log:        base.With("channel", c.Channel, "topic", topic),
+		obs:        obs,
+		batchTime:  meter.Histogram(observability.MetricCQRSBatchDuration, "seconds to apply one batch", "s"),
+		awaiting:   meter.Gauge(observability.MetricCQRSAwaiting, "parked rows still waiting for repair"),
 		textFields: utils.TextFieldIndexes[TData](),
 		keyPool:    utils.NewMapPool[string, int](),
 		groupPool:  utils.NewBufferPool[group[TData]](),
@@ -290,4 +350,6 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 			repair:    newRepairState(),
 		},
 	}
+	svc.st.stats.bind(meter)
+	return svc
 }

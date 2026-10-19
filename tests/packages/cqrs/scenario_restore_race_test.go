@@ -479,7 +479,6 @@ func TestMultiReplicaRace_ConcurrentWritesWhileReplicasRace(t *testing.T) {
 	}
 	r.waitInSync()
 	for _, pm := range pumps {
-		pm := pm
 		eventuallyN(t, 30*time.Second, "every replica to reach the end", pm.caughtUp)
 	}
 }

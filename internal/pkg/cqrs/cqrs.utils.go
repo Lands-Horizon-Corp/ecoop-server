@@ -8,9 +8,10 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/uptrace/bun"
+
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
-	"github.com/uptrace/bun"
 )
 
 func (c *CQRSService[TData, TResponse, TRequest, TID]) writeDB() (*bun.DB, error) {

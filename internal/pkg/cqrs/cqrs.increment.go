@@ -5,8 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) IncrementByID(ctx context.Context, id TID, field string, delta float64) (*TData, error) {

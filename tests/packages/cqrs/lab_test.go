@@ -301,9 +301,6 @@ func scripts() []script {
 
 // ---- a lab-wide semaphore-free helper for subtests that need a pump ----------
 
-// converge waits for the databases to be equal, bounded, and reports the service.
-func (r *rig) converge(except ...int64) { r.waitInSync(except...) }
-
 // parallelLabs runs fns as parallel parent tests, one lab each.
 func labTest(t *testing.T, parts int, mods []func(*cqrsSvc), body func(l *lab)) {
 	t.Parallel()

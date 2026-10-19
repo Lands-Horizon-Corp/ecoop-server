@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) UpdateByID(ctx context.Context, id TID, data TData, preload ...string) (*TData, error) {

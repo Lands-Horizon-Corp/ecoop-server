@@ -3,9 +3,10 @@ package cqrs
 import (
 	"context"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 )
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) Paginate(ctx context.Context, page pagination.Pagination) (pagination.PaginationResult[TData], error) {

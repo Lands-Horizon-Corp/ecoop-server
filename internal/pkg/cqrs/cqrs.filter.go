@@ -3,8 +3,9 @@ package cqrs
 import (
 	"context"
 
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 	"github.com/uptrace/bun"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/pagination"
 )
 
 func (s *CQRSService[TData, TResponse, TRequest, TID]) Max(ctx context.Context, field string, filter pagination.StructuredFilter, preloads ...string) (*TData, error) {
