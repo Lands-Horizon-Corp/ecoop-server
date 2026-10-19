@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol"
 
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cache"
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/security"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
@@ -23,6 +24,37 @@ type AuthService[T ClaimWithID] struct {
 
 	cache    cache.ICacheService
 	security security.ISecurityService
+	obs      observability.IObserver
+}
+
+func (h *AuthService[T]) setObserver(o observability.IObserver) { h.obs = observability.Pick(o) }
+
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing. Only the operation name and its outcome are
+// ever recorded: never a token, a session id, a user id or a claim.
+func WithObserver(o observability.IObserver) Option {
+	return func(s observed) { s.setObserver(o) }
+}
+
+// begin starts the Operation of one call. A service built as a bare struct
+// literal has no observer, so it falls back to Nop without writing.
+func (h *AuthService[T]) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if h.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentAuth, name)
+	}
+	return h.obs.Begin(ctx, observability.ComponentAuth, name)
+}
+
+// finish ends op for a session lookup: a missing or invalid token is an answer
+// (a visitor who is not signed in), so it ends as skipped and never raises the
+// error rate; a store failure is an error.
+func finish(op observability.Operation, err error) {
+	if errors.Is(err, ErrNoToken) || errors.Is(err, ErrInvalidToken) {
+		op.SetOutcome(observability.OutcomeSkipped)
+		op.End(nil)
+		return
+	}
+	op.End(err)
 }
 
 func NewAuthService[T ClaimWithID](
@@ -31,19 +63,29 @@ func NewAuthService[T ClaimWithID](
 	ssl bool,
 	cache cache.ICacheService,
 	security security.ISecurityService,
+	opts ...Option,
 ) AUTHServices[T] {
-	return &AuthService[T]{
+	s := &AuthService[T]{
 		name:       name,
 		csrfHeader: csrfHeader,
 		ssl:        ssl,
 		cache:      cache,
 		security:   security,
+		obs:        observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
 }
 
-func (h *AuthService[T]) SetCSRF(ctx context.Context, c *app.RequestContext, claim T, expiry time.Duration) error {
+func (h *AuthService[T]) SetCSRF(ctx context.Context, c *app.RequestContext, claim T, expiry time.Duration) (err error) {
 	ctx, cancel := bound(ctx)
 	defer cancel()
+	ctx, op := h.begin(ctx, "set_session")
+	defer func() { op.End(err) }()
 	if err := h.ready(); err != nil {
 		return err
 	}
@@ -81,22 +123,28 @@ func (h *AuthService[T]) SetCSRF(ctx context.Context, c *app.RequestContext, cla
 	return nil
 }
 
-func (h *AuthService[T]) GetCSRF(ctx context.Context, c *app.RequestContext) (T, error) {
+func (h *AuthService[T]) GetCSRF(ctx context.Context, c *app.RequestContext) (claim T, err error) {
 	ctx, cancel := bound(ctx)
 	defer cancel()
-	claim, _, err := h.current(ctx, c)
+	ctx, op := h.begin(ctx, "load_session")
+	defer func() { finish(op, err) }()
+	claim, _, err = h.current(ctx, c)
 	return claim, err
 }
 
-func (h *AuthService[T]) VerifyCSRF(ctx context.Context, token string) (T, error) {
+func (h *AuthService[T]) VerifyCSRF(ctx context.Context, token string) (claim T, err error) {
 	ctx, cancel := bound(ctx)
 	defer cancel()
-	claim, _, err := h.load(ctx, token)
+	ctx, op := h.begin(ctx, "load_session")
+	defer func() { finish(op, err) }()
+	claim, _, err = h.load(ctx, token)
 	return claim, err
 }
-func (h *AuthService[T]) ClearCSRF(ctx context.Context, c *app.RequestContext) error {
+func (h *AuthService[T]) ClearCSRF(ctx context.Context, c *app.RequestContext) (err error) {
 	ctx, cancel := bound(ctx)
 	defer cancel()
+	ctx, op := h.begin(ctx, "clear_session")
+	defer func() { op.End(err) }()
 	defer h.clearCookies(c)
 	if err := h.ready(); err != nil {
 		return err
@@ -116,7 +164,7 @@ func (h *AuthService[T]) ClearCSRF(ctx context.Context, c *app.RequestContext) e
 	return h.remove(ctx, s.UserID, id)
 }
 
-// Devices
+// Devices.
 
 func (h *AuthService[T]) HasActiveSessionOnOtherDevice(ctx context.Context, c *app.RequestContext) (bool, error) {
 	ctx, cancel := bound(ctx)

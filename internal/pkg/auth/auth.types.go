@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 )
 
 const (
@@ -29,6 +31,12 @@ var (
 )
 
 type (
+	// Option configures an AuthService: WithObserver.
+	Option func(observed)
+
+	// observed is what an Option may set: the observer.
+	observed interface{ setObserver(observability.IObserver) }
+
 	session struct {
 		UserID string `json:"u"`
 		Claim  []byte `json:"c"`
