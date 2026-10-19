@@ -11,6 +11,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -23,10 +24,26 @@ type BrokerService struct {
 	dlqSuffix string
 	attempts  int
 	backoff   time.Duration
+	obs       observability.IObserver
 
 	mu       sync.Mutex
 	producer *kgo.Client
 	subs     map[string]*subscription
+}
+
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing.
+func WithObserver(o observability.IObserver) Option {
+	return func(b *BrokerService) { b.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one unit of work. A service built as a bare
+// struct literal has no observer, so it falls back to Nop without writing.
+func (b *BrokerService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if b.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentBroker, name)
+	}
+	return b.obs.Begin(ctx, observability.ComponentBroker, name)
 }
 
 type subscription struct {
@@ -39,8 +56,8 @@ type subscription struct {
 // Subscribe. inflight may be shared with other services; nil gives the
 // service its own tracker.
 func NewBrokerService(
-	brokers []string, groupID string, inflight *utils.Inflight) IBrokerService {
-	return &BrokerService{
+	brokers []string, groupID string, inflight *utils.Inflight, opts ...Option) IBrokerService {
+	b := &BrokerService{
 		brokers:   brokers,
 		groupID:   groupID,
 		gate:      utils.NewGate(inflight),
@@ -48,7 +65,14 @@ func NewBrokerService(
 		dlqSuffix: DLQSuffix,
 		attempts:  HandlerAttempts,
 		backoff:   RetryBackoff,
+		obs:       observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(b)
+		}
+	}
+	return b
 }
 
 func (b *BrokerService) Run(ctx context.Context) error {
@@ -107,7 +131,7 @@ func (b *BrokerService) closeLocked() {
 	}
 }
 
-func (b *BrokerService) Publish(ctx context.Context, topic string, key, value []byte) error {
+func (b *BrokerService) Publish(ctx context.Context, topic string, key, value []byte) (err error) {
 	if strings.TrimSpace(topic) == "" {
 		return ErrNoTopic
 	}
@@ -116,13 +140,19 @@ func (b *BrokerService) Publish(ctx context.Context, topic string, key, value []
 		return ErrNotRunning
 	}
 	defer done()
+	ctx, op := b.begin(ctx, "publish")
+	defer func() { op.End(err) }()
 	b.mu.Lock()
 	producer := b.producer
 	b.mu.Unlock()
 	if producer == nil {
 		return ErrNotRunning
 	}
-	if err := producer.ProduceSync(ctx, &kgo.Record{Topic: topic, Key: key, Value: value}).FirstErr(); err != nil {
+	// The trace context travels with the message, so the consumer's work is part
+	// of the publisher's trace. It is written under the W3C header names only.
+	rec := &kgo.Record{Topic: topic, Key: key, Value: value}
+	observability.Inject(ctx, b.obs, recordCarrier{rec})
+	if err := producer.ProduceSync(ctx, rec).FirstErr(); err != nil {
 		return errors.Join(ErrPublish, err)
 	}
 	return nil
@@ -220,10 +250,20 @@ func (b *BrokerService) handle(handler Handler, r *kgo.Record) bool {
 	defer done()
 	wait := b.backoff
 	var err error
+	// Messages here come from our own services over Kafka, a trusted hop, so the
+	// trace the publisher started is continued.
+	parent := observability.Extract(context.Background(), b.obs, recordCarrier{r})
 	for attempt := 1; attempt <= b.attempts; attempt++ {
-		if err = safely(handler, r); err == nil {
+		hctx, op := b.begin(parent, "handle")
+		err = safely(hctx, handler, r)
+		if err == nil {
+			op.End(nil)
 			return true
 		}
+		if attempt < b.attempts {
+			op.SetOutcome(observability.OutcomeRetry) // a failed attempt that will be tried again
+		}
+		op.End(err)
 		if attempt < b.attempts {
 			time.Sleep(wait)
 			wait *= 2
@@ -259,8 +299,13 @@ func (b *BrokerService) deadLetter(r *kgo.Record, cause error) bool {
 	wait := b.backoff
 	for b.gate.IsOpen() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		_, op := b.begin(ctx, "dead_letter")
 		err := producer.ProduceSync(ctx, dead).FirstErr()
 		cancel()
+		if err == nil {
+			op.SetOutcome(observability.OutcomeDLQ) // parked on the dead-letter topic
+		}
+		op.End(err)
 		if err == nil {
 			return true
 		}
@@ -272,11 +317,34 @@ func (b *BrokerService) deadLetter(r *kgo.Record, cause error) bool {
 
 // safely runs handler, turning a panic into an error so one bad message
 // cannot crash the consumer.
-func safely(handler Handler, r *kgo.Record) (err error) {
+func safely(ctx context.Context, handler Handler, r *kgo.Record) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = errors.New("broker: handler panicked")
 		}
 	}()
-	return handler(context.Background(), r.Key, r.Value)
+	return handler(ctx, r.Key, r.Value)
+}
+
+// recordCarrier reads and writes the headers of a Kafka record. Set replaces a
+// header of the same name, so a republished message never carries two.
+type recordCarrier struct{ r *kgo.Record }
+
+func (c recordCarrier) Get(key string) string {
+	for _, h := range c.r.Headers {
+		if h.Key == key {
+			return string(h.Value)
+		}
+	}
+	return ""
+}
+
+func (c recordCarrier) Set(key, value string) {
+	for i, h := range c.r.Headers {
+		if h.Key == key {
+			c.r.Headers[i].Value = []byte(value)
+			return
+		}
+	}
+	c.r.Headers = append(c.r.Headers, kgo.RecordHeader{Key: key, Value: []byte(value)})
 }

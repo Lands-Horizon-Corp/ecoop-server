@@ -6,11 +6,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
 )
 
 // A message whose handler panics or keeps failing is retried, then skipped:

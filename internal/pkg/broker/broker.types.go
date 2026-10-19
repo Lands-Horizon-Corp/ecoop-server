@@ -39,6 +39,9 @@ var (
 )
 
 type (
+	// Option configures a BrokerService: WithObserver.
+	Option func(*BrokerService)
+
 	// Handler processes one message. Return nil when done; an error retries
 	// it (HandlerAttempts in all) before it is parked on the topic's dead-letter
 	// topic, <topic>+DLQSuffix, and the topic moves on. A message is committed

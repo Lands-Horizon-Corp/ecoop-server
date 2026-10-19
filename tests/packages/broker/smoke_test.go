@@ -5,8 +5,9 @@ package broker_test
 import (
 	"context"
 	"errors"
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
 	"testing"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
 )
 
 // Smoke: run, subscribe, publish, receive, stop.

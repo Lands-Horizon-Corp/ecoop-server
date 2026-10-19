@@ -6,9 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
 	"sync"
 	"testing"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
 )
 
 // Many goroutines publishing at once: every message arrives. Run with -race.

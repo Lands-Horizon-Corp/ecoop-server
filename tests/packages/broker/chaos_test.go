@@ -5,10 +5,11 @@ package broker_test
 import (
 	"context"
 	"errors"
-	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/broker"
 )
 
 // A handler that fails transiently (a downstream timeout) is retried until
