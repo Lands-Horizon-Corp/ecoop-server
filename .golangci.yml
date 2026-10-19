@@ -1,0 +1,314 @@
+# golangci-lint v2. Run with `make lint`.
+#
+# The set is chosen for what this code does: it handles money and credentials,
+# talks to a database, a cache and a broker, and is heavily concurrent. So it is
+# strong on bugs (errors, contexts, SQL, resources, security) and light on style
+# opinions, which a formatter already settles.
+version: "2"
+
+run:
+  timeout: 10m
+  # Test code is linted too, with the integration tag, so the 190-odd integration
+  # test files are checked and not silently skipped.
+  tests: true
+  build-tags:
+    - integration
+
+linters:
+  # Start from nothing and name every linter, so a new golangci-lint release
+  # cannot change what is checked behind our back.
+  default: none
+  enable:
+    # ---- bugs the compiler and vet miss
+    - govet            # vet, with the extra analyzers enabled below
+    - staticcheck      # SA (bugs), S (simplify) and ST (style) checks
+    - errcheck         # an ignored error return
+    - ineffassign      # an assignment that is never read
+    - unused           # unused code
+    - errorlint        # errors compared or asserted without errors.Is / errors.As
+    - nilerr           # returning nil when an error was just checked
+    - nilnesserr       # returning a nil error variable after an err != nil check
+    - copyloopvar      # redundant loop-variable copies (Go 1.22+)
+    - durationcheck    # time.Duration multiplied by a time.Duration
+    - makezero         # append to a slice made with a non-zero length
+    - exhaustive       # a switch over an enum that forgets a value
+    - forcetypeassert  # x.(T) without the ok check, which panics
+    - unconvert        # a conversion to the type it already has
+
+    # ---- resources and concurrency
+    - bodyclose        # an HTTP response body that is never closed
+    - rowserrcheck     # sql.Rows.Err is never checked
+    - sqlclosecheck    # sql.Rows or Stmt is never closed
+    - noctx            # an HTTP request or SQL call without a context
+    - contextcheck     # a function that drops the context it was given
+    - containedctx     # a context stored in a struct
+    - gosec            # security: weak crypto, SQL built from strings, file perms
+    - protogetter      # direct access to protobuf fields
+    - spancheck        # an OpenTelemetry span that is never ended
+    - testifylint      # misused testify assertions
+
+    # ---- keep the code simple and the errors informative
+    - wrapcheck        # an error from another package returned without context
+    - perfsprint       # fmt.Sprintf where strconv or concatenation is faster
+    - prealloc         # a slice that could be preallocated
+    - intrange         # a for loop that could range over an int
+    - usestdlibvars    # a literal where net/http has a constant (200, "GET")
+    - misspell         # typos in comments and strings
+    - godot            # a top-level comment that does not end in a period
+    - gocritic         # a broad set of small correctness and style checks
+    - revive           # the maintained successor of golint
+    - unparam          # a function parameter that is always the same or unused
+    - whitespace       # leading or trailing blank lines in a block
+    - nolintlint       # a //nolint that suppresses nothing or gives no reason
+    - testpackage      # tests in the _test package, as this repository does
+    - thelper          # test helpers that do not call t.Helper
+    - tparallel        # t.Parallel used inconsistently
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment   # reorders structs for memory; noise, not bugs
+        - shadow           # shadowed err is idiomatic Go and flagged everywhere
+    staticcheck:
+      checks:
+        - all
+        # Package comments and naming opinions the codebase does not follow.
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        # Tests do these on purpose: a nil context to see it repaired, two random
+        # outputs compared, a bidirectional control character as hostile input.
+        - -SA1012
+        - -SA4000
+        - -ST1018
+    errcheck:
+      # forcetypeassert owns unchecked assertions; reporting them twice only
+      # splits one finding over two linters.
+      check-type-assertions: false
+      exclude-functions:
+        # A deferred Close on a read-only handle has nothing useful to report.
+        - (*os.File).Close
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    exhaustive:
+      # A switch with a default has handled the rest on purpose (a filter mode that
+      # does not apply to dates, a reflect.Kind that is not a string).
+      default-signifies-exhaustive: true
+      # Operations a switch handles in part on purpose, and whose other values are
+      # dealt with earlier (a snapshot read fires no hook; a truncate is parked).
+      ignore-constants:
+        - ^github\.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/cdc\.Op(Read|Truncate)$
+    gosec:
+      excludes:
+        - G104   # unhandled errors: errcheck already owns this, with better rules
+        - G115   # integer conversions: flagged on every bounds-checked cast
+        - G304   # file inclusion via a variable: every path here is operator-supplied config, never a request
+        - G118   # a goroutine on context.Background: the services detach on purpose, so that a Stop
+                 # whose context already ended still releases its resources (queue, sql, qr, config)
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+        - fmt.Errorf(
+        # io.Reader and a driver's Exec: an io.EOF or a database error is a value
+        # callers test for (errors.Is, a Pg code), so it passes through as it is.
+        - (io.Reader).Read(
+        - (github.com/uptrace/bun.IConn).ExecContext(
+        # A cancelled or expired context is returned as it is: callers test it with
+        # errors.Is(err, context.Canceled), and wrapping adds nothing to it.
+        - (context.Context).Err()
+        # Instrument constructors fail only at start-up, with a message that already
+        # names the instrument.
+        - go.opentelemetry.io/otel/metric.Meter
+      # Errors from these packages are returned as they are: the service's own
+      # sentinel errors, and the caller's context.
+      # The standard library's codecs, files and database/sql, the bun and goose
+      # calls that every caller wraps with its own operation, and the decoders
+      # whose message already names what failed ("invalid character ...").
+      ignore-package-globs:
+        - github.com/Lands-Horizon-Corp/ecoop-server/*
+        - os
+        - io
+        - fmt
+        - cmp
+        - path/filepath
+        - text/tabwriter
+        - database/sql
+        - encoding/*
+        - crypto/*
+        - github.com/uptrace/bun*
+        - github.com/pressly/goose/*
+        - github.com/bytedance/sonic
+        - github.com/klauspost/compress/*
+        - go.yaml.in/yaml/*
+        - github.com/pusher/*
+        - github.com/minio/*
+        - github.com/twmb/franz-go/*
+        - go.opentelemetry.io/otel/*
+        - ariga.io/atlas/*
+    perfsprint:
+      # fmt.Errorf with %w and wrapping verbs must stay; only the trivial ones go.
+      errorf: false
+      strconcat: false
+    godot:
+      scope: toplevel
+      period: true
+      exclude:
+        - '^\s*(nolint|lint:|go:|TODO|FIXME)'
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: var-declaration
+        - name: range
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+        # Not enabled, on purpose: receiver-naming (the generic CQRS service uses s and
+        # c for the same type in different files) and unused-parameter (a method that
+        # satisfies an interface must keep a ctx it does not use).
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam      # copying a large struct by value; deliberate in tests
+        - rangeValCopy   # same
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    testpackage:
+      # Helpers shared by white-box tests keep their own file name.
+      skip-regexp: (export|internal)_test\.go
+    thelper:
+      test:
+        name: false     # a *testing.T parameter may be called t or tt
+      benchmark:
+        name: false
+      tb:
+        name: false     # testing.TB is called t throughout this repository
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # A test may ignore errors, build SQL from strings, use weak randomness and
+      # skip the doc-comment rules; the point of a test is the assertion.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - forcetypeassert
+          - gosec
+          - wrapcheck
+          - noctx
+          - godot
+          - revive
+          - unparam
+          - prealloc
+          - perfsprint
+          - containedctx
+          - contextcheck
+      # Test helpers under tests/ are not part of the product either.
+      - path: ^tests/
+        linters:
+          - errcheck
+          - gosec
+          - wrapcheck
+          - godot
+          - revive
+          - gocritic
+      # main and the module list only wire things together.
+      - path: ^(main|app)\.go$
+        linters:
+          - wrapcheck
+          - godot
+      # A service that owns long-lived goroutines holds a context for them on
+      # purpose: the API's shutdown context, the CDC consumers' run context (so a
+      # short start-up context cannot kill them) and the operation's own span
+      # context. Passing these through every call would be the bug.
+      - path: ^internal/pkg/(api/api|cdc/cdc|observability/observability)\.go$
+        linters:
+          - containedctx
+      # contextcheck follows method names, and `Add` on an atomic counter is not a
+      # call that takes a context; the batch and consume loops pass theirs. The rest
+      # are deliberate detaches: a Stop whose context has ended still has to close
+      # what it opened (broker, cdc, sql, queue's leader lock), and the API builds
+      # its handler chain once at Start, with no request to inherit from.
+      - path: ^internal/pkg/(cqrs|cdc|broker|queue|qr|sql|api)/
+        linters:
+          - contextcheck
+      # An assertion on a value this package put there itself cannot fail: a
+      # sync.Pool's New, a list element the limiter pushed, the route queue stored,
+      # an Atlas change whose type the pairing function just selected, and the
+      # TextUnmarshaler that Implements has just confirmed.
+      - path: ^internal/(utils/(bufferpool|mappool|limiter)\.go|pkg/(queue/queue|sql/sql\.atlas|config/config\.utils)\.go)$
+        linters:
+          - forcetypeassert
+      # A switch over reflect.Kind or a filter Mode names the cases it handles;
+      # the rest are dealt with before it (a filter for another column type is
+      # converted, an unsupported Kind is rejected on entry).
+      - path: ^internal/(utils/|pkg/pagination/pagination\.(date|filter)\.go$)
+        linters:
+          - exhaustive
+      # Integration suites share one Postgres, Kafka and Valkey and say so: most of
+      # them are serial by design (see the Makefile), so parallel-subtest advice
+      # does not apply to them.
+      - path: ^tests/packages/
+        linters:
+          - tparallel
+      # A test that provokes a panic (a nil map write, a nil func call), or changes
+      # a copy it was handed to prove it is a copy, does what govet warns against.
+      - path: ^tests/packages/(cdc|config)/
+        linters:
+          - govet
+      # Test helpers close rows and read bodies in ways a linter cannot follow
+      # across a helper boundary; the suites assert the behaviour directly.
+      - path: ^tests/
+        linters:
+          - bodyclose
+          - rowserrcheck
+          - sqlclosecheck
+          - thelper
+          - exhaustive
+          - unconvert
+          - testpackage
+          - usestdlibvars
+          - intrange
+          - forcetypeassert
+
+issues:
+  # Report every finding: a cap hides the second half of a long list.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Lands-Horizon-Corp/ecoop-server
