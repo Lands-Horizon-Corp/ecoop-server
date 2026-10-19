@@ -11,6 +11,7 @@ import (
 
 	"github.com/wneessen/go-mail"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
@@ -28,6 +29,23 @@ type SMTPService struct {
 	gate   *utils.Gate
 	client *mail.Client
 	send   *queue.Job[sendPayload]
+	obs    observability.IObserver
+}
+
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing. Only the operation name and its outcome are
+// ever recorded: never an address, a subject or a body.
+func WithObserver(o observability.IObserver) Option {
+	return func(s *SMTPService) { s.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one call. A service built as a bare struct
+// literal has no observer, so it falls back to Nop without writing.
+func (s *SMTPService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if s.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentSMTP, name)
+	}
+	return s.obs.Begin(ctx, observability.ComponentSMTP, name)
 }
 
 type sendPayload struct {
@@ -41,8 +59,8 @@ func NewSMTPService(
 	host string, port int, username, password, from,
 	defaultName string, secured bool,
 	queue queue.IQueueService,
-	inflight *utils.Inflight) ISMTPService {
-	return &SMTPService{
+	inflight *utils.Inflight, opts ...Option) ISMTPService {
+	s := &SMTPService{
 		host:        host,
 		port:        port,
 		username:    username,
@@ -52,7 +70,14 @@ func NewSMTPService(
 		secured:     secured,
 		queue:       queue,
 		gate:        utils.NewGate(inflight),
+		obs:         observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
 }
 func (s *SMTPService) Start(ctx context.Context) error {
 	if s.gate == nil {
@@ -167,12 +192,14 @@ func (s *SMTPService) Format(ctx context.Context, req SMTPRequest) (*SMTPRequest
 	return &req, nil
 }
 
-func (s *SMTPService) Send(ctx context.Context, req SMTPRequest) error {
+func (s *SMTPService) Send(ctx context.Context, req SMTPRequest) (err error) {
 	done, ok := s.gate.Enter()
 	if !ok {
 		return ErrNotStarted
 	}
 	defer done()
+	ctx, op := s.begin(ctx, "send")
+	defer func() { op.End(err) }()
 	if !utils.IsValidEmail(req.To) {
 		return ErrInvalidRecipient
 	}
@@ -201,7 +228,9 @@ func (s *SMTPService) Send(ctx context.Context, req SMTPRequest) error {
 	return nil
 }
 
-func (s *SMTPService) deliver(ctx context.Context, p sendPayload) error {
+func (s *SMTPService) deliver(ctx context.Context, p sendPayload) (err error) {
+	ctx, op := s.begin(ctx, "deliver")
+	defer func() { op.End(err) }()
 	msg := mail.NewMsg()
 	if err := msg.FromFormat(p.FromName, s.from); err != nil {
 		return errors.Join(ErrInvalidSender, err, queue.ErrSkipRetry)

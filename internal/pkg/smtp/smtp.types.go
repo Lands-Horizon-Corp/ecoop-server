@@ -36,6 +36,9 @@ var (
 )
 
 type (
+	// Option configures an SMTPService: WithObserver.
+	Option func(*SMTPService)
+
 	SMTPRequest struct {
 		Name     string
 		To       string

@@ -106,7 +106,7 @@ func startMailpit() error {
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("mailpit API not ready at %s: %v", mailpitAPI, err)
+			return fmt.Errorf("mailpit API not ready at %s: %w", mailpitAPI, err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -232,7 +232,7 @@ func newQueue(t testing.TB) queue.IQueueService {
 		t.Fatalf("cache Run: %v", err)
 	}
 	t.Cleanup(func() { _ = ch.Stop(context.Background()) })
-	q := queue.NewQueueService(ch, queue.Namespace(qns.For(t, queueAddr, queuePassword)))
+	q := queue.NewQueueService(ch, queue.WithNamespace(qns.For(t, queueAddr, queuePassword)))
 	if err := q.Start(context.Background()); err != nil {
 		t.Fatalf("queue Start: %v", err)
 	}

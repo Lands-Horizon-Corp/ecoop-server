@@ -87,7 +87,7 @@ func TestSadPath_QueueUnavailable(t *testing.T) {
 	// queue that is not running instead of failing on the first Send.
 	requireMailpit(t)
 	ch := cache.NewCacheService([]string{queueAddr}, queuePassword, nil)
-	err := smtp.NewSMTPService(smtpHost, smtpPort, "", "", sender, "", true, queue.NewQueueService(ch, queue.Namespace(qns.For(t, queueAddr, queuePassword))), nil).Start(ctxT(t))
+	err := smtp.NewSMTPService(smtpHost, smtpPort, "", "", sender, "", true, queue.NewQueueService(ch, queue.WithNamespace(qns.For(t, queueAddr, queuePassword))), nil).Start(ctxT(t))
 	if !errors.Is(err, smtp.ErrQueueUnavailable) || !errors.Is(err, queue.ErrNotStarted) {
 		t.Fatalf("Start = %v, want ErrQueueUnavailable + queue.ErrNotStarted", err)
 	}
