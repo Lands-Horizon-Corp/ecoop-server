@@ -60,7 +60,7 @@ func TestPoison_RedirectToAPrivateAddressIsBlocked(t *testing.T) {
 // is cut off at the size limit and nothing is stored.
 func TestPoison_LyingAndEndlessDownloads(t *testing.T) {
 	t.Parallel()
-	s, bucket := running(t, storage.AllowPrivateURLs(), storage.MaxFileSize(64<<10))
+	s, bucket := running(t, storage.WithAllowPrivateURLs(), storage.WithMaxFileSize(64<<10))
 	ctx := ctxT(t)
 	liar := fileServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
@@ -86,7 +86,7 @@ func TestPoison_LyingAndEndlessDownloads(t *testing.T) {
 // A huge base64 string is refused before it is decoded into memory.
 func TestPoison_HugeBase64IsRefusedUpFront(t *testing.T) {
 	t.Parallel()
-	s, _ := running(t, storage.MaxFileSize(1<<20))
+	s, _ := running(t, storage.WithMaxFileSize(1<<20))
 	huge := strings.Repeat("A", 8<<20)
 	if _, err := s.UploadFromBase64(ctxT(t), huge, nil); !errors.Is(err, storage.ErrTooLarge) {
 		t.Fatalf("huge base64: %v", err)

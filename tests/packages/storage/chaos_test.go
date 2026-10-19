@@ -93,7 +93,7 @@ func TestChaos_CancelledUploadStopsPromptly(t *testing.T) {
 // A source that stalls is abandoned after URLTimeout.
 func TestChaos_StalledDownloadTimesOut(t *testing.T) {
 	t.Parallel()
-	s, bucket := running(t, storage.AllowPrivateURLs(), storage.URLTimeout(500*time.Millisecond))
+	s, bucket := running(t, storage.WithAllowPrivateURLs(), storage.WithURLTimeout(500*time.Millisecond))
 	srv := fileServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(pngBytes[:10])
@@ -119,7 +119,7 @@ func TestChaos_StalledDownloadTimesOut(t *testing.T) {
 // A source that drops the connection halfway fails the upload cleanly.
 func TestChaos_DownloadCutHalfway(t *testing.T) {
 	t.Parallel()
-	s, bucket := running(t, storage.AllowPrivateURLs())
+	s, bucket := running(t, storage.WithAllowPrivateURLs())
 	srv := fileServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "100000")
 		_, _ = w.Write(payload(1000))

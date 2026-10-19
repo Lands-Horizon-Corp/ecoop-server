@@ -97,7 +97,7 @@ func TestHappy_UploadFromBase64(t *testing.T) {
 
 func TestHappy_UploadFromURL(t *testing.T) {
 	t.Parallel()
-	s, bucket := running(t, storage.AllowPrivateURLs()) // the test server is local
+	s, bucket := running(t, storage.WithAllowPrivateURLs()) // the test server is local
 	srv := fileServer(t, serveBytes(pdfBytes, "application/pdf; charset=binary"))
 	st, err := s.UploadFromURL(ctxT(t), srv.URL+"/docs/loan-terms.pdf", nil)
 	if err != nil {
@@ -164,7 +164,7 @@ func TestHappy_ProgressOfAKnownSize(t *testing.T) {
 
 func TestHappy_UploadPicksTheRightWay(t *testing.T) {
 	t.Parallel()
-	s, bucket := running(t, storage.AllowPrivateURLs())
+	s, bucket := running(t, storage.WithAllowPrivateURLs())
 	ctx := ctxT(t)
 	p := filepath.Join(t.TempDir(), "a.png")
 	_ = os.WriteFile(p, pngBytes, 0o644)

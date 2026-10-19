@@ -26,6 +26,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -49,18 +50,19 @@ type StorageService struct {
 	publicClient atomic.Pointer[minio.Client]
 	lifecycle    sync.Mutex // serialises Run and Stop
 	gate         *utils.Gate
+	obs          observability.IObserver
 }
 
-// MaxFileSize caps every upload (DefaultMaxFileSize otherwise).
-func MaxFileSize(n int64) Option { return func(s *StorageService) { s.maxFileSize = n } }
+// WithMaxFileSize caps every upload (DefaultMaxFileSize otherwise).
+func WithMaxFileSize(n int64) Option { return func(s *StorageService) { s.maxFileSize = n } }
 
-// URLTimeout bounds a whole UploadFromURL download (DefaultURLTimeout
+// WithURLTimeout bounds a whole UploadFromURL download (DefaultURLTimeout
 // otherwise).
-func URLTimeout(d time.Duration) Option { return func(s *StorageService) { s.urlTimeout = d } }
+func WithURLTimeout(d time.Duration) Option { return func(s *StorageService) { s.urlTimeout = d } }
 
-// AllowPrivateURLs lets UploadFromURL fetch private and local addresses.
+// WithAllowPrivateURLs lets UploadFromURL fetch private and local addresses.
 // Off by default: a URL from a user could otherwise reach internal services.
-func AllowPrivateURLs() Option { return func(s *StorageService) { s.allowPrivate = true } }
+func WithAllowPrivateURLs() Option { return func(s *StorageService) { s.allowPrivate = true } }
 
 // NewStorageService creates the service. endpoint and publicEndpoint are
 // host:port; publicEndpoint is where browsers reach the server, for
@@ -87,6 +89,7 @@ func NewStorageService(
 		maxFileSize:    DefaultMaxFileSize,
 		urlTimeout:     DefaultURLTimeout,
 		gate:           utils.NewGate(inflight),
+		obs:            observability.Nop(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -96,11 +99,11 @@ func NewStorageService(
 	return s
 }
 
-// Lifecycle
+// Lifecycle.
 
 // Run connects to the server and creates the bucket if it does not exist.
 // Calling it while running does nothing.
-func (s *StorageService) Run(ctx context.Context) error {
+func (s *StorageService) Run(ctx context.Context) (err error) {
 	if s.gate == nil {
 		return ErrNoTracker
 	}
@@ -121,6 +124,8 @@ func (s *StorageService) Run(ctx context.Context) error {
 	if s.gate.IsOpen() {
 		return nil
 	}
+	ctx, op := s.begin(ctx, "run")
+	defer func() { op.End(err) }()
 	client, err := s.newClient(s.endpoint, s.ssl)
 	if err != nil {
 		return errors.Join(ErrConnect, err)
@@ -168,12 +173,14 @@ func (s *StorageService) Stop(ctx context.Context) error {
 	return s.gate.Close(ctx)
 }
 
-func (s *StorageService) Ping(ctx context.Context) error {
+func (s *StorageService) Ping(ctx context.Context) (err error) {
 	client, done, err := s.ready()
 	if err != nil {
 		return err
 	}
 	defer done()
+	ctx, op := s.begin(ctx, "ping")
+	defer func() { op.End(err) }()
 	if _, err := client.BucketExists(ctx, s.bucket); err != nil {
 		return errors.Join(ErrConnect, err)
 	}
@@ -194,7 +201,7 @@ func (s *StorageService) ready() (*minio.Client, func(), error) {
 	return client, done, nil
 }
 
-// Uploads
+// Uploads.
 
 func (s *StorageService) Upload(ctx context.Context, file any, cb ProgressCallback) (*Storage, error) {
 	switch f := file.(type) {
@@ -298,17 +305,25 @@ func (s *StorageService) UploadFromURL(ctx context.Context, raw string, cb Progr
 	if err != nil {
 		return nil, ErrInvalidURL
 	}
+	_, op := s.begin(ctx, "fetch_url")
 	resp, err := s.httpClient().Do(req)
 	if err != nil {
 		if errors.Is(err, ErrBlockedAddress) {
+			// A refused private address is an answer, not a fault; it ends as
+			// skipped so an attempt to reach internal services shows up alone.
+			op.SetOutcome(observability.OutcomeSkipped)
+			op.End(nil)
 			return nil, ErrBlockedAddress
 		}
+		op.End(err)
 		return nil, errors.Join(ErrDownload, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		op.End(ErrDownload)
 		return nil, fmt.Errorf("%w: %s", ErrDownload, resp.Status)
 	}
+	op.End(nil)
 	if resp.ContentLength > s.maxFileSize {
 		return nil, ErrTooLarge
 	}
@@ -355,7 +370,7 @@ func (s *StorageService) UploadFromStream(ctx context.Context, r io.Reader, size
 }
 
 // upload stores r under a new unique key and reports progress to cb.
-func (s *StorageService) upload(ctx context.Context, r io.Reader, size int64, fileName, contentType string, cb ProgressCallback) (*Storage, error) {
+func (s *StorageService) upload(ctx context.Context, r io.Reader, size int64, fileName, contentType string, cb ProgressCallback) (_ *Storage, err error) {
 	client, done, err := s.ready()
 	if err != nil {
 		return nil, err
@@ -367,6 +382,8 @@ func (s *StorageService) upload(ctx context.Context, r io.Reader, size int64, fi
 	if size > s.maxFileSize {
 		return nil, ErrTooLarge
 	}
+	ctx, op := s.begin(ctx, "upload")
+	defer func() { finish(op, err) }()
 	br := bufio.NewReaderSize(r, 512)
 	head, err := br.Peek(512)
 	if len(head) == 0 {
@@ -488,9 +505,9 @@ func (s *StorageService) objectURL(key string) string {
 	return u.String()
 }
 
-// Files
+// Files.
 
-func (s *StorageService) DeleteFile(ctx context.Context, st *Storage) error {
+func (s *StorageService) DeleteFile(ctx context.Context, st *Storage) (err error) {
 	if st == nil {
 		return ErrNilStorage
 	}
@@ -505,13 +522,15 @@ func (s *StorageService) DeleteFile(ctx context.Context, st *Storage) error {
 		return err
 	}
 	defer done()
+	ctx, op := s.begin(ctx, "delete_file")
+	defer func() { op.End(err) }()
 	if err := client.RemoveObject(ctx, s.bucket, st.StorageKey, minio.RemoveObjectOptions{}); err != nil {
 		return errors.Join(ErrDelete, err)
 	}
 	return nil
 }
 
-func (s *StorageService) GeneratePresignedURL(ctx context.Context, st *Storage, expiry time.Duration) (string, error) {
+func (s *StorageService) GeneratePresignedURL(ctx context.Context, st *Storage, expiry time.Duration) (_ string, err error) {
 	if st == nil {
 		return "", ErrNilStorage
 	}
@@ -529,6 +548,8 @@ func (s *StorageService) GeneratePresignedURL(ctx context.Context, st *Storage, 
 		return "", err
 	}
 	defer done()
+	ctx, op := s.begin(ctx, "presign")
+	defer func() { op.End(err) }()
 	u, err := s.publicClient.Load().PresignedGetObject(ctx, s.bucket, st.StorageKey, expiry, nil)
 	if err != nil {
 		return "", errors.Join(ErrConnect, err)
@@ -569,12 +590,14 @@ func (s *StorageService) GenerateUniqueName(original, contentType string) (strin
 }
 
 // RemoveAllFiles deletes every object in the service's bucket.
-func (s *StorageService) RemoveAllFiles(ctx context.Context) error {
+func (s *StorageService) RemoveAllFiles(ctx context.Context) (err error) {
 	client, done, err := s.ready()
 	if err != nil {
 		return err
 	}
 	defer done()
+	ctx, op := s.begin(ctx, "remove_all")
+	defer func() { op.End(err) }()
 	objects := client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Recursive: true})
 	var errs []error
 	for e := range client.RemoveObjects(ctx, s.bucket, objects, minio.RemoveObjectsOptions{}) {

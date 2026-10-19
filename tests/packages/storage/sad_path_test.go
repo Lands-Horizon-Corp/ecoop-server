@@ -76,7 +76,7 @@ func TestSad_CallsBeforeRunAndAfterStop(t *testing.T) {
 
 func TestSad_BadInputsAreRefused(t *testing.T) {
 	t.Parallel()
-	s, bucket := running(t, storage.MaxFileSize(1024))
+	s, bucket := running(t, storage.WithMaxFileSize(1024))
 	ctx := ctxT(t)
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "empty.txt"), nil, 0o644)
@@ -119,7 +119,7 @@ func TestSad_BadInputsAreRefused(t *testing.T) {
 
 func TestSad_URLsThatAreNotDownloads(t *testing.T) {
 	t.Parallel()
-	s, _ := running(t, storage.AllowPrivateURLs())
+	s, _ := running(t, storage.WithAllowPrivateURLs())
 	ctx := ctxT(t)
 	for _, u := range []string{"ftp://example.com/a.png", "file:///etc/passwd", "javascript:alert(1)", "//example.com/a", "http://", "not a url"} {
 		if _, err := s.UploadFromURL(ctx, u, nil); !errors.Is(err, storage.ErrInvalidURL) {
