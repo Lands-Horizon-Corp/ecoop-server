@@ -16,6 +16,7 @@ import (
 
 	"github.com/pusher/pusher-http-go/v5"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
 
@@ -31,6 +32,7 @@ type BroadcasterService struct {
 	client    atomic.Pointer[pusher.Client]
 	lifecycle sync.Mutex // serialises Start and Stop
 	gate      *utils.Gate
+	obs       observability.IObserver
 }
 
 func NewBroadcastService(
@@ -38,11 +40,12 @@ func NewBroadcastService(
 	secured bool,
 	maxPayloadKB int,
 	inflight *utils.Inflight,
+	opts ...Option,
 ) IBroadcastService {
 	if maxPayloadKB <= 0 {
 		maxPayloadKB = DefaultMaxPayloadKB
 	}
-	return &BroadcasterService{
+	b := &BroadcasterService{
 		appID:        appID,
 		key:          key,
 		secret:       secret,
@@ -51,10 +54,17 @@ func NewBroadcastService(
 		secured:      secured,
 		maxPayloadKB: maxPayloadKB,
 		gate:         utils.NewGate(inflight),
+		obs:          observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(b)
+		}
+	}
+	return b
 }
 
-func (b *BroadcasterService) Start(ctx context.Context) error {
+func (b *BroadcasterService) Start(ctx context.Context) (err error) {
 	if b.gate == nil {
 		return ErrNoTracker
 	}
@@ -75,6 +85,8 @@ func (b *BroadcasterService) Start(ctx context.Context) error {
 	if b.gate.IsOpen() {
 		return nil
 	}
+	ctx, op := b.begin(ctx, "start")
+	defer func() { op.End(err) }()
 	client := &pusher.Client{
 		AppID:                       b.appID,
 		Key:                         b.key,
@@ -107,13 +119,18 @@ func (b *BroadcasterService) Stop(ctx context.Context) error {
 }
 
 func (b *BroadcasterService) Ping(ctx context.Context) error {
+	if !b.gate.IsOpen() {
+		return ErrNotStarted
+	}
+	ctx, op := b.begin(ctx, "ping")
 	err := b.call(ctx, func(c *pusher.Client) error {
 		_, err := c.Channels(pusher.ChannelsParams{})
 		return err
 	})
 	if err != nil && !errors.Is(err, ErrNotStarted) {
-		return errors.Join(ErrConnect, err)
+		err = errors.Join(ErrConnect, err)
 	}
+	op.End(err)
 	return err
 }
 
@@ -142,7 +159,7 @@ func (b *BroadcasterService) Runner(ctx context.Context) error {
 	}
 }
 
-// Events
+// Events.
 
 func (b *BroadcasterService) Publish(ctx context.Context, channel, event string, payload any) error {
 	return b.Dispatch(ctx, []string{channel}, event, payload)
@@ -150,7 +167,7 @@ func (b *BroadcasterService) Publish(ctx context.Context, channel, event string,
 
 // Dispatch sends event to every channel, in batches of
 // MaxChannelsPerTrigger. Duplicate channels receive it once.
-func (b *BroadcasterService) Dispatch(ctx context.Context, channels []string, event string, payload any) error {
+func (b *BroadcasterService) Dispatch(ctx context.Context, channels []string, event string, payload any) (err error) {
 	if len(channels) == 0 {
 		return ErrNoChannels
 	}
@@ -167,6 +184,11 @@ func (b *BroadcasterService) Dispatch(ctx context.Context, channels []string, ev
 	if err != nil {
 		return fmt.Errorf("broadcast: %w", err)
 	}
+	if !b.gate.IsOpen() {
+		return ErrNotStarted
+	}
+	ctx, op := b.begin(ctx, "dispatch")
+	defer func() { op.End(err) }()
 	var errs []error
 	for batch := range slices.Chunk(channels, MaxChannelsPerTrigger) {
 		err := b.call(ctx, func(c *pusher.Client) error { return c.TriggerMulti(batch, event, data) })
@@ -202,7 +224,7 @@ func (b *BroadcasterService) Broadcast(ctx context.Context, channels []string, e
 	return errors.Join(errs...)
 }
 
-// Helpers
+// Helpers.
 
 var validChannel = regexp.MustCompile(`^[A-Za-z0-9_\-=@,.;]{1,164}$`)
 

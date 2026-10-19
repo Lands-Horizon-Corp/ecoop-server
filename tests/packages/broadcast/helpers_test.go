@@ -248,9 +248,10 @@ func (s *subscriber) subscribe(t testing.TB, channels ...string) {
 		if !ok {
 			t.Fatalf("subscriptions never confirmed: %v", pending)
 		}
-		if m.Event == "pusher_internal:subscription_succeeded" {
+		switch m.Event {
+		case "pusher_internal:subscription_succeeded":
 			delete(pending, m.Channel)
-		} else if m.Event == "pusher:subscription_error" || m.Event == "pusher:error" {
+		case "pusher:subscription_error", "pusher:error":
 			t.Fatalf("subscribing: %+v", m)
 		}
 	}
