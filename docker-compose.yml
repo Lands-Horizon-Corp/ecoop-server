@@ -269,6 +269,65 @@ services:
     networks:
       - app-network
 
+  # ---- telemetry (docker compose --profile telemetry up -d) ----------------
+  # Not part of the default stack: the app and its tests need none of it.
+  # App -> otel-collector :14318 (OTLP/HTTP) -> Prometheus (metrics) and Tempo
+  # (traces) -> Grafana :3000. Point the app at it with
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318
+  #   OTEL_EXPORTER_OTLP_INSECURE=true
+  otel-collector:
+    profiles: [ telemetry ]
+    image: otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_IMAGE_TAG:-0.120.0}
+    command: [ "--config=/etc/otelcol/config.yaml" ]
+    volumes:
+      - ./docker/otel/collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      # 14318 on the host, not the standard 4318: other tracing stacks on a
+      # developer machine commonly hold 4318, and a clash stops this one.
+      - "127.0.0.1:${OTEL_COLLECTOR_PORT:-14318}:4318"
+    networks:
+      - app-network
+
+  prometheus:
+    profiles: [ telemetry ]
+    image: prom/prometheus:${PROMETHEUS_IMAGE_TAG:-v3.2.1}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # Prometheus 3 accepts OTLP metrics at /api/v1/otlp/v1/metrics once this
+      # flag is set. It is a flag, not a feature name: the old
+      # --enable-feature=otlp-write-receiver is rejected as unknown.
+      - --web.enable-otlp-receiver
+    volumes:
+      - ./docker/otel/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - app-network
+
+  tempo:
+    profiles: [ telemetry ]
+    image: grafana/tempo:${TEMPO_IMAGE_TAG:-2.7.1}
+    command: [ "-config.file=/etc/tempo/tempo.yaml" ]
+    volumes:
+      - ./docker/otel/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    networks:
+      - app-network
+
+  grafana:
+    profiles: [ telemetry ]
+    image: grafana/grafana:${GRAFANA_IMAGE_TAG:-11.5.2}
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./docker/otel/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./docker/otel/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./telemetry:/var/lib/grafana/dashboards/ecoop:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - app-network
+
 networks:
   app-network:
 

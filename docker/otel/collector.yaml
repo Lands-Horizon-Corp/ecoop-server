@@ -1,0 +1,48 @@
+# Receives OTLP/HTTP from the app and fans it out: metrics to Prometheus, traces
+# to Tempo. The collector is also where limits belong, so a misbehaving app
+# cannot take the backends down.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Drops data instead of growing without bound when a backend is slow.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+    spike_limit_mib: 100
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  # Defence in depth: whatever the app sends, these never reach a backend.
+  attributes/scrub:
+    actions:
+      - key: authorization
+        action: delete
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.cookie
+        action: delete
+
+exporters:
+  otlphttp/prometheus:
+    endpoint: http://prometheus:9090/api/v1/otlp
+    tls:
+      insecure: true
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [ otlp ]
+      processors: [ memory_limiter, batch ]
+      exporters: [ otlphttp/prometheus ]
+    traces:
+      receivers: [ otlp ]
+      processors: [ memory_limiter, attributes/scrub, batch ]
+      exporters: [ otlp/tempo ]

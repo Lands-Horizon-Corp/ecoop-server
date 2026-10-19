@@ -1,0 +1,14 @@
+# The app pushes its metrics through the collector (OTLP), so there is nothing to
+# scrape. Prometheus only stores them and answers Grafana.
+global:
+  scrape_interval: 15s
+
+# OTLP resource attributes become labels, so a query can use job (service.name)
+# and instance (service.instance.id) without the app naming them.
+otlp:
+  promote_resource_attributes:
+    - service.instance.id
+    - service.name
+    - service.namespace
+    - service.version
+    - deployment.environment.name

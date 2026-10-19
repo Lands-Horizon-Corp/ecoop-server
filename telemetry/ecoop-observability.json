@@ -1,0 +1,1551 @@
+{
+    "uid": "ecoop-observability",
+    "title": "ecoop-server / operations",
+    "description": "What every internal/pkg package reports through the observability package: operations_total, operation_duration_seconds, inflight_operations and the cqrs_* totals. Needs an exporter that sends them to Prometheus; until one exists this dashboard is empty.",
+    "tags": [
+        "ecoop",
+        "go",
+        "observability"
+    ],
+    "timezone": "browser",
+    "refresh": "10s",
+    "schemaVersion": 39,
+    "editable": true,
+    "time": {
+        "from": "now-30m",
+        "to": "now"
+    },
+    "templating": {
+        "list": [
+            {
+                "name": "service",
+                "label": "Service",
+                "type": "query",
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "query": {
+                    "query": "label_values(operations_total, job)",
+                    "refId": "service"
+                },
+                "definition": "label_values(operations_total, job)",
+                "current": {
+                    "text": "e-coop/ecoop",
+                    "value": "e-coop/ecoop"
+                },
+                "refresh": 2
+            },
+            {
+                "name": "component",
+                "label": "Component",
+                "type": "query",
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "query": {
+                    "query": "label_values(operations_total{job=\"$service\"}, component)",
+                    "refId": "component"
+                },
+                "definition": "label_values(operations_total{job=\"$service\"}, component)",
+                "includeAll": true,
+                "multi": true,
+                "allValue": ".*",
+                "current": {
+                    "text": "All",
+                    "value": "$__all"
+                },
+                "refresh": 2
+            }
+        ]
+    },
+    "panels": [
+        {
+            "type": "row",
+            "title": "Overview",
+            "id": 1,
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "panels": []
+        },
+        {
+            "type": "stat",
+            "title": "Operations / s",
+            "id": 2,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 0,
+                "y": 1
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "decimals": 1
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=~\"$component\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Error rate",
+            "id": 3,
+            "description": "Faults only. Expected answers (a cache miss, a wrong password, a duplicate) end as skipped and are not counted here.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 4,
+                "y": 1
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "decimals": 2,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "orange",
+                                "value": 0.01
+                            },
+                            {
+                                "color": "red",
+                                "value": 0.05
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=~\"$component\",outcome=\"error\"}[$__rate_interval])) / sum(rate(operations_total{job=\"$service\",component=~\"$component\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "In flight",
+            "id": 4,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 8,
+                "y": 1
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(inflight_operations{job=\"$service\",component=~\"$component\"})"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Retries / s",
+            "id": 5,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 12,
+                "y": 1
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "decimals": 2
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=~\"$component\",outcome=\"retry\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Dead-lettered / s",
+            "id": 6,
+            "description": "Records parked on a dead-letter topic. Anything above zero needs a look.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 16,
+                "y": 1
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "decimals": 2,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 0.0001
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=~\"$component\",outcome=\"dlq\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Series cap hit",
+            "id": 7,
+            "description": "Above zero means a label that should be bounded is not: its series were folded into one overflow series per component. Find the label and fix the caller.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 20,
+                "y": 1
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 0,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 1
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(operations_total{job=\"$service\",overflow=\"true\"}) or vector(0)"
+                }
+            ]
+        },
+        {
+            "type": "row",
+            "title": "By component",
+            "id": 10,
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 5
+            },
+            "panels": []
+        },
+        {
+            "type": "timeseries",
+            "title": "Operations / s by component",
+            "id": 11,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops"
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{component}}",
+                    "expr": "sum by (component) (rate(operations_total{job=\"$service\",component=~\"$component\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Error rate by component",
+            "id": 12,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{component}}",
+                    "expr": "sum by (component) (rate(operations_total{job=\"$service\",component=~\"$component\",outcome=\"error\"}[$__rate_interval])) / sum by (component) (rate(operations_total{job=\"$service\",component=~\"$component\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "p95 duration by component",
+            "id": 13,
+            "description": "95th percentile, from the operation_duration_seconds buckets (1 ms to 5 min). An average hides the slow tail; this shows it.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 14
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{component}} p95",
+                    "expr": "histogram_quantile(0.95, sum by (le, component) (rate(operation_duration_seconds_bucket{job=\"$service\",component=~\"$component\"}[$__rate_interval])))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "B",
+                    "legendFormat": "{{component}} p99",
+                    "expr": "histogram_quantile(0.99, sum by (le, component) (rate(operation_duration_seconds_bucket{job=\"$service\",component=~\"$component\"}[$__rate_interval])))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "In flight by component",
+            "id": 14,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 14
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{component}}",
+                    "expr": "sum by (component) (inflight_operations{job=\"$service\",component=~\"$component\"})"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Outcomes",
+            "id": 15,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 22
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "custom": {
+                        "stacking": {
+                            "mode": "normal"
+                        },
+                        "fillOpacity": 40
+                    }
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{outcome}}",
+                    "expr": "sum by (outcome) (rate(operations_total{job=\"$service\",component=~\"$component\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "table",
+            "title": "Worst operations (errors / s)",
+            "id": 16,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 22
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "decimals": 3
+                },
+                "overrides": []
+            },
+            "options": {
+                "sortBy": [
+                    {
+                        "displayName": "Value",
+                        "desc": true
+                    }
+                ]
+            },
+            "transformations": [
+                {
+                    "id": "organize",
+                    "options": {
+                        "excludeByName": {
+                            "Time": true
+                        }
+                    }
+                }
+            ],
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "format": "table",
+                    "instant": true,
+                    "expr": "topk(15, sum by (component, operation) (rate(operations_total{job=\"$service\",component=~\"$component\",outcome=\"error\"}[$__rate_interval])) > 0)"
+                }
+            ]
+        },
+        {
+            "type": "row",
+            "title": "API",
+            "id": 20,
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 30
+            },
+            "panels": []
+        },
+        {
+            "type": "timeseries",
+            "title": "Requests / s by route",
+            "id": 21,
+            "description": "Routes are templates (/members/:id), never concrete paths. 4xx counts as success, 5xx and panics as error, 429 as retry.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 31
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{operation}}",
+                    "expr": "sum by (operation) (rate(operations_total{job=\"$service\",component=\"api\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "5xx and panics by route",
+            "id": 22,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 8,
+                "y": 31
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{operation}}",
+                    "expr": "sum by (operation) (rate(operations_total{job=\"$service\",component=\"api\",outcome=\"error\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "p95 request duration by route",
+            "id": 23,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 16,
+                "y": 31
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{operation}}",
+                    "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(operation_duration_seconds_bucket{job=\"$service\",component=\"api\"}[$__rate_interval])))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Rate-limited (429) by route",
+            "id": 24,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 0,
+                "y": 39
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{operation}}",
+                    "expr": "sum by (operation) (rate(operations_total{job=\"$service\",component=\"api\",outcome=\"retry\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Requests no route matched",
+            "id": 25,
+            "description": "Scanners and typos. One series however many paths are tried.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 12,
+                "y": 39
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "unmatched",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=\"api\",operation=\"unmatched\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "row",
+            "title": "Abuse and security signals",
+            "id": 30,
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 45
+            },
+            "panels": []
+        },
+        {
+            "type": "timeseries",
+            "title": "Wrong passwords / s",
+            "id": 31,
+            "description": "A guessing attack shows up here without raising the security error rate.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 6,
+                "x": 0,
+                "y": 46
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "wrong password",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=\"security\",operation=\"verify_password\",outcome=\"skipped\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Wrong or expired one-time codes / s",
+            "id": 32,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 6,
+                "x": 6,
+                "y": 46
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "rejected code",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=\"otp\",operation=\"verify\",outcome=\"skipped\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Missing or invalid session tokens / s",
+            "id": 33,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 6,
+                "x": 12,
+                "y": 46
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "no valid session",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=\"auth\",operation=\"load_session\",outcome=\"skipped\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Uploads fetched from a private address / s",
+            "id": 34,
+            "description": "A user supplied a URL pointing at an internal address. Refused, and counted here.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 6,
+                "x": 18,
+                "y": 46
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "blocked URL",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=\"storage\",operation=\"fetch_url\",outcome=\"skipped\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "row",
+            "title": "CQRS replication",
+            "id": 40,
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 53
+            },
+            "panels": []
+        },
+        {
+            "type": "stat",
+            "title": "Rows awaiting repair",
+            "id": 41,
+            "description": "Parked rows still waiting for their parent. Staying above zero means the read database is behind.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 0,
+                "y": 54
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 0,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "orange",
+                                "value": 1
+                            },
+                            {
+                                "color": "red",
+                                "value": 100
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(cqrs_awaiting_rows{job=\"$service\"})"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Commit failures (15m)",
+            "id": 42,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 4,
+                "y": 54
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 0,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 1
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(increase(cqrs_commit_failures_total{job=\"$service\"}[15m]))"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Dead-lettered (15m)",
+            "id": 43,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 8,
+                "y": 54
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 0,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 1
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(increase(cqrs_dead_lettered_total{job=\"$service\"}[15m]))"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Hooks dropped (15m)",
+            "id": 44,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 12,
+                "y": 54
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 0,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "orange",
+                                "value": 1
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(increase(cqrs_hooks_dropped_total{job=\"$service\"}[15m]))"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Stale records skipped (15m)",
+            "id": 45,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 16,
+                "y": 54
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(increase(cqrs_stale_total{job=\"$service\"}[15m]))"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Rows repaired (15m)",
+            "id": 46,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 20,
+                "y": 54
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "decimals": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "expr": "sum(increase(cqrs_repaired_total{job=\"$service\"}[15m]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Batches and records / s",
+            "id": 47,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 58
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "batches",
+                    "expr": "sum(rate(cqrs_batches_total{job=\"$service\"}[$__rate_interval]))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "B",
+                    "legendFormat": "records",
+                    "expr": "sum(rate(cqrs_records_total{job=\"$service\"}[$__rate_interval]))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "C",
+                    "legendFormat": "applied",
+                    "expr": "sum(rate(cqrs_applied_total{job=\"$service\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "What is not applied / s",
+            "id": 48,
+            "description": "Duplicates, tombstones, skipped, stale and retried records.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 8,
+                "y": 58
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "duplicates",
+                    "expr": "sum(rate(cqrs_duplicates_total{job=\"$service\"}[$__rate_interval]))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "B",
+                    "legendFormat": "tombstones",
+                    "expr": "sum(rate(cqrs_tombstones_total{job=\"$service\"}[$__rate_interval]))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "C",
+                    "legendFormat": "skipped",
+                    "expr": "sum(rate(cqrs_skipped_total{job=\"$service\"}[$__rate_interval]))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "D",
+                    "legendFormat": "stale",
+                    "expr": "sum(rate(cqrs_stale_total{job=\"$service\"}[$__rate_interval]))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "E",
+                    "legendFormat": "retries",
+                    "expr": "sum(rate(cqrs_retries_total{job=\"$service\"}[$__rate_interval]))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "F",
+                    "legendFormat": "dead-lettered",
+                    "expr": "sum(rate(cqrs_dead_lettered_total{job=\"$service\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Batch duration p50 / p95 / p99",
+            "id": 49,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 16,
+                "y": 58
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "p50",
+                    "expr": "histogram_quantile(0.50, sum by (le) (rate(cqrs_batch_duration_seconds_bucket{job=\"$service\"}[$__rate_interval])))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "B",
+                    "legendFormat": "p95",
+                    "expr": "histogram_quantile(0.95, sum by (le) (rate(cqrs_batch_duration_seconds_bucket{job=\"$service\"}[$__rate_interval])))"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "C",
+                    "legendFormat": "p99",
+                    "expr": "histogram_quantile(0.99, sum by (le) (rate(cqrs_batch_duration_seconds_bucket{job=\"$service\"}[$__rate_interval])))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Rows awaiting repair over time",
+            "id": 50,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 24,
+                "x": 0,
+                "y": 66
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "awaiting",
+                    "expr": "sum(cqrs_awaiting_rows{job=\"$service\"})"
+                }
+            ]
+        },
+        {
+            "type": "row",
+            "title": "Pipelines and dependencies",
+            "id": 60,
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 72
+            },
+            "panels": []
+        },
+        {
+            "type": "timeseries",
+            "title": "Cache hit ratio",
+            "id": 61,
+            "description": "Hits over hits plus misses. A miss ends as skipped, not as an error.",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 73
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "hit ratio",
+                    "expr": "sum(rate(operations_total{job=\"$service\",component=\"cache\",operation=\"get\",outcome=\"success\"}[$__rate_interval])) / sum(rate(operations_total{job=\"$service\",component=\"cache\",operation=\"get\",outcome=~\"success|skipped\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "CDC and broker: deliver, retry, dead-letter / s",
+            "id": 62,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 8,
+                "y": 73
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{component}} {{operation}} {{outcome}}",
+                    "expr": "sum by (component, operation, outcome) (rate(operations_total{job=\"$service\",component=~\"cdc|broker\",operation=~\"deliver|handle|publish|commit|dead_letter\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Queue: enqueued and run / s",
+            "id": 63,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 16,
+                "y": 73
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{operation}} {{outcome}}",
+                    "expr": "sum by (operation, outcome) (rate(operations_total{job=\"$service\",component=\"queue\",operation=~\"enqueue|run\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "SQL commands / s",
+            "id": 64,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 8,
+                "x": 0,
+                "y": 81
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{operation}} {{outcome}}",
+                    "expr": "sum by (operation, outcome) (rate(operations_total{job=\"$service\",component=\"sql\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Queries by table (paginate) / s",
+            "id": 65,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 8,
+                "x": 8,
+                "y": 81
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{table}}",
+                    "expr": "sum by (table) (rate(operations_total{job=\"$service\",component=\"pagination\",operation=\"paginate\"}[$__rate_interval]))"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Mail, SMS, PDF, storage, broadcast errors / s",
+            "id": 66,
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 7,
+                "w": 8,
+                "x": 16,
+                "y": 81
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "min": 0
+                },
+                "overrides": []
+            },
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "prometheus"
+                    },
+                    "refId": "A",
+                    "legendFormat": "{{component}} {{operation}}",
+                    "expr": "sum by (component, operation) (rate(operations_total{job=\"$service\",component=~\"smtp|sms|pdf|storage|broadcast\",outcome=\"error\"}[$__rate_interval]))"
+                }
+            ]
+        }
+    ]
+}
