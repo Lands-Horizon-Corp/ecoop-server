@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 )
 
 type ConfigService[T any] struct {
@@ -26,22 +28,40 @@ type ConfigService[T any] struct {
 	ReloadInterval time.Duration
 	OnReload       func(error)
 
+	obs    observability.IObserver
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
 }
 
-func NewConfigService[T any]() (*ConfigService[T], error) {
+func NewConfigService[T any](opts ...Option) (*ConfigService[T], error) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("failed to generate encryption key: %w", err)
 	}
-	return &ConfigService[T]{
+	c := &ConfigService[T]{
 		key: key,
-	}, nil
+		obs: observability.Nop(),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(c)
+		}
+	}
+	return c, nil
 }
 
 func (c *ConfigService[T]) Start(ctx context.Context) error {
+	return c.observedLoad(ctx, "load")
+}
+
+// observedLoad runs load as one counted operation.
+func (c *ConfigService[T]) observedLoad(ctx context.Context, name string) (err error) {
+	if c == nil {
+		return ErrNotLoaded
+	}
+	_, op := c.begin(ctx, name)
+	defer func() { op.End(err) }()
 	return c.load()
 }
 
@@ -76,7 +96,7 @@ func (c *ConfigService[T]) Run(ctx context.Context) error {
 			}
 			if now := fingerprint(); now != last {
 				last = now
-				err := c.load()
+				err := c.observedLoad(ctx, "reload")
 				if c.OnReload != nil {
 					c.OnReload(err)
 				}
@@ -174,14 +194,20 @@ func (c *ConfigService[T]) Get(ctx context.Context) (T, error) {
 	if ptr == nil {
 		return zero, fmt.Errorf("%w: service not started", ErrNotLoaded)
 	}
+	// Get is read on hot paths, so only a failure is recorded: a success would
+	// add a write for every read.
 	plainBytes, err := c.decrypt(*ptr)
 	if err != nil {
-		return zero, fmt.Errorf("decrypting config failed: %w", err)
+		err = fmt.Errorf("decrypting config failed: %w", err)
+		c.fail(ctx, "get", err)
+		return zero, err
 	}
 	defer clear(plainBytes)
 	var cfg T
 	if err := json.Unmarshal(plainBytes, &cfg); err != nil {
-		return zero, fmt.Errorf("decoding config failed: %w", err)
+		err = fmt.Errorf("decoding config failed: %w", err)
+		c.fail(ctx, "get", err)
+		return zero, err
 	}
 	return cfg, nil
 }

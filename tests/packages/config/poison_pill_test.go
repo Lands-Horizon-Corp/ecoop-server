@@ -117,7 +117,10 @@ func TestPoison_UnsupportedAndOddTargetTypes(t *testing.T) {
 		}
 	})
 	t.Run("no exported fields", func(t *testing.T) {
-		type c struct{ a int }
+		type c struct {
+			//lint:ignore U1000 unexported on purpose: a struct with no exported field
+			a int
+		}
 		setup(t, nil, nil)
 		svc, _ := config.NewConfigService[c]()
 		var startErr error

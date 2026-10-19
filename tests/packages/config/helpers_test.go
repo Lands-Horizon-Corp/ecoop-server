@@ -32,7 +32,8 @@ type appCfg struct {
 	Started  time.Time     `env:"STARTED_AT"`
 	Redis    redisCfg      `envPrefix:"REDIS_"`
 	Cache    *redisCfg     `envPrefix:"CACHE_"`
-	ignored  string
+	//lint:ignore U1000 unexported on purpose: the loader must skip it
+	ignored string
 }
 
 var keys = []string{"APP_NAME", "PORT", "DEBUG", "HTTP_TIMEOUT", "RATIO", "WORKERS", "KAFKA_BROKERS",
