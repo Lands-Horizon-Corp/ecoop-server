@@ -40,6 +40,9 @@ var (
 )
 
 type (
+	// Option configures an SMSService: WithObserver.
+	Option func(*SMSService)
+
 	SMSRequest struct {
 		To   string
 		Body string

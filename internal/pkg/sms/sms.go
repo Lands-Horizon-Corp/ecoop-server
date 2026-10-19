@@ -14,6 +14,7 @@ import (
 	twilioclient "github.com/twilio/twilio-go/client"
 	openapi "github.com/twilio/twilio-go/rest/api/v2010"
 
+	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/observability"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/pkg/queue"
 	"github.com/Lands-Horizon-Corp/ecoop-server/internal/utils"
 )
@@ -32,6 +33,23 @@ type SMSService struct {
 	gate   *utils.Gate
 	twilio *twilio.RestClient
 	send   *queue.Job[sendPayload]
+	obs    observability.IObserver
+}
+
+// WithObserver gives the service an observer for its metrics, traces and logs.
+// Without one it observes nothing. Only the operation name and its outcome are
+// ever recorded: never a phone number or a message body.
+func WithObserver(o observability.IObserver) Option {
+	return func(s *SMSService) { s.obs = observability.Pick(o) }
+}
+
+// begin starts the Operation of one call. A service built as a bare struct
+// literal has no observer, so it falls back to Nop without writing.
+func (s *SMSService) begin(ctx context.Context, name string) (context.Context, observability.Operation) {
+	if s.obs == nil {
+		return observability.Nop().Begin(ctx, observability.ComponentSMS, name)
+	}
+	return s.obs.Begin(ctx, observability.ComponentSMS, name)
 }
 
 type sendPayload struct {
@@ -44,8 +62,8 @@ type sendPayload struct {
 func NewSMSService(
 	accountSID, authToken, sender string, maxCharacters int32, secured bool,
 	queue queue.IQueueService,
-	inflight *utils.Inflight) ISMSServices {
-	return &SMSService{
+	inflight *utils.Inflight, opts ...Option) ISMSServices {
+	s := &SMSService{
 		accountSID:    accountSID,
 		authToken:     authToken,
 		sender:        sender,
@@ -53,7 +71,14 @@ func NewSMSService(
 		secured:       secured,
 		queue:         queue,
 		gate:          utils.NewGate(inflight),
+		obs:           observability.Nop(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
 }
 
 func (s *SMSService) Start(ctx context.Context) error {
@@ -152,12 +177,14 @@ func (s *SMSService) Format(ctx context.Context, req SMSRequest) (*SMSRequest, e
 	return &req, nil
 }
 
-func (s *SMSService) Send(ctx context.Context, req SMSRequest) error {
+func (s *SMSService) Send(ctx context.Context, req SMSRequest) (err error) {
 	done, ok := s.gate.Enter()
 	if !ok {
 		return ErrNotStarted
 	}
 	defer done()
+	ctx, op := s.begin(ctx, "send")
+	defer func() { op.End(err) }()
 	if !utils.IsValidPhoneNumber(req.To) {
 		return ErrInvalidRecipient
 	}
@@ -180,7 +207,9 @@ func (s *SMSService) Send(ctx context.Context, req SMSRequest) error {
 	return nil
 }
 
-func (s *SMSService) deliver(ctx context.Context, p sendPayload) error {
+func (s *SMSService) deliver(ctx context.Context, p sendPayload) (err error) {
+	_, op := s.begin(ctx, "deliver")
+	defer func() { op.End(err) }()
 	params := &openapi.CreateMessageParams{}
 	params.SetTo(p.To)
 	params.SetFrom(s.sender)
