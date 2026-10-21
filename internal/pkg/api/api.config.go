@@ -122,7 +122,6 @@ var (
 
 var knownMethods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "HEAD": true, "OPTIONS": true}
 
-// WithDefaults returns c with the zero fields filled in.
 func (c Config) WithDefaults() Config {
 	if c.Addr == "" {
 		c.Addr = DefaultAddr
